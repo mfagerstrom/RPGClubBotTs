@@ -3,16 +3,6 @@ import type { ArgsOf, Client } from "discordx";
 import { Discord, On } from "discordx";
 
 @Discord()
-export class MessageDeleted {
-  @On()
-  messageDelete([message]: ArgsOf<"messageDelete">, client: Client): void {
-    const userName: string | undefined =
-      message.member?.nickname?.length ? message.member?.nickname : message.member?.displayName;
-    console.log("Message Deleted", userName, message.content);
-  }
-}
-
-@Discord()
 export class MessageCreated {
   @On()
   async messageCreate(
@@ -31,11 +21,20 @@ export class MessageCreated {
       message.member?.nickname?.length ? message.member?.nickname : message.member?.displayName;
     consoleOutputString += `[${userName} => `;
 
-    // channel name
-    const channelId: string = message.channelId;
-    const channel = await client.channels.fetch(channelId);
-    // @ts-ignore
-    consoleOutputString += `${channel.name}]: `;
+    // channel name (for threads)
+    if (message.channel.type === 11) {
+      const parentId: string | null = message.channel.parentId;
+      if (parentId) {
+        const parent: Channel | null = await client.channels.fetch(parentId);
+        // @ts-ignore
+        consoleOutputString += `#${parent.name}/${message.channel.name}]: `;
+      }
+    } 
+    
+    // channel name (for regular channels)
+    if (message.channel.type === 0) {
+      consoleOutputString += `#${message.channel.name}]: `;
+    }
 
     // message text
     let messageContent = message.content;
@@ -57,5 +56,6 @@ export class MessageCreated {
     }
 
     console.log(consoleOutputString);
+    //console.log(message.channel);
   }
 }
