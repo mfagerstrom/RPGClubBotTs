@@ -39,8 +39,12 @@ export class hltb {
 
     // @ts-ignore
     const hltbMessyUrl: string = hltbUrlObjects[0].href;
-    const hltbId: string = hltbMessyUrl.split('/url?q=https://howlongtobeat.com/game/')[1].split('/')[0];
+    // @ts-ignore
+    const hltbId: string | null = hltbMessyUrl.match(/\d+/)[0];
+    console.log(hltbId);
+  
     const hltbGameUrl: string = `https://howlongtobeat.com/game/${hltbId}`;
+    console.log(hltbGameUrl);
     const hltbGameHTML: string = await fetchPage(hltbGameUrl);
     const $ = cheerio.load(hltbGameHTML);
 
