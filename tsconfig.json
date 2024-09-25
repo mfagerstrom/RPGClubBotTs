@@ -1,11 +1,13 @@
 {
   "compilerOptions": {
+    "allowJs": true,
     "target": "ESNext",
     "module": "ESNext",
     "outDir": "build",
-    "rootDir": "src",
+    "baseUrl": ".",
+    "rootDir": "./src",
     "strict": true,
-    "moduleResolution": "Node",
+    "moduleResolution": "node",
     "allowSyntheticDefaultImports": true,
 
     "experimentalDecorators": true,
