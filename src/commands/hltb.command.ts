@@ -2,7 +2,7 @@ import axios, { AxiosError } from 'axios';
 import * as cheerio from 'cheerio';
 import { EmbedBuilder } from "discord.js";
 
-import type { Channel, CommandInteraction } from "discord.js";
+import type { CommandInteraction } from "discord.js";
 import { ApplicationCommandOptionType } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import UserAgent from 'user-agents';
