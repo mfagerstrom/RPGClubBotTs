@@ -12,7 +12,7 @@ export class hltb {
   @Slash({ description: "How Long to Beat™" })
   async hltb(
     @SlashOption({
-      description: "Enter game title",
+      description: "Enter game title and optional descriptors (we're googling!)",
       name: "title",
       required: true,
       type: ApplicationCommandOptionType.String,
@@ -58,6 +58,8 @@ export class hltb {
       mainSides: $('h4:contains("Main + Sides")').next().text(),
       completionist: $('h4:contains("Completionist")').next().text(),
       singlePlayer: $('h4:contains("Single-Player")').next().text(),
+      coOp: $('h4:contains("Co-Op")').next().text(),
+      vs: $('h4:contains("Vs.")').next().text(),
       imageUrl: $('img').attr('src'),
     };
 
@@ -101,6 +103,22 @@ function outputHltbResultsAsEmbed(
       fields.push({
         name: 'Single-Player',
         value: hltb_result.singlePlayer,
+        inline: true,
+      });
+    }
+
+    if (hltb_result.coOp) {
+      fields.push({
+        name: 'Co-Op',
+        value: hltb_result.coOp,
+        inline: true,
+      });
+    }
+
+    if (hltb_result.vs) {
+      fields.push({
+        name: 'Vs.',
+        value: hltb_result.vs,
         inline: true,
       });
     }
