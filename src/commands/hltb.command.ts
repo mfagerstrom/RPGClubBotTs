@@ -57,8 +57,11 @@ export class hltb {
       main: $('h4:contains("Main Story")').next().text(),
       mainSides: $('h4:contains("Main + Sides")').next().text(),
       completionist: $('h4:contains("Completionist")').next().text(),
+      singlePlayer: $('h4:contains("Single-Player")').next().text(),
       imageUrl: $('img').attr('src'),
     };
+
+    console.log(result);
 
     // finally, render the data in an embed in discord
     outputHltbResultsAsEmbed(interaction, result, hltbQuery);
@@ -92,6 +95,41 @@ function outputHltbResultsAsEmbed(
   if (result) {
     const hltb_result = result;
 
+    const fields = [];
+
+    if (hltb_result.singlePlayer) {
+      fields.push({
+        name: 'Single-Player',
+        value: hltb_result.singlePlayer,
+        inline: true,
+      });
+    }
+
+    if (hltb_result.main) {
+      fields.push({
+        name: 'Main',
+        value: hltb_result.main,
+        inline: true,
+      });
+    }
+
+    if (hltb_result.mainSides) {
+      fields.push({
+        name: 'Main + Sides',
+        value: hltb_result.mainSides,
+        inline: true,
+      });
+    }
+
+    if (hltb_result.completionist) {
+      fields.push({
+        name: 'Completionist',
+        value: hltb_result.completionist,
+        inline: true,
+      });
+    }
+    
+
     const hltbEmbed = new EmbedBuilder()
       .setColor(0x0099ff)
       .setTitle(`How Long to Beat ${hltb_result.name}`)
@@ -101,23 +139,7 @@ function outputHltbResultsAsEmbed(
         iconURL: 'https://howlongtobeat.com/img/hltb_brand.png',
         url: 'https://howlongtobeat.com',
       })
-      .setFields([
-        {
-          name: 'Main',
-          value: `${hltb_result.main}`,
-          inline: true,
-        },
-        {
-          name: 'Main + Sides',
-          value: `${hltb_result.mainSides}`,
-          inline: true,
-        },
-        {
-          name: 'Completionist',
-          value: `${hltb_result.completionist}`,
-          inline: true,
-        }
-      ])
+      .setFields(fields)
       .setImage(hltb_result.imageUrl);
 
     interaction.reply({ embeds: [hltbEmbed] });
