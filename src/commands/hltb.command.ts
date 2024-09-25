@@ -21,11 +21,12 @@ export class hltb {
     interaction: CommandInteraction,
   ): Promise<void> {
     const hltbQuery: string = title;
-    const googleUrl = `https://www.google.com/search?q=site${encodeURI(':howlongtobeat.com')}+${encodeURI(hltbQuery)}`;
-    console.log(`https://www.google.com/search?q=site${encodeURI(':howlongtobeat.com')}+${encodeURI(hltbQuery)}`);
 
-    // @ts-ignore
-    const hltbUrlObjects: object[] = await axios.get(googleUrl, { responseEncoding: "latin1" })
+    // search google for the title, using a site constraint
+    const googleUrl = `https://www.google.com/search?q=site${encodeURI(':howlongtobeat.com')}+${encodeURI(hltbQuery)}`;
+
+    // grab all the search result links
+    const hltbUrlObjects = await axios.get(googleUrl, { responseEncoding: "latin1" })
       .then(({ data: html }) => {
         const $ = cheerio.load(html);
         const data = [...$(".egMi0")]
@@ -37,17 +38,19 @@ export class hltb {
       })
       .catch(err => console.error(err));
 
+    // grab the first link of the bunch and pull out the id from it
     // @ts-ignore
     const hltbMessyUrl: string = hltbUrlObjects[0].href;
-    // @ts-ignore
-    const hltbId: string | null = hltbMessyUrl.match(/\d+/)[0];
-    console.log(hltbId);
+    const hltbId: string = hltbMessyUrl!.match(/\d+/)![0];
   
+    // use the id to construct the hltb detail url
     const hltbGameUrl: string = `https://howlongtobeat.com/game/${hltbId}`;
-    console.log(hltbGameUrl);
+    
+    // and scrape it
     const hltbGameHTML: string = await fetchPage(hltbGameUrl);
     const $ = cheerio.load(hltbGameHTML);
 
+    // grab the data that we need with cheerio
     const result = {
       name: $('.GameHeader_profile_header__q_PID').text().trim(),
       id: hltbId,
@@ -56,6 +59,8 @@ export class hltb {
       completionist: $('h4:contains("Completionist")').next().text(),
       imageUrl: $('img').attr('src'),
     };
+
+    // finally, render the data in an embed in discord
     outputHltbResultsAsEmbed(interaction, result, hltbQuery);
   }
 }
