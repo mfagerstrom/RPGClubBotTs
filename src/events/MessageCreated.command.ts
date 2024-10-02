@@ -1,4 +1,4 @@
-import { Channel } from "discord.js";
+import { Channel, Role } from "discord.js";
 import type { ArgsOf, Client } from "discordx";
 import { Discord, On } from "discordx";
 
@@ -29,8 +29,8 @@ export class MessageCreated {
         // @ts-ignore
         consoleOutputString += `#${parent.name}/${message.channel.name}]: `;
       }
-    } 
-    
+    }
+
     // channel name (for regular channels)
     if (message.channel.type === 0) {
       consoleOutputString += `#${message.channel.name}]: `;
@@ -57,5 +57,15 @@ export class MessageCreated {
 
     console.log(consoleOutputString);
     //console.log(message.channel);
+
+    // does the user have the members role?
+    const hasMemberRole: boolean = message.member!.roles.cache.some(role => role.name === 'members');
+    if (!hasMemberRole) {
+      const role: Role | undefined = message.member!.guild.roles.cache.find(r => r.name === 'members');
+      if (role) {
+        console.log(`Granting member role to ${userName}`);
+        message.member!.roles.add(role);
+      }
+    }
   }
 }
