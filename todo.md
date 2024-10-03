@@ -1,5 +1,3 @@
-**RPGClubBotTs**
-
 **IN PROGRESS**
 
 feature implementation - member data tracking - merph518
