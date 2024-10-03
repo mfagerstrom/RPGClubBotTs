@@ -55,9 +55,6 @@ export class MessageCreated {
       }
     }
 
-    console.log(consoleOutputString);
-    //console.log(message.channel);
-
     // does the user have the members role?
     const hasMemberRole: boolean = message.member!.roles.cache.some(role => role.name === 'members');
     if (!hasMemberRole) {
@@ -67,5 +64,8 @@ export class MessageCreated {
         message.member!.roles.add(role);
       }
     }
+
+    // Logging of messages, mostly for development / testing
+    // console.log(consoleOutputString);
   }
 }

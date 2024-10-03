@@ -1,5 +1,23 @@
 **RPGClubBotTs**
 
+**IN PROGRESS**
+
+feature implementation - member data tracking - merph518
+- populate database tables
+  - members
+- triggered by discord events
+  - on member join - record member and join date in members table
+  - on member part - record part date in members table
+
+feature implementation - member nickname tracking - merph518
+- create database table
+  - member nicknames
+- triggered by discord events
+  - on member nickname change - record old nickname in member nicknames table if it does not already exist there
+  - on member nickname change - record new nickname in member nicknames table
+- function that gives previous nicknames for a user
+
+
 **TO DO**
 
 System
@@ -7,17 +25,14 @@ System
   - vote rounds
   - nominations
   - featured games
-  - member nicknames
   - member friend codes/usernames
   - member reminders
 - populate database tables
-  - members
   - role definitions
   - member/role assignments
   - vote rounds
   - nominations
   - featured games
-  - member nicknames
   - member friend codes/usernames
   - member reminders
 - implement "Playing game-of-the-month" [dependent on vote rounds table]
@@ -33,11 +48,8 @@ Automation
   - automatic output of vote bot setup strings in admin channel on vote day
 - triggered by discord events
   - on member join - automatic restoration of roles on re-join 
-  - on member join - record member and join date in members table
   - on member role assignment - record role in member roles table
   - on member role removal - remove role in member roles table
-  - on member nickname change - record new nickname in member nicknames table
-  - on member part - record part date in members table
   - on event create - automatic creation of live events threads (but not for voting events)
 - triggered by bot functions
   - automatic creation of events for voting rounds
@@ -52,7 +64,6 @@ Voting
 - replace current vote bot functionality 
 
 Reference
-- function that gives previous nicknames for a user
 - function that gives friend codes / online usernames for a given user (from a dropdown)
 - function that lets you set your own friend codes / online usernames
 - function that outputs the full GOTM / NR GOTM history
