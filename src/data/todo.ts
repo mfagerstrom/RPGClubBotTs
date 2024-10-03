@@ -1,4 +1,4 @@
-**IN PROGRESS**
+export const todoText: string = `**IN PROGRESS**
 
 feature implementation - member data tracking - merph518
 - populate database tables
@@ -78,3 +78,4 @@ Admin
 - report: how long have members been with us but not been given regulars?
 - report: regulars that do not have longstanding-members role, and how long they have been on the server?
 - re-implement channel migration functionality from RPGClubBotJs
+`;

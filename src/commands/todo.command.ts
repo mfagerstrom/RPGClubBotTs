@@ -1,7 +1,7 @@
 import { EmbedBuilder } from "discord.js";
 import type { CommandInteraction } from "discord.js";
 import { Discord, Slash } from "discordx";
-// import todoText from "../../todo.md";
+import { todoText } from "../data/todo";
 
 @Discord()
 export class todo {
@@ -9,11 +9,9 @@ export class todo {
   async todo(
     interaction: CommandInteraction,
   ): Promise<void> {
-    /*
     if (todoText) {
       outputTodoAsEmbed(interaction, todoText);
     }
-      */
   }
 }
 
