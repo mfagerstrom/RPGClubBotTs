@@ -25,12 +25,22 @@ System
 - re-implement admin check from RPGClubBotJS for admin only functions
 
 Automation
-- automatic creation of events for voting rounds
-- automatic restoration of roles on re-join 
-- nomination reminders 
-- automatic vote setup [requires home grown voting mechanism]
-- automatic creation of live events threads when an event is made (but not for voting events)
-- automatic messaging of reminders via private message to user
+- triggered by specific dates
+  - nomination reminders
+  - automatic messaging of reminders via private message to user
+  - automatic vote setup [requires home grown voting mechanism]
+  - automatic output of nominations in admin channel on vote day
+  - automatic output of vote bot setup strings in admin channel on vote day
+- triggered by discord events
+  - on member join - automatic restoration of roles on re-join 
+  - on member join - record member and join date in members table
+  - on member role assignment - record role in member roles table
+  - on member role removal - remove role in member roles table
+  - on member nickname change - record new nickname in member nicknames table
+  - on member part - record part date in members table
+  - on event create - automatic creation of live events threads (but not for voting events)
+- triggered by bot functions
+  - automatic creation of events for voting rounds
 
 Voting
 - set up vote round function [admin only]
