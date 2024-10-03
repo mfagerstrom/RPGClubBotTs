@@ -73,6 +73,7 @@ Reference
 - function that checks if a game has been featured before
   - call this when nominating as a warning?
 - function that lets a user set a reminder for themselves
+- function that offers help for all /slashcommands, chosen from dropdown
 
 Admin
 - report: how long have newcomers been on the server without participating?
