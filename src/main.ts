@@ -1,6 +1,6 @@
 import { dirname, importx } from "@discordx/importer";
 import type { Interaction, Message } from "discord.js";
-import { IntentsBitField } from "discord.js";
+import { ActivityType, IntentsBitField } from "discord.js";
 import { Client } from "discordx";
 
 import dotenv from 'dotenv';
@@ -32,6 +32,15 @@ export const bot = new Client({
 bot.once("ready", async () => {
   // Make sure all guilds are cached
   await bot.guilds.fetch();
+
+  // Set presence state, hardcoded for now to the NR GOTM since Bamiji's bot features the GOTM
+  bot.user!.setPresence({ 
+    activities: [{ 
+      name: 'Legend of Zelda: Echoes of Wisdom [NR GOTM Round 119]', 
+      type: ActivityType.Playing,
+    }],
+    status: 'online',
+  });
 
   // Synchronize applications commands with Discord
   void bot.initApplicationCommands();
