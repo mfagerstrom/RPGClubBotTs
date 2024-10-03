@@ -3,6 +3,7 @@
 10/3/2024 
 - implemented hardcoded discord presence for NR GOTM
 - incorporated todo list / changelog into project
+- implemented /todo command that outputs the content of todo.md
 
 10/2/2024 
 - set up dotenv for private credential handling
