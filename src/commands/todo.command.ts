@@ -5,7 +5,7 @@ import { todoText } from "../data/todo.js";
 
 @Discord()
 export class todo {
-  @Slash({ description: "RPGClubBotTS Development TODO List" })
+  @Slash({ description: "RPGClubBotTS Development" })
   async todo(
     interaction: CommandInteraction,
   ): Promise<void> {

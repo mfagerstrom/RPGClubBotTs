@@ -4,9 +4,9 @@ import { Discord, Slash } from "discordx";
 import { changelogText } from "../data/changelog.js";
 
 @Discord()
-export class todo {
-  @Slash({ description: "RPGClubBotTS Development TODO List" })
-  async todo(
+export class changelog {
+  @Slash({ description: "RPGClubBotTS Development" })
+  async changelog(
     interaction: CommandInteraction,
   ): Promise<void> {
     if (changelogText) {
