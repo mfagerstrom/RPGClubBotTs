@@ -5,7 +5,7 @@ import { changelogText } from "../data/changelog.js";
 
 @Discord()
 export class changelog {
-  @Slash({ description: "RPGClubBotTS Development" })
+  @Slash({ description: "RPGClubBotTS Development Changelog" })
   async changelog(
     interaction: CommandInteraction,
   ): Promise<void> {
@@ -20,16 +20,6 @@ function outputChangelogAsEmbed(
   changelogText: string
 ) {
 
-  const fields = [];
-
-  if (changelogText) {
-    fields.push({
-      name: 'Changelog',
-      value: changelogText,
-      inline: false,
-    });
-  }
-
   const changelogEmbed = new EmbedBuilder()
     .setColor(0x0099ff)
     .setTitle(`Bot Development Changelog`)
@@ -39,7 +29,7 @@ function outputChangelogAsEmbed(
       iconURL: 'https://cdn.discordapp.com/avatars/1154429583031025705/07cd692b5b2c8e5ad5b4d06ad166684c.webp?size=240',
       url: 'https://github.com/mfagerstrom/RPGClubBotTs/',
     })
-    .setFields(fields);
+    .setDescription(changelogText);
 
   interaction.reply({ embeds: [changelogEmbed] });
 }

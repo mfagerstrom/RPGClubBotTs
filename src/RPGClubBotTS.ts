@@ -36,7 +36,7 @@ bot.once("ready", async () => {
   // Set presence state, hardcoded for now to the NR GOTM since Bamiji's bot features the GOTM
   bot.user!.setPresence({ 
     activities: [{ 
-      name: 'Legend of Zelda: Echoes of Wisdom [NR GOTM Round 119]', 
+      name: 'The Legend of Zelda: Echoes of Wisdom [NR GOTM Round 119]', 
       type: ActivityType.Playing,
     }],
     status: 'online',
