@@ -1,19 +1,17 @@
 import { EmbedBuilder } from "discord.js";
 import type { CommandInteraction } from "discord.js";
 import { Discord, Slash } from "discordx";
-// import { todoText } from "../data/todo";
+import { todoText } from "../data/todo.js";
 
 @Discord()
 export class todo {
-  @Slash({ description: "RPGClubBotTS Development TODO List - Work In Progress, does nothing yet" })
+  @Slash({ description: "RPGClubBotTS Development TODO List" })
   async todo(
     interaction: CommandInteraction,
   ): Promise<void> {
-    /*
     if (todoText) {
       outputTodoAsEmbed(interaction, todoText);
     }
-      */
   }
 }
 
@@ -26,7 +24,7 @@ function outputTodoAsEmbed(
 
   if (todoText) {
     fields.push({
-      name: 'todo.md',
+      name: 'TODO List',
       value: todoText,
       inline: false,
     });
