@@ -72,6 +72,8 @@ Reference
   - call this when nominating as a warning?
 - function that lets a user set a reminder for themselves
 - function that offers help for all /slashcommands, chosen from dropdown
+- function that gives completionator profile urls for a given user (from a dropdown)
+- function that lets you set your own completionator profile url
 
 Admin
 - report: how long have newcomers been on the server without participating?
