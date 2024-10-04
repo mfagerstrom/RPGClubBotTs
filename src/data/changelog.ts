@@ -5,6 +5,7 @@ export const changelogText: string =
 - incorporated todo list / changelog into project
 - implemented /todo command that outputs the bot dev todo list
 - implemented /changelog command that outputs the bot dev changelog
+- implemented pagination (multiple embeds) for /todo and /changelog, if they go over the 4096 character maximum
 
 10/2/2024 - v1.2.0
 - set up dotenv for private credential handling
