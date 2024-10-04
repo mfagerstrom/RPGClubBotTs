@@ -21,7 +21,7 @@ function outputTodoAsEmbed(
 ) {
   const todoEmbed = new EmbedBuilder()
     .setColor(0x0099ff)
-    .setTitle(`RPGClubBotTS Development TODO List`)
+    .setTitle(`Bot Development TODO List`)
     .setURL(`https://github.com/mfagerstrom/RPGClubBotTs/`)
     .setAuthor({
       name: 'RPGClubBotTs',
