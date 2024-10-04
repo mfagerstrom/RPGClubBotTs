@@ -1,7 +1,10 @@
-export const changelogText: string = `10/3/2024 - v1.3.0
+export const changelogText: string = 
+`
+10/3/2024 - v1.3.0
 - implemented hardcoded discord presence for NR GOTM
 - incorporated todo list / changelog into project
 - implemented /todo command that outputs the bot dev todo list
+- implemented /changelog command that outputs the bot dev changelog
 
 10/2/2024 - v1.2.0
 - set up dotenv for private credential handling

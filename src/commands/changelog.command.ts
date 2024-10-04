@@ -1,7 +1,7 @@
 import { EmbedBuilder } from "discord.js";
 import type { CommandInteraction } from "discord.js";
 import { Discord, Slash } from "discordx";
-import { todoText } from "../data/todo.js";
+import { changelogText } from "../data/changelog.js";
 
 @Discord()
 export class todo {
@@ -9,30 +9,30 @@ export class todo {
   async todo(
     interaction: CommandInteraction,
   ): Promise<void> {
-    if (todoText) {
-      outputTodoAsEmbed(interaction, todoText);
+    if (changelogText) {
+      outputChangelogAsEmbed(interaction, changelogText);
     }
   }
 }
 
-function outputTodoAsEmbed(
+function outputChangelogAsEmbed(
   interaction: CommandInteraction, 
-  todoText: string
+  changelogText: string
 ) {
 
   const fields = [];
 
-  if (todoText) {
+  if (changelogText) {
     fields.push({
-      name: 'TODO List',
-      value: todoText,
+      name: 'Changelog',
+      value: changelogText,
       inline: false,
     });
   }
 
-  const todoEmbed = new EmbedBuilder()
+  const changelogEmbed = new EmbedBuilder()
     .setColor(0x0099ff)
-    .setTitle(`Bot Development TODO List`)
+    .setTitle(`Bot Development Changelog`)
     .setURL(`https://github.com/mfagerstrom/RPGClubBotTs/`)
     .setAuthor({
       name: 'RPGClubBotTs',
@@ -41,5 +41,5 @@ function outputTodoAsEmbed(
     })
     .setFields(fields);
 
-  interaction.reply({ embeds: [todoEmbed] });
+  interaction.reply({ embeds: [changelogEmbed] });
 }

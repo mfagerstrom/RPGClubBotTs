@@ -1,4 +1,6 @@
-export const todoText: string = `**IN PROGRESS**
+export const todoText: string = 
+`
+**IN PROGRESS**
 
 feature implementation - member data tracking - merph518
 - populate database tables
@@ -33,8 +35,6 @@ System
   - featured games
   - member friend codes/usernames
   - member reminders
-- implement "Playing game-of-the-month" [dependent on vote rounds table]
-- implement rotation of "playing" between GOTM and NR GOTM [dependent on vote rounds table]
 - re-implement admin check from RPGClubBotJS for admin only functions
 
 Automation
@@ -78,4 +78,5 @@ Admin
 - report: how long have members been with us but not been given regulars?
 - report: regulars that do not have longstanding-members role, and how long they have been on the server?
 - re-implement channel migration functionality from RPGClubBotJs
+
 `;
