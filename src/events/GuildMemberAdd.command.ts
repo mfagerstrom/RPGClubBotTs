@@ -15,11 +15,5 @@ export class GuildMemberAdd {
     if (role) {
         member.roles.add(role);
     }
-
-    // record member information on member join
-    // TODO: Connect to database
-    // TODO: Check if member already exists in members table
-    // TODO: If this is a rejoin, update joinDate and remove partDate
-    // TODO: If this is a new member, insert a record in members table
   }
 }

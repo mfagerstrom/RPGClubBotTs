@@ -1,28 +1,6 @@
 export const todoText: string =
-  `
-**IN PROGRESS**
-- exploration of mongoDB - merph518
-
+`
 **TO DO**
-
-System
-- create database tables
-  - members
-  - member nicknames
-  - vote rounds
-  - nominations
-  - featured games
-  - member friend codes/usernames
-  - member reminders
-- populate database tables
-  - role definitions
-  - member/role assignments
-  - vote rounds
-  - nominations
-  - featured games
-  - member friend codes/usernames
-  - member reminders
-- re-implement admin check from RPGClubBotJS for admin only functions
 
 Automation
 - triggered by specific dates
@@ -36,7 +14,6 @@ Automation
   - on member role assignment - record role in member roles table
   - on member role removal - remove role in member roles table
   - on event create - automatic creation of live events threads (but not for voting events)
-  - on member join - record member and join date
   - on member part - record part date in members table
   - on member nickname change - record old nickname in member nicknames table if it does not   
     already exist there
