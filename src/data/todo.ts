@@ -1,27 +1,14 @@
-export const todoText: string = 
-`
+export const todoText: string =
+  `
 **IN PROGRESS**
-
-feature implementation - member data tracking - merph518
-- populate database tables
-  - members
-- triggered by discord events
-  - on member join - record member and join date in members table
-  - on member part - record part date in members table
-
-feature implementation - member nickname tracking - merph518
-- create database table
-  - member nicknames
-- triggered by discord events
-  - on member nickname change - record old nickname in member nicknames table if it does not already exist there
-  - on member nickname change - record new nickname in member nicknames table
-- function that gives previous nicknames for a user
-
+- exploration of mongoDB - merph518
 
 **TO DO**
 
 System
 - create database tables
+  - members
+  - member nicknames
   - vote rounds
   - nominations
   - featured games
@@ -49,6 +36,11 @@ Automation
   - on member role assignment - record role in member roles table
   - on member role removal - remove role in member roles table
   - on event create - automatic creation of live events threads (but not for voting events)
+  - on member join - record member and join date
+  - on member part - record part date in members table
+  - on member nickname change - record old nickname in member nicknames table if it does not   
+    already exist there
+  - on member nickname change - record new nickname in member nicknames table
 - triggered by bot functions
   - automatic creation of events for voting rounds
 
@@ -74,6 +66,7 @@ Reference
 - function that offers help for all /slashcommands, chosen from dropdown
 - function that gives completionator profile urls for a given user (from a dropdown)
 - function that lets you set your own completionator profile url
+- function that gives previous nicknames for a user
 
 Admin
 - report: how long have newcomers been on the server without participating?

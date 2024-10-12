@@ -2,6 +2,7 @@ import { dirname, importx } from "@discordx/importer";
 import type { Interaction, Message } from "discord.js";
 import { ActivityType, IntentsBitField } from "discord.js";
 import { Client } from "discordx";
+import * as mongoDB from './config/database.js'
 
 import dotenv from 'dotenv';
 dotenv.config();
@@ -80,3 +81,6 @@ async function run() {
 }
 
 void run();
+// console.log(process.env.MONGO_USERNAME);
+// console.log(process.env.MONGO_PASSWORD);
+// await mongoDB.run();

@@ -1,20 +1,30 @@
+import { MongoClient, ServerApiVersion } from 'mongodb';
 import dotenv from 'dotenv';
 dotenv.config();
 
-import * as db from 'mssql';
+const uri = `mongodb+srv://${encodeURI(process.env.MONGO_USERNAME!)}:${encodeURI(process.env.MONGO_PASSWORD!)}@rpgclub.5quuxcm.mongodb.net/?retryWrites=true&w=majority&appName=rpgclub`;
 
-const config = {
-  user: process.env.DB_USER,
-  password: process.env.DB_PASS,
-  database: process.env.DB_NAME,
-  server: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  options: {
-    encrypt: false,
-    trustServerCertificate: false,
-  },
-};
+// Create a MongoClient with a MongoClientOptions object to set the Stable API version
+const client = new MongoClient(uri, {
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  }
+});
 
-const connectionString = `Server=${config.server},${config.port};Database=${config.database};User Id=${config.user};Password=${config.password};Encrypt=false`;
+export async function run() {
+  try {
+    console.log(uri);
 
-export const database = new db.ConnectionPool(connectionString);
+    // Connect the client to the server	(optional starting in v4.7)
+    await client.connect();
+    // Send a ping to confirm a successful connection
+    await client.db("admin").command({ ping: 1 });
+    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+  } finally {
+    // Ensures that the client will close when you finish/error
+    await client.close();
+  }
+}
+run().catch(console.dir);
