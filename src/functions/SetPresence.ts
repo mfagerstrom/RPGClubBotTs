@@ -1,20 +1,19 @@
-import { ActivityType } from "discord.js";
-import { Client } from "discordx";
+import { ActivityType, CommandInteraction } from "discord.js";
+import fs from 'fs';
 
-export async function setPresence(client: Client, activityName: string) {
-    client.user!.setPresence({
+export async function setPresence(interaction: CommandInteraction, activityName: string) {
+    interaction.client.user!.setPresence({
         activities: [{
             name: activityName,
             type: ActivityType.Playing,
         }],
         status: 'online',
     });
-}
 
-interface discordPresence {
-    activities: [{
-        name: string,
-        type: ActivityType.Playing,
-    }],
-    status: string,
+    const presenceJSON = JSON.stringify(activityName);
+    fs.writeFile('./src/data/presence.json', presenceJSON, (err) => {
+        if (err) {
+            console.log('Error writing file:', err);
+        }
+    });
 }

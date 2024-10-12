@@ -2,6 +2,9 @@ import { dirname, importx } from "@discordx/importer";
 import type {  Interaction, Message } from "discord.js";
 import { ActivityType, IntentsBitField } from "discord.js";
 import { Client } from "discordx";
+
+import { setPresence } from "./functions/SetPresence.js";
+import presenceJSON from "./data/presence.json" assert { type: "json" };
 // import * as mongoDB from './config/database.js'
 
 import { scanGuild } from "./utilities/guildUtils.js";
@@ -36,10 +39,10 @@ bot.once("ready", async () => {
   // Make sure all guilds are cached
   await bot.guilds.fetch();
 
-  // Set presence state, hardcoded for now to the NR GOTM since Bamiji's bot features the GOTM
+  // Set stored presence state
   bot.user!.setPresence({ 
     activities: [{ 
-      name: 'The Legend of Zelda: Echoes of Wisdom [NR GOTM Round 119]', 
+      name: presenceJSON, 
       type: ActivityType.Playing,
     }],
     status: 'online',

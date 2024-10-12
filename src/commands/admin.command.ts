@@ -1,32 +1,33 @@
-import { PermissionsBitField } from "discord.js";
-
-
+import { ApplicationCommandOptionType, PermissionsBitField } from "discord.js";
+import { setPresence } from "../functions/SetPresence.js";
 import { EmbedBuilder } from "discord.js";
 import type { CommandInteraction } from "discord.js";
-import { Discord, Slash, SlashGroup } from "discordx";
+import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
 
 @Discord()
-@SlashGroup({ description: "Manage permissions", name: "admin" })
+@SlashGroup({ description: "Admin Commands", name: "admin" })
 @SlashGroup("admin")
 export class Admin {
-  @Slash({ description: "Command A", name: "a" })
-  async a(interaction: CommandInteraction): Promise<void> {
+  @Slash({ description: "Set Presence", name: "presence" })
+  async presence(
+    @SlashOption({
+      description: "What should the 'Now Playing' value be?",
+      name: "text",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    text: string,
+    interaction: CommandInteraction
+  ): Promise<void> {
     const okToUseCommand: boolean = await isAdmin(interaction);
 
     if (okToUseCommand) {
+      await setPresence(
+        interaction,
+        text
+      );
       await interaction.reply({
-        content: 'You selected Command A.'
-      });
-    }
-  }
-
-  @Slash({ description: "Command B", name: "b" })
-  async b(interaction: CommandInteraction): Promise<void> {
-    const okToUseCommand: boolean = await isAdmin(interaction);
-
-    if (okToUseCommand) {
-      await interaction.reply({
-        content: 'You selected Command B.'
+        content: `I'm now playing: ${text}!`
       });
     }
   }

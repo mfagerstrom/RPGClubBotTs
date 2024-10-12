@@ -1,25 +1,52 @@
-import { PermissionsBitField } from "discord.js";
-
-
-import { EmbedBuilder } from "discord.js";
+import { ApplicationCommandOptionType, PermissionsBitField } from "discord.js";
 import type { CommandInteraction } from "discord.js";
-import { Discord, Slash } from "discordx";
+import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
+import { setPresence } from "../functions/SetPresence.js";
 
 @Discord()
+@SlashGroup({ description: "Moderator Commands", name: "mod" })
+@SlashGroup("mod")
 export class Mod {
-  @Slash({ description: "Moderator-only commands" })
-  async mod(
-    interaction: CommandInteraction,
+  @Slash({ description: "Set Presence", name: "presence" })
+  async presence(
+    @SlashOption({
+      description: "What should the 'Now Playing' value be?",
+      name: "text",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    text: string,
+    interaction: CommandInteraction
   ): Promise<void> {
     const okToUseCommand: boolean = await isModerator(interaction);
 
     if (okToUseCommand) {
+      await setPresence(
+        interaction,
+        text
+      );
       await interaction.reply({
-        content: 'Nice.  You\'re in.'
+        content: `I'm now playing: ${text}!`
       });
     }
   }
 }
+
+// @Discord()
+// export class Mod {
+//   @Slash({ description: "Moderator-only commands" })
+//   async mod(
+//     interaction: CommandInteraction,
+//   ): Promise<void> {
+//     const okToUseCommand: boolean = await isModerator(interaction);
+
+//     if (okToUseCommand) {
+//       await interaction.reply({
+//         content: 'Nice.  You\'re in.'
+//       });
+//     }
+//   }
+// }
 
 export async function isModerator(interaction: CommandInteraction) {
   // @ts-ignore
