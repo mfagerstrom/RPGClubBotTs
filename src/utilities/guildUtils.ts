@@ -2,17 +2,17 @@ import { GuildMember } from "discord.js";
 import { Client } from "discordx";
 import fs from 'fs';
 
-const guildId: string = '191941851757019136';
+
+
+let memberRoles: string[] = [];
 
 export async function scanGuild(
   client: Client,
 ) {
+  const guildId: string = '191941851757019136';
   const guild = await client.guilds.fetch(guildId);
-  const membersOutput = await guild.members.fetch();
 
-  const members: Member[] = [];
-  let member: Member;
-
+  // get roles
   const roleIds = client.guilds.cache
     .map((guild) => guild.roles.cache.map((role) => (role.id)))[0];
 
@@ -23,31 +23,36 @@ export async function scanGuild(
     }
   });
 
-  let memberRoles: string[] = [];
-  let memberIndex: number = 0;
+  // Get all members 
+  await guild.members.fetch();
+  const memberArray: GuildMember[] = [];
 
-  membersOutput.forEach(async (memberOutput) => {
-    memberRoles = await getMemberRoles(memberOutput, roleIds);
+  guild.members.cache.each(member => {
+    memberArray.push(member);
+  });
+
+  // grab just the data from the member array that we need
+  const members: Member[] = [];
+  let member: Member;
+
+  for (let x: number = 0; x < memberArray.length; x++) {
+    memberRoles = await getMemberRoles(memberArray[x], roleIds);
 
     member = {
-      id: memberOutput.id,
-      joinedTimestamp: memberOutput.joinedAt,
+      id: memberArray[x].id,
+      joinedTimestamp: memberArray[x].joinedAt,
       partedTimestamp: null,
-      nickname: memberOutput.nickname,
+      nickname: memberArray[x].nickname,
       user: {
-        username: memberOutput.user.username,
-        globalName: memberOutput.user.globalName,
-        avatar: memberOutput.user.avatarURL(),
+        username: memberArray[x].user.username,
+        globalName: memberArray[x].user.globalName,
+        avatar: memberArray[x].user.avatarURL(),
       },
-      roleIds: memberRoles
+      roleIds: memberRoles,
     };
 
-    if (memberIndex++ === 0) {
-      console.log(member);
-    }
-
     members.push(member);
-  });
+  }
 
   const membersJSON = JSON.stringify(members);
   fs.writeFile('./src/data/members.json', membersJSON, (err) => {
