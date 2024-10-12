@@ -1,8 +1,10 @@
 import { dirname, importx } from "@discordx/importer";
-import type { Interaction, Message } from "discord.js";
+import type {  Interaction, Message } from "discord.js";
 import { ActivityType, IntentsBitField } from "discord.js";
 import { Client } from "discordx";
-import * as mongoDB from './config/database.js'
+// import * as mongoDB from './config/database.js'
+
+import { scanGuild } from "./utilities/guildUtils.js";
 
 import dotenv from 'dotenv';
 dotenv.config();
@@ -55,6 +57,9 @@ bot.once("ready", async () => {
   //  );
 
   console.log("Bot started");
+
+  // scan guild members
+  scanGuild(bot);
 });
 
 bot.on("interactionCreate", (interaction: Interaction) => {

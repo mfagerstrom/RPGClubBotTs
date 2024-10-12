@@ -1,7 +1,6 @@
 import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
 import type { CommandInteraction } from "discord.js";
 import { Discord, Slash, SlashChoice, SlashOption } from "discordx";
-import { changelogText } from "../data/changelog.js";
 import changelogJSON from "../data/changelog.json" assert { type: "json" };
 
 @Discord()

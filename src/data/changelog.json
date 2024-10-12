@@ -9,9 +9,13 @@
             "- converted changelog to JSON format",
             "- converted /changelog command to use JSON file",
             "- added an optional parameter to /changelog to allow the user to choose",
-            "  - Latest Change",
+            "  - Latest Change (default)",
             "  - Latest 3 Changes",
-            "  - All Changes" 
+            "  - All Changes",
+            "- set up webhook in bot channel to share pushes to main",
+            "- began work on a guild scan on bot startup",
+            "  - guild member data (join/part dates, id, nickname, username, globalname, avatarurl) is captured and stored in members.json file",
+            "  - began exploring how to capture each member's roles (still early on in this endeavor)"
         ],
         "author": "merph518"
     },
