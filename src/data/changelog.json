@@ -8,7 +8,8 @@
             "- set up a mod-only slash command that will later be extended with more functionality",
             "- stubbed out a slash command group for /admin",
             "- implemented '/admin presence' command to set bot's now-playing message",
-            "- implemented '/mod presence' command to set bot's now-playing message"
+            "- implemented '/mod presence' command to set bot's now-playing message",
+            "- refactored HLTB search into a separate function from the slash command"
         ],
         "author": "merph518"
     },
