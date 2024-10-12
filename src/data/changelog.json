@@ -3,7 +3,9 @@
         "version": "1.4.1",
         "date": "10/12/2024",
         "changes": [
-            "- added roles held by each member to the member data file"
+            "- added roles held by each member to the member data file",
+            "- set up an admin-only slash command that will later be extended with more functionality",
+            "- set up a mod-only slash command that will later be extended with more functionality"
         ],
         "author": "merph518"
     },
