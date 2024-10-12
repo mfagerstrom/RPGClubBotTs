@@ -6,9 +6,9 @@ import type { CommandInteraction } from "discord.js";
 import { Discord, Slash } from "discordx";
 
 @Discord()
-export class ModUtils {
+export class Mod {
   @Slash({ description: "Moderator-only commands" })
-  async mod_utils(
+  async mod(
     interaction: CommandInteraction,
   ): Promise<void> {
     const okToUseCommand: boolean = await isModerator(interaction);

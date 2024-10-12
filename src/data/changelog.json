@@ -5,7 +5,8 @@
         "changes": [
             "- added roles held by each member to the member data file",
             "- set up an admin-only slash command that will later be extended with more functionality",
-            "- set up a mod-only slash command that will later be extended with more functionality"
+            "- set up a mod-only slash command that will later be extended with more functionality",
+            "- stubbed out a slash command group for /admin"
         ],
         "author": "merph518"
     },

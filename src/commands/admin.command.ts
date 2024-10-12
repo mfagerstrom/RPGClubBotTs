@@ -3,19 +3,30 @@ import { PermissionsBitField } from "discord.js";
 
 import { EmbedBuilder } from "discord.js";
 import type { CommandInteraction } from "discord.js";
-import { Discord, Slash } from "discordx";
+import { Discord, Slash, SlashGroup } from "discordx";
 
 @Discord()
-export class AdminUtils {
-  @Slash({ description: "Admin-only commands" })
-  async admin_utils(
-    interaction: CommandInteraction,
-  ): Promise<void> {
+@SlashGroup({ description: "Manage permissions", name: "admin" })
+@SlashGroup("admin")
+export class Admin {
+  @Slash({ description: "Command A", name: "a" })
+  async a(interaction: CommandInteraction): Promise<void> {
     const okToUseCommand: boolean = await isAdmin(interaction);
 
     if (okToUseCommand) {
       await interaction.reply({
-        content: 'Nice.  You\'re in.'
+        content: 'You selected Command A.'
+      });
+    }
+  }
+
+  @Slash({ description: "Command B", name: "b" })
+  async b(interaction: CommandInteraction): Promise<void> {
+    const okToUseCommand: boolean = await isAdmin(interaction);
+
+    if (okToUseCommand) {
+      await interaction.reply({
+        content: 'You selected Command B.'
       });
     }
   }
