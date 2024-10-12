@@ -1,3 +1,4 @@
+import { GuildMember } from "discord.js";
 import { Client } from "discordx";
 import fs from 'fs';
 
@@ -12,8 +13,21 @@ export async function scanGuild(
   const members: Member[] = [];
   let member: Member;
 
+  const roleIds = client.guilds.cache
+    .map((guild) => guild.roles.cache.map((role) => (role.id)))[0];
+
+  const roleIdsJSON = JSON.stringify(roleIds);
+  fs.writeFile('./src/data/roleIds.json', roleIdsJSON, (err) => {
+    if (err) {
+      console.log('Error writing file:', err);
+    }
+  });
+
+  let memberRoles: string[] = [];
+  let memberIndex: number = 0;
+
   membersOutput.forEach(async (memberOutput) => {
-    const guildRoles = memberOutput.roles.cache;
+    memberRoles = await getMemberRoles(memberOutput, roleIds);
 
     member = {
       id: memberOutput.id,
@@ -24,17 +38,38 @@ export async function scanGuild(
         username: memberOutput.user.username,
         globalName: memberOutput.user.globalName,
         avatar: memberOutput.user.avatarURL(),
-      }
+      },
+      roleIds: memberRoles
     };
+
+    if (memberIndex++ === 0) {
+      console.log(member);
+    }
+
     members.push(member);
   });
 
   const membersJSON = JSON.stringify(members);
   fs.writeFile('./src/data/members.json', membersJSON, (err) => {
     if (err) {
-      console.log('Error writing file:', err); 
+      console.log('Error writing file:', err);
     }
   });
+}
+
+async function getMemberRoles(
+  member: GuildMember,
+  roleIds: string[]
+): Promise<string[]> {
+
+  const memberRoles: string[] = [];
+
+  roleIds.forEach(async (roleId) => {
+    if (member.roles.cache.has(roleId)) {
+      memberRoles.push(roleId);
+    }
+  });
+  return memberRoles;
 }
 
 interface Member {
@@ -42,7 +77,8 @@ interface Member {
   joinedTimestamp: Date | null,
   partedTimestamp?: Date | null,
   nickname: string | null;
-  user: User;  
+  user: User;
+  roleIds: string[];
 }
 
 interface User {
