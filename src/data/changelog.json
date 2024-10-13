@@ -1,5 +1,13 @@
 [
     {
+        "version": "1.5.1",
+        "date": "10/13/2024",
+        "changes": [
+            "- Update member auto-role to now remove the newcomers role"
+        ],
+        "author": "merph518"
+    },
+    {
         "version": "1.5.0",
         "date": "10/12/2024",
         "changes": [

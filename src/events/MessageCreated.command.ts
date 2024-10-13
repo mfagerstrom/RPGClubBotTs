@@ -58,10 +58,15 @@ export class MessageCreated {
     // does the user have the members role?
     const hasMemberRole: boolean = message.member!.roles.cache.some(role => role.name === 'members');
     if (!hasMemberRole) {
-      const role: Role | undefined = message.member!.guild.roles.cache.find(r => r.name === 'members');
-      if (role) {
+      const membersRole: Role | undefined = message.member!.guild.roles.cache.find(r => r.name === 'members');
+      const newcomersRole: Role | undefined = message.member!.guild.roles.cache.find(r => r.name === 'newcomers');
+      if (membersRole) {
         console.log(`Granting member role to ${userName}`);
-        message.member!.roles.add(role);
+        message.member!.roles.add(membersRole);
+      }
+      if (newcomersRole){
+        console.log(`Removing newcomers role from ${userName}`);
+        message.member!.roles.remove(newcomersRole);
       }
     }
 
