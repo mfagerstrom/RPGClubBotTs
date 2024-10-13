@@ -2,8 +2,6 @@ import { GuildMember } from "discord.js";
 import { Client } from "discordx";
 import fs from 'fs';
 
-
-
 let memberRoles: string[] = [];
 
 export async function scanGuild(

@@ -4,7 +4,7 @@
     "target": "ESNext",
     "module": "ESNext",
     "outDir": "build",
-    "baseUrl": ".",
+    "baseUrl": "./src",
     "rootDir": "./src",
     "strict": true,
     "moduleResolution": "node",

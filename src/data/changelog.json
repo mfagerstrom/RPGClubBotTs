@@ -1,10 +1,16 @@
 [
     {
-        "version": "1.5.1",
+        "version": "1.6.0",
         "date": "10/13/2024",
         "changes": [
             "- Update member auto-role to now remove the newcomers role",
-            "- Implemented /coverart command using the HLTB function but only returning the image"
+            "- Implemented /coverart command using the HLTB function but only returning the image",
+            "- Stubbed out the commands /nom gotm and /nom nr_gotm",
+            "- Built json file for gotm nominations",
+            "- Implemented /nom gotm command to nominate a game",
+            "- Added checking for an existing noom to /nom gotm",
+            "- Implemented /nom gotm_list to output the list of current nominations",
+            "- Implemented /nom gotm_delete_my_nomination to let a user delete their nomination"
         ],
         "author": "merph518"
     },

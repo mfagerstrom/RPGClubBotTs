@@ -12,7 +12,6 @@ Automation
 - triggered by discord events
   - on member join - automatic restoration of roles on re-join 
   - on member role assignment - record role in member roles table
-  - on member role removal - remove role in member roles table
   - on event create - automatic creation of live events threads (but not for voting events)
   - on member part - record part date in members table
   - on member nickname change - record old nickname in member nicknames table if it does not   
@@ -23,8 +22,6 @@ Automation
 
 Voting
 - set up vote round function [admin only]
-- nominate game function [one per user per category (GOTM / NR GOTM)]
-- display current nominations
 - delete nomination function [admin only]
 - edit existing nomination [self only with admin only override]
 - output vote bot setup strings [admin only]
