@@ -3,7 +3,8 @@
         "version": "1.5.1",
         "date": "10/13/2024",
         "changes": [
-            "- Update member auto-role to now remove the newcomers role"
+            "- Update member auto-role to now remove the newcomers role",
+            "- Implemented /coverart command using the HLTB function but only returning the image"
         ],
         "author": "merph518"
     },
