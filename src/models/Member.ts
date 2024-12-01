@@ -12,7 +12,7 @@ interface IMember extends Document {
   partedTimestamp?: Date | null;
   nickname: string | null;
   user: IUser;
-  roles: IRole[]; // Change from roleIds: string[] to roles: IRole[]
+  roles: IRole[]; 
 }
 
 interface IRole {
@@ -38,7 +38,7 @@ const MemberSchema: Schema = new Schema({
   partedTimestamp: { type: Date, required: false },
   nickname: { type: String, required: false },
   user: { type: UserSchema, required: true },
-  roles: [RoleSchema] // Use RoleSchema to store roleId and roleName
+  roles: [RoleSchema] 
 });
 
 const Member = mongoose.model<IMember>('Member', MemberSchema);
