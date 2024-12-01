@@ -1,6 +1,6 @@
-import { ActivityType, CommandInteraction } from "discord.js";
-import Presence from '../models/Presence.js'; 
-import { Client } from "discordx";
+import { ActivityType, Client, CommandInteraction } from "discord.js";
+import mongoose from 'mongoose';
+import Presence from '../models/Presence.js';
 
 export async function setPresence(interaction: CommandInteraction, activityName: string) {
     interaction.client.user!.setPresence({
@@ -22,21 +22,21 @@ export async function setPresence(interaction: CommandInteraction, activityName:
 
 export async function updateBotPresence(bot: Client) {
     try {
-      const latestPresence = await Presence.findOne().sort({ timestamp: -1 }).exec();
-  
-      if (latestPresence) {
-        bot.user!.setPresence({
-          activities: [{
-            name: latestPresence.activityName,
-            type: ActivityType.Playing,
-          }],
-          status: 'online',
-        });
-        console.log('Bot presence updated from MongoDB.');
-      } else {
-        console.log('No presence data found in MongoDB.');
-      }
+        const latestPresence = await Presence.findOne().sort({ timestamp: -1 }).exec();
+
+        if (latestPresence) {
+            bot.user!.setPresence({
+                activities: [{
+                    name: latestPresence.activityName,
+                    type: ActivityType.Playing,
+                }],
+                status: 'online',
+            });
+            console.log('Bot presence updated from MongoDB.');
+        } else {
+            console.log('No presence data found in MongoDB.');
+        }
     } catch (error) {
-      console.error('Error retrieving presence data:', error);
+        console.error('Error retrieving presence data:', error);
     }
-  }
+}

@@ -3,8 +3,6 @@ import type {  Interaction, Message } from "discord.js";
 import { IntentsBitField } from "discord.js";
 import { Client } from "discordx";
 
-import { connectToDatabase } from "./config/database.js";
-
 import { scanGuild } from "./utilities/ScanGuild.js";
 
 import dotenv from 'dotenv';
@@ -73,9 +71,6 @@ async function run() {
   if (!process.env.BOT_TOKEN) {
     throw Error("Could not find BOT_TOKEN in your environment");
   }
-
-  // Connect to MongoDB
-  await connectToDatabase();
 
   // Log in with your bot token
   await bot.login(process.env.BOT_TOKEN);

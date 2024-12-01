@@ -19,21 +19,3 @@ export async function connectToDatabase() {
     console.error("Error connecting to MongoDB:", error);
   }
 }
-
-export async function run() {
-  try {
-    console.log(uri);
-
-    // Connect to the database
-    await connectToDatabase();
-
-    // Perform any database operations here
-
-    console.log("Successfully connected to MongoDB with Mongoose!");
-  } finally {
-    // Ensures that the connection will close when you finish/error
-    await mongoose.connection.close();
-  }
-}
-
-run().catch(console.dir);

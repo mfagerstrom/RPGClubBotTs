@@ -11,11 +11,13 @@ export async function scanGuild(client: Client) {
     const guild = await client.guilds.fetch(guildId);
 
     // Get roles
-    const roleIds = client.guilds.cache
-        .map((guild) => guild.roles.cache.map((role) => (role.id)))[0];
+    const rolesData = guild.roles.cache.map(role => ({
+        roleId: role.id,
+        roleName: role.name
+      }));
 
     // Save roles to MongoDB
-    await Role.insertMany(roleIds.map(roleId => ({ roleId })));
+    await Role.insertMany(rolesData);
 
     // Get all members
     await guild.members.fetch();
@@ -30,7 +32,7 @@ export async function scanGuild(client: Client) {
     let member: Member;
 
     for (let x: number = 0; x < memberArray.length; x++) {
-        const memberRoles = await getMemberRoles(memberArray[x], roleIds);
+        const memberRoles = await getMemberRoles(memberArray[x]);
 
         member = {
             id: memberArray[x].id,
@@ -42,7 +44,7 @@ export async function scanGuild(client: Client) {
                 globalName: memberArray[x].user.globalName || 'Unknown',
                 avatar: memberArray[x].user.avatarURL(),
             },
-            roleIds: memberRoles,
+            memberRoles: memberRoles,
         };
 
         members.push(member);
@@ -56,11 +58,16 @@ export async function scanGuild(client: Client) {
 
 interface Member {
     id: string;
-    joinedTimestamp: Date | null,
-    partedTimestamp?: Date | null,
+    joinedTimestamp: Date | null;
+    partedTimestamp?: Date | null;
     nickname: string | null;
     user: User;
-    roleIds: string[];
+    memberRoles: MemberRole[]; 
+}
+
+interface MemberRole {
+    roleId: string;
+    roleName: string;
 }
 
 interface User {
