@@ -1,14 +1,15 @@
 import { dirname, importx } from "@discordx/importer";
 import type {  Interaction, Message } from "discord.js";
-import { ActivityType, IntentsBitField } from "discord.js";
+import { IntentsBitField } from "discord.js";
 import { Client } from "discordx";
 
-import presenceJSON from "./data/presence.json" assert { type: "json" };
-import * as mongoDB from './config/database.js'
+import { connectToDatabase } from "./config/database.js";
 
 import { scanGuild } from "./utilities/ScanGuild.js";
 
 import dotenv from 'dotenv';
+import { updateBotPresence } from "./functions/SetPresence.js";
+
 dotenv.config();
 
 export const bot = new Client({
@@ -38,15 +39,6 @@ bot.once("ready", async () => {
   // Make sure all guilds are cached
   await bot.guilds.fetch();
 
-  // Set stored presence state
-  bot.user!.setPresence({ 
-    activities: [{ 
-      name: presenceJSON, 
-      type: ActivityType.Playing,
-    }],
-    status: 'online',
-  });
-
   // Synchronize applications commands with Discord
   void bot.initApplicationCommands();
 
@@ -62,6 +54,9 @@ bot.once("ready", async () => {
 
   // scan guild members
   scanGuild(bot);
+
+  // Set stored presence state
+  await updateBotPresence(bot);
 });
 
 bot.on("interactionCreate", (interaction: Interaction) => {
@@ -73,19 +68,17 @@ bot.on("messageCreate", (message: Message) => {
 });
 
 async function run() {
-  // The following syntax should be used in the ECMAScript environment
   await importx(`${dirname(import.meta.url)}/{events,commands}/**/*.command.{ts,js}`);
 
-  // Let's start the bot
   if (!process.env.BOT_TOKEN) {
     throw Error("Could not find BOT_TOKEN in your environment");
   }
+
+  // Connect to MongoDB
+  await connectToDatabase();
 
   // Log in with your bot token
   await bot.login(process.env.BOT_TOKEN);
 }
 
 void run();
-console.log(process.env.MONGO_USERNAME);
-console.log(process.env.MONGO_PASSWORD);
-await mongoDB.connectToDatabase();
