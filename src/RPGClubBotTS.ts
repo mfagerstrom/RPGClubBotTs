@@ -3,11 +3,10 @@ import type {  Interaction, Message } from "discord.js";
 import { ActivityType, IntentsBitField } from "discord.js";
 import { Client } from "discordx";
 
-import { setPresence } from "./functions/SetPresence.js";
 import presenceJSON from "./data/presence.json" assert { type: "json" };
-// import * as mongoDB from './config/database.js'
+import * as mongoDB from './config/database.js'
 
-import { scanGuild } from "./utilities/guildUtils.js";
+import { scanGuild } from "./utilities/ScanGuild.js";
 
 import dotenv from 'dotenv';
 dotenv.config();
@@ -73,8 +72,6 @@ bot.on("messageCreate", (message: Message) => {
   void bot.executeCommand(message);
 });
 
-
-
 async function run() {
   // The following syntax should be used in the ECMAScript environment
   await importx(`${dirname(import.meta.url)}/{events,commands}/**/*.command.{ts,js}`);
@@ -89,6 +86,6 @@ async function run() {
 }
 
 void run();
-// console.log(process.env.MONGO_USERNAME);
-// console.log(process.env.MONGO_PASSWORD);
-// await mongoDB.run();
+console.log(process.env.MONGO_USERNAME);
+console.log(process.env.MONGO_PASSWORD);
+await mongoDB.connectToDatabase();

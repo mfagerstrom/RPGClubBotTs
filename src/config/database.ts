@@ -1,30 +1,39 @@
-import { MongoClient, ServerApiVersion } from 'mongodb';
+import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+
 dotenv.config();
 
-const uri = `mongodb+srv://${encodeURI(process.env.MONGO_USERNAME!)}:${encodeURI(process.env.MONGO_PASSWORD!)}@rpgclub.5quuxcm.mongodb.net/?retryWrites=true&w=majority&appName=rpgclub`;
+const uri = `mongodb+srv://${encodeURIComponent(process.env.MONGO_USERNAME!)}:${encodeURIComponent(process.env.MONGO_PASSWORD!)}@rpgclub.5quuxcm.mongodb.net/?retryWrites=true&w=majority&appName=rpgclub`;
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
-const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
+export async function connectToDatabase() {
+  try {
+    await mongoose.connect(uri, {
+      serverApi: {
+        version: '1',
+        strict: true,
+        deprecationErrors: true,
+      }
+    });
+    console.log("Connected to MongoDB using Mongoose!");
+  } catch (error) {
+    console.error("Error connecting to MongoDB:", error);
   }
-});
+}
 
 export async function run() {
   try {
     console.log(uri);
 
-    // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
-    // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    // Connect to the database
+    await connectToDatabase();
+
+    // Perform any database operations here
+
+    console.log("Successfully connected to MongoDB with Mongoose!");
   } finally {
-    // Ensures that the client will close when you finish/error
-    await client.close();
+    // Ensures that the connection will close when you finish/error
+    await mongoose.connection.close();
   }
 }
+
 run().catch(console.dir);

@@ -21,6 +21,7 @@
     "discord.js": "^14.15.3",
     "discordx": "^11.11.1",
     "fast-levenshtein": "^3.0.0",
+    "mongoose": "^8.8.3",
     "pm2": "^5.4.2",
     "user-agents": "^1.1.325"
   },
