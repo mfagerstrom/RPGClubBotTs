@@ -1,7 +1,7 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
 // Define an interface for the voting round document
-interface VotingRound extends Document {
+export interface IVotingRound extends Document {
   roundName: string;
   startDate: Date;
   endDate: Date;
@@ -19,6 +19,6 @@ const VotingRoundSchema: Schema = new Schema({
 });
 
 // Create and export the model
-const VotingRoundModel = mongoose.model<VotingRound>('VotingRound', VotingRoundSchema);
+const VotingRound = mongoose.model<IVotingRound>('VotingRound', VotingRoundSchema);
 
-export default VotingRoundModel;
+export default VotingRound;

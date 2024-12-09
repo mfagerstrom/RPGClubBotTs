@@ -1,7 +1,6 @@
 // import { ApplicationCommandOptionType } from "discord.js";
 // import type { CommandInteraction } from "discord.js";
 // import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
-// import { getGotmNominations } from "../functions/Nominations.js";
 
 // @Discord()
 // @SlashGroup({ description: "Nomination Commands", name: "nom" })
@@ -18,7 +17,7 @@
 //     text: string,
 //     interaction: CommandInteraction
 //   ): Promise<void> {
-//     let currentNoms: Nomination[] = await getGotmNominationsJSON();
+//     let currentNoms: Nomination[] = await getCurrentNominations();
 
 //     let userHasAlreadyNominated: boolean = false;
 //     for (let x: number = 0; x < currentNoms.length; x++) {
@@ -50,7 +49,7 @@
 //   async gotm_list(
 //     interaction: CommandInteraction
 //   ): Promise<void> {
-//     const gotmNoms: string = await getGotmNominations();
+//     const gotmNoms: string = await getCurrentNominations();
 //     await interaction.reply({
 //       content: gotmNoms,
 //     });
@@ -60,7 +59,7 @@
 //   async gotm_delete_my_nomination(
 //     interaction: CommandInteraction
 //   ): Promise<void> {
-//     let currentNoms: Nomination[] = await getGotmNominationsJSON();
+//     let currentNoms: Nomination[] = await getCurrentNominations();
 
 //     for (let x: number = 0; x < currentNoms.length; x++) {
 //       if (currentNoms[x].nominator === interaction.user.id) {

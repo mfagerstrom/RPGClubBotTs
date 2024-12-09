@@ -6,7 +6,7 @@ interface IUser {
   avatar: string | null;
 }
 
-interface IMember extends Document {
+export interface IMember extends Document {
   id: string;
   joinedTimestamp: Date | null;
   partedTimestamp?: Date | null;

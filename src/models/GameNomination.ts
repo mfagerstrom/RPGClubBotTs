@@ -1,13 +1,14 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
-import VotingRoundModel from './VotingRound.js'; 
-import MemberModel from './Member.js'; 
+import { IMember } from './Member.js';
+import { IVotingRound } from './VotingRound';
 
 // Define an interface for the nomination document
-interface GameNomination extends Document {
+export interface IGameNomination extends Document {
+  id: string;
   nomination: string;
-  votingRound: Types.ObjectId; // Reference to the VotingRound
+  votingRound: IVotingRound;
   nominationType: 'GOTM' | 'NR-GOTM'; // Type of the nomination
-  memberId: Types.ObjectId; // Reference to the Members schema
+  member: IMember;
   createdAt: Date;
 }
 
@@ -21,6 +22,6 @@ const GameNominationSchema: Schema = new Schema({
 });
 
 // Create and export the model
-const GameNominationModel = mongoose.model<GameNomination>('GameNomination', GameNominationSchema);
+const GameNomination = mongoose.model<IGameNomination>('GameNomination', GameNominationSchema);
 
-export default GameNominationModel;
+export default GameNomination;
