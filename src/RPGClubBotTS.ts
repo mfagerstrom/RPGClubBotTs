@@ -40,7 +40,7 @@ bot.once("ready", async () => {
    // Set presence state, hardcoded for now to the NR GOTM since Bamiji's bot features the GOTM
    bot.user!.setPresence({ 
     activities: [{ 
-      name: 'Mega Man Legends [NR GOTM Round 121]', 
+      name: 'Okami [NR GOTM Round 122]', 
       type: ActivityType.Playing,
     }],
     status: 'online',
