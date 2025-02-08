@@ -56,12 +56,6 @@ async function searchGoogleCustomSearchAPI(query: string) {
         });
 
         if (response.data.items) {
-            response.data.items.forEach(item => {
-                console.log(`Title: ${item.title}`);
-                console.log(`Link: ${item.link}`);
-                console.log(`Snippet: ${item.snippet}`);
-                console.log('---');
-            });
             return response.data.items;
         } else {
             console.log('No results found.');
