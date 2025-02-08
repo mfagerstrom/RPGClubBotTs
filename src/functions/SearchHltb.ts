@@ -1,42 +1,36 @@
 import axios, { AxiosError } from 'axios';
 import * as cheerio from 'cheerio';
 import UserAgent from 'user-agents';
+import { google } from 'googleapis';
+
+interface GoogleSearchResult {
+    kind: string;
+    title: string;
+    htmlTitle: string;
+    link: string;
+    displayLink: string;
+    snippet: string;
+    htmlSnipped: string;
+    formattedUrl: string;
+    htmlFormattedUrl: string;
+    pagemap: any;
+}
 
 export async function searchHltb(title: string) {
     const hltbQuery: string = title;
 
-    // search google for the title, using a site constraint
-    const googleUrl = `https://www.google.com/search?q=site${encodeURI(':howlongtobeat.com')}+${encodeURI(hltbQuery)}`;
-
-    // grab all the search result links
-    const hltbUrlObjects = await axios.get(googleUrl, { responseEncoding: "latin1" })
-        .then(({ data: html }) => {
-            const $ = cheerio.load(html);
-            const data = [...$(".egMi0")]
-                .map(e => ({
-                    title: $(e).find("h3").text().trim(),
-                    href: $(e).find("a").attr("href"),
-                }));
-            return data;
-        })
-        .catch(err => console.error(err));
+    const searchData: GoogleSearchResult[] = await searchGoogleCustomSearchAPI(`How long is ${hltbQuery}?`) as GoogleSearchResult[];
 
     // grab the first link of the bunch and pull out the id from it
-    // @ts-ignore
-    const hltbMessyUrl: string = hltbUrlObjects[0].href;
-    const hltbId: string = hltbMessyUrl!.match(/\d+/)![0];
-
-    // use the id to construct the hltb detail url
-    const hltbGameUrl: string = `https://howlongtobeat.com/game/${hltbId}`;
+    const hltbUrl: string = searchData[0].link;
 
     // and scrape it
-    const hltbGameHTML: string = await fetchPage(hltbGameUrl);
+    const hltbGameHTML: string = await fetchPage(hltbUrl);
     const $ = cheerio.load(hltbGameHTML);
 
     // grab the data that we need with cheerio
     const result = {
         name: $('.GameHeader_profile_header__q_PID').text().trim(),
-        id: hltbId,
         main: $('h4:contains("Main Story")').next().text(),
         mainSides: $('h4:contains("Main + Sides")').next().text(),
         completionist: $('h4:contains("Completionist")').next().text(),
@@ -47,6 +41,34 @@ export async function searchHltb(title: string) {
     };
 
     return result;
+}
+
+async function searchGoogleCustomSearchAPI(query: string) {
+    const customSearch = google.customsearch('v1');
+    const apiKey = process.env.GOOGLE_API_KEY;
+    const searchEngineId = process.env.SEARCH_ID;
+
+    try {
+        const response = await customSearch.cse.list({
+            auth: apiKey,
+            cx: searchEngineId,
+            q: query,
+        });
+
+        if (response.data.items) {
+            response.data.items.forEach(item => {
+                console.log(`Title: ${item.title}`);
+                console.log(`Link: ${item.link}`);
+                console.log(`Snippet: ${item.snippet}`);
+                console.log('---');
+            });
+            return response.data.items;
+        } else {
+            console.log('No results found.');
+        }
+    } catch (error) {
+        console.error('Error performing search:', error);
+    }
 }
 
 async function fetchPage(url: string) {

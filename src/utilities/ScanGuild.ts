@@ -1,11 +1,11 @@
 import { Client, GuildMember } from "discord.js";
 import Role from '../models/Role.js';
 import Member from '../models/Member.js';
-import { connectToDatabase } from '../config/database.js';
+// import { connectToDatabase } from '../config/database.js';
 import { getMemberRoles } from './GetMemberRoles.js';
 
 export async function scanGuild(client: Client) {
-    await connectToDatabase();
+    // await connectToDatabase();
 
     const guildId: string = '191941851757019136';
     const guild = await client.guilds.fetch(guildId);
@@ -17,7 +17,7 @@ export async function scanGuild(client: Client) {
       }));
 
     // Save roles to MongoDB
-    await Role.insertMany(rolesData);
+    // await Role.insertMany(rolesData);
 
     // Get all members
     await guild.members.fetch();
@@ -51,9 +51,9 @@ export async function scanGuild(client: Client) {
     }
 
     // Save members to MongoDB
-    await Member.insertMany(members);
+    // await Member.insertMany(members);
 
-    console.log("Roles and members have been saved to MongoDB.");
+    // console.log("Roles and members have been saved to MongoDB.");
 }
 
 interface Member {
