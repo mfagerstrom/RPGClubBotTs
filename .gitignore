@@ -6,5 +6,5 @@ package-lock.json
 yarn.lock
 
 # folders
-build
 node_modules
+.qodo
