@@ -37,14 +37,14 @@ bot.once("ready", async () => {
   // Make sure all guilds are cached
   await bot.guilds.fetch();
 
-   // Set presence state, hardcoded for now to the NR GOTM since Bamiji's bot features the GOTM
-   bot.user!.setPresence({ 
-    activities: [{ 
-      name: 'Sakuna: Of Rice and Ruin [NR GOTM Round 123]', 
-      type: ActivityType.Playing,
-    }],
-    status: 'online',
-  });
+  // Set presence state, hardcoded for now to the NR GOTM since Bamiji's bot features the GOTM
+  // bot.user!.setPresence({ 
+  //   activities: [{ 
+  //     name: 'Sakuna: Of Rice and Ruin [NR GOTM Round 123]', 
+  //     type: ActivityType.Playing,
+  //   }],
+  //   status: 'online',
+  // });
 
   // Synchronize applications commands with Discord
   void bot.initApplicationCommands();
