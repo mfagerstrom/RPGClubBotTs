@@ -1,10 +1,149 @@
+import { EmbedBuilder, ChannelType, type ForumChannel, type TextChannel } from "discord.js";
 import type { ArgsOf, Client } from "discordx";
 import { Discord, On } from "discordx";
+
+const NOW_PLAYING_FORUM_ID: string = '1059875931356938240';
+const RPGCLUBBOT_DEVELOPMENT_CHANNEL_ID: string = '549603388334014464';
+const WHATCHA_PLAYING_CHANNEL_ID: string = '360819470836695042';
 
 @Discord()
 export class ThreadCreated {
   @On()
-  threadCreate([thread]: ArgsOf<"threadCreate">, client: Client): void {
-    
+  async threadCreate(
+    [thread]: ArgsOf<"threadCreate">,
+    client: Client,
+  ): Promise<void> {
+    console.log(thread);    
+
+    // New Threads in Now Playing forum channel get announced in the Whatcha Playing channel
+    if (thread.parentId === NOW_PLAYING_FORUM_ID) {
+      // Resolve thread author (prefer starter message author; fallback to thread.ownerId)
+      let authorName: string = 'Unknown';
+      let authorIconUrl: string | undefined;
+      let authorProfileUrl: string | undefined;
+      let imageUrl: string | undefined;
+
+      try {
+        let starter = await thread.fetchStarterMessage();
+        if (starter) {
+          authorName = starter.member?.displayName ?? starter.author.username;
+          authorIconUrl = starter.author.displayAvatarURL();
+          authorProfileUrl = `https://discord.com/users/${starter.author.id}`;
+
+          // try attachments first
+          for (const att of starter.attachments.values()) {
+            const nameLc = att.name?.toLowerCase() ?? '';
+            if (
+              att.contentType?.toLowerCase()?.startsWith('image/') ||
+              /\.(png|jpg|jpeg|gif|webp|bmp|tiff)$/.test(nameLc) ||
+              (att as any).width
+            ) {
+              imageUrl = att.url ?? att.proxyURL;
+              break;
+            }
+          }
+          // fallback to embed image/thumbnail
+          if (!imageUrl) {
+            for (const emb of starter.embeds) {
+              if (emb.image?.url) { imageUrl = emb.image.url; break; }
+              if (emb.thumbnail?.url) { imageUrl = emb.thumbnail.url; break; }
+            }
+          }
+        }
+
+        // Retry for up to 5s, polling every 500ms for image to appear
+        if (!imageUrl) {
+          const sleep = (ms: number): Promise<void> => new Promise<void>((resolve): void => { setTimeout(resolve, ms); });
+          const deadline: number = Date.now() + 5000;
+          while (!imageUrl && Date.now() < deadline) {
+            const again = await thread.fetchStarterMessage().catch(() => null);
+            if (again) {
+              // pick from attachments
+              for (const att of again.attachments.values()) {
+                const nameLc = att.name?.toLowerCase() ?? '';
+                if (
+                  att.contentType?.toLowerCase()?.startsWith('image/') ||
+                  /\.(png|jpg|jpeg|gif|webp|bmp|tiff)$/.test(nameLc) ||
+                  (att as any).width
+                ) {
+                  imageUrl = att.url ?? att.proxyURL;
+                  break;
+                }
+              }
+              // or from embeds
+              if (!imageUrl) {
+                for (const emb of again.embeds) {
+                  if (emb.image?.url) { imageUrl = emb.image.url; break; }
+                  if (emb.thumbnail?.url) { imageUrl = emb.thumbnail.url; break; }
+                }
+              }
+            }
+            if (!imageUrl) {
+              await sleep(500);
+            }
+          }
+        }
+      } catch {
+        // ignore and fallback below
+      }
+
+      if (authorName === 'Unknown' && thread.ownerId) {
+        try {
+          const ownerUser = await client.users.fetch(thread.ownerId);
+          if (ownerUser) {
+            authorName = ownerUser.username;
+            authorIconUrl = ownerUser.displayAvatarURL();
+            authorProfileUrl = `https://discord.com/users/${ownerUser.id}`;
+          }
+        } catch {
+          // leave defaults
+        }
+      }
+
+      const nowPlayingEmbed = new EmbedBuilder()
+        .setColor(0x0099ff)
+        .setTitle(`${thread.name}`)
+        .setURL(`https://discord.com/channels/${thread.guildId}/${thread.id}`)
+        .setDescription(`New "Now Playing" Forum Post`)
+        .setAuthor({
+          name: authorName,
+          iconURL: authorIconUrl,
+          url: authorProfileUrl,
+        });
+      if (imageUrl) {
+        nowPlayingEmbed.setImage(imageUrl);
+      }
+
+      // Add forum thread tag names as fields (if any)
+      try {
+        if (thread.appliedTags && thread.appliedTags.length && thread.parentId) {
+          const parent = await client.channels.fetch(thread.parentId);
+          if (parent && parent.type === ChannelType.GuildForum) {
+            const forum = parent as ForumChannel;
+            const tagNames: string[] = thread.appliedTags
+              .map((id) => forum.availableTags.find((t) => t.id === id)?.name)
+              .filter((n): n is string => Boolean(n));
+            if (tagNames.length) {
+              nowPlayingEmbed.addFields({
+                name: tagNames.length > 1 ? 'Tags' : 'Tag',
+                value: tagNames.join(', ').slice(0, 1024),
+                inline: false,
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to resolve forum tag names:', err);
+      }
+
+      const channel = await client.channels.fetch(WHATCHA_PLAYING_CHANNEL_ID);
+      if (channel && channel.isTextBased()) {
+        try {
+          await (channel as TextChannel).send({ embeds: [nowPlayingEmbed] });
+        } catch (err) {
+          console.error('Failed to send Now Playing embed:', err);
+        }
+      }
+    }
   }
 }
