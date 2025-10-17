@@ -23,7 +23,7 @@
     "fast-levenshtein": "^3.0.0",
     "googleapis": "^144.0.0",
     "mongoose": "^8.8.3",
-    "pm2": "^5.4.2",
+    "pm2": "^6.0.13",
     "user-agents": "^1.1.325"
   },
   "devDependencies": {
