@@ -6,24 +6,31 @@
   "type": "module",
   "main": "build/main.js",
   "scripts": {
-    "build": "rm -r build | tsc",
+    "build": "rm -rf ./build | tsc",
     "bs": "tsc | node build/RPGClubBotTS.js",
     "dev": "node --loader ts-node/esm/transpile-only src/RPGClubBotTS.ts",
     "start": "node build/RPGClubBotTS.js",
     "start:prod": "pm2 start build/RPGClubBotTS.js",
-    "watch": "nodemon --exec npm run dev --watch src --ext ts"
+    "watch": "nodemon --exec npm run dev --watch src --ext ts",
+    "compile": "npx tsc --noEmit",
+    "lint": "rm -rf ./build | npx eslint"
   },
   "dependencies": {
     "@discordx/importer": "^1.3.1",
     "@discordx/pagination": "^3.5.4",
+    "@stylistic/eslint-plugin-js": "^4.4.1",
     "axios": "^1.7.7",
     "cheerio": "^1.0.0",
     "discord.js": "^14.15.3",
     "discordx": "^11.11.1",
+    "eslint": "^9.37.0",
+    "eslint-config-prettier": "^10.1.8",
     "fast-levenshtein": "^3.0.0",
+    "globals": "^16.4.0",
     "googleapis": "^144.0.0",
     "mongoose": "^8.8.3",
     "pm2": "^6.0.13",
+    "typescript-eslint": "^8.46.1",
     "user-agents": "^1.1.325"
   },
   "devDependencies": {
