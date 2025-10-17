@@ -42,11 +42,14 @@ export class ThreadCreated {
               break;
             }
           }
-          // fallback to embed image/thumbnail
+          // fallback to embed image/thumbnail (also consider proxy URLs)
           if (!imageUrl) {
             for (const emb of starter.embeds) {
-              if (emb.image?.url) { imageUrl = emb.image.url; break; }
-              if (emb.thumbnail?.url) { imageUrl = emb.thumbnail.url; break; }
+              const anyEmb: any = emb as any;
+              const imgUrl: string | undefined = emb.image?.url || anyEmb?.image?.proxyURL || anyEmb?.image?.proxy_url;
+              const thumbUrl: string | undefined = emb.thumbnail?.url || anyEmb?.thumbnail?.proxyURL || anyEmb?.thumbnail?.proxy_url;
+              if (imgUrl) { imageUrl = imgUrl; break; }
+              if (thumbUrl) { imageUrl = thumbUrl; break; }
             }
           }
         }
@@ -70,11 +73,14 @@ export class ThreadCreated {
                   break;
                 }
               }
-              // or from embeds
+              // or from embeds (also consider proxy URLs)
               if (!imageUrl) {
                 for (const emb of again.embeds) {
-                  if (emb.image?.url) { imageUrl = emb.image.url; break; }
-                  if (emb.thumbnail?.url) { imageUrl = emb.thumbnail.url; break; }
+                  const anyEmb: any = emb as any;
+                  const imgUrl: string | undefined = emb.image?.url || anyEmb?.image?.proxyURL || anyEmb?.image?.proxy_url;
+                  const thumbUrl: string | undefined = emb.thumbnail?.url || anyEmb?.thumbnail?.proxyURL || anyEmb?.thumbnail?.proxy_url;
+                  if (imgUrl) { imageUrl = imgUrl; break; }
+                  if (thumbUrl) { imageUrl = thumbUrl; break; }
                 }
               }
             }
@@ -114,6 +120,20 @@ export class ThreadCreated {
         nowPlayingEmbed.setImage(imageUrl);
       }
 
+      // Attach image to ensure it renders reliably in the embed
+      let files: { attachment: string; name?: string }[] | undefined;
+      try {
+        if (imageUrl) {
+          const urlObj = new URL(imageUrl);
+          const base = urlObj.pathname.split("/").pop() || "image.jpg";
+          const ensured = /\.(png|jpe?g|gif|webp|bmp|tiff)$/i.test(base) ? base : `${base}.jpg`;
+          files = [{ attachment: imageUrl, name: ensured }];
+          nowPlayingEmbed.setImage(`attachment://${ensured}`);
+        }
+      } catch {
+        // If parsing fails, leave the direct URL image as-is
+      }
+
       // Add forum thread tag names as fields (if any)
       try {
         if (thread.appliedTags && thread.appliedTags.length && thread.parentId) {
@@ -139,7 +159,7 @@ export class ThreadCreated {
       const channel = await client.channels.fetch(WHATCHA_PLAYING_CHANNEL_ID);
       if (channel && channel.isTextBased()) {
         try {
-          await (channel as TextChannel).send({ embeds: [nowPlayingEmbed] });
+          await (channel as TextChannel).send({ embeds: [nowPlayingEmbed], files });
         } catch (err) {
           console.error('Failed to send Now Playing embed:', err);
         }
