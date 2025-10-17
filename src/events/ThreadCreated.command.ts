@@ -17,6 +17,9 @@ export class ThreadCreated {
 
     // New Threads in Now Playing forum channel get announced in the Whatcha Playing channel
     if (thread.parentId === NOW_PLAYING_FORUM_ID) {
+      // Always wait 10 seconds before fetching the starter message
+      const sleep = (ms: number): Promise<void> => new Promise<void>((resolve): void => { setTimeout(resolve, ms); });
+      await sleep(10_000);
       // Resolve thread author (prefer starter message author; fallback to thread.ownerId)
       let authorName: string = 'Unknown';
       let authorIconUrl: string | undefined;
@@ -56,7 +59,6 @@ export class ThreadCreated {
 
         // Retry for up to 5s, polling every 500ms for image to appear
         if (!imageUrl) {
-          const sleep = (ms: number): Promise<void> => new Promise<void>((resolve): void => { setTimeout(resolve, ms); });
           const deadline: number = Date.now() + 5000;
           while (!imageUrl && Date.now() < deadline) {
             const again = await thread.fetchStarterMessage().catch(() => null);
@@ -120,19 +122,9 @@ export class ThreadCreated {
         nowPlayingEmbed.setImage(imageUrl);
       }
 
-      // Attach image to ensure it renders reliably in the embed
-      let files: { attachment: string; name?: string }[] | undefined;
-      try {
-        if (imageUrl) {
-          const urlObj = new URL(imageUrl);
-          const base = urlObj.pathname.split("/").pop() || "image.jpg";
-          const ensured = /\.(png|jpe?g|gif|webp|bmp|tiff)$/i.test(base) ? base : `${base}.jpg`;
-          files = [{ attachment: imageUrl, name: ensured }];
-          nowPlayingEmbed.setImage(`attachment://${ensured}`);
-        }
-      } catch {
-        // If parsing fails, leave the direct URL image as-is
-      }
+      // Do not try to attach remote URLs as files — discord.js expects
+      // local paths/Buffers for attachments. Keep direct image URLs in the embed.
+      let files: undefined;
 
       // Add forum thread tag names as fields (if any)
       try {
@@ -159,7 +151,7 @@ export class ThreadCreated {
       const channel = await client.channels.fetch(WHATCHA_PLAYING_CHANNEL_ID);
       if (channel && channel.isTextBased()) {
         try {
-          await (channel as TextChannel).send({ embeds: [nowPlayingEmbed], files });
+          await (channel as TextChannel).send({ embeds: [nowPlayingEmbed] });
         } catch (err) {
           console.error('Failed to send Now Playing embed:', err);
         }

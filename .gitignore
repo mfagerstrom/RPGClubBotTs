@@ -6,9 +6,5 @@ package-lock.json
 yarn.lock
 
 # folders
-<<<<<<< HEAD
-=======
-build
->>>>>>> 3d25363 (fix: dusting this off, replaced custom google search api key)
 node_modules
 .qodo
