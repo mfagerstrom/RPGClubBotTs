@@ -14,7 +14,7 @@ let Coverart = class Coverart {
     async coverart(title, interaction) {
         const result = await searchHltb(title);
         await interaction.reply({
-        //content: result.imageUrl,
+            content: result.imageUrl,
         });
     }
 };

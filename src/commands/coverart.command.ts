@@ -19,7 +19,7 @@ export class Coverart {
   ): Promise<void> {
     const result = await searchHltb(title)
     await interaction.reply({
-        //content: result.imageUrl,
+        content: result.imageUrl,
       });
   }
 }
