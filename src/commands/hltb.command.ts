@@ -3,6 +3,7 @@ import { ApplicationCommandOptionType } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import { EmbedBuilder } from "discord.js";
 import { searchHltb } from "../functions/SearchHltb.js";
+import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 
 @Discord()
 export class hltb {
@@ -17,12 +18,20 @@ export class hltb {
     title: string,
     interaction: CommandInteraction,
   ): Promise<void> {
-    const result = await searchHltb(title)
-    outputHltbResultsAsEmbed(interaction, result, title);
+    await safeDeferReply(interaction);
+
+    try {
+      const result = await searchHltb(title);
+      await outputHltbResultsAsEmbed(interaction, result, title);
+    } catch (error) {
+      await safeReply(interaction, {
+        content: `Sorry, there was an error searching for "${title}". Please try again later.`
+      });
+    }
   }
 }
 
-function outputHltbResultsAsEmbed(
+async function outputHltbResultsAsEmbed(
   interaction: CommandInteraction,
   result: any,
   hltbQuery: string) {
@@ -79,7 +88,7 @@ function outputHltbResultsAsEmbed(
         inline: true,
       });
     }
-    
+
 
     const hltbEmbed = new EmbedBuilder()
       .setColor(0x0099ff)
@@ -93,8 +102,10 @@ function outputHltbResultsAsEmbed(
       .setFields(fields)
       .setImage(hltb_result.imageUrl);
 
-    interaction.reply({ embeds: [hltbEmbed] });
+    await safeReply(interaction, { embeds: [hltbEmbed] });
   } else {
-    interaction.reply(`Sorry, no results were found for "${hltbQuery}"`);
+    await safeReply(interaction, {
+      content: `Sorry, no results were found for "${hltbQuery}"`
+    });
   }
 }

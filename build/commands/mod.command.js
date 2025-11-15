@@ -10,12 +10,14 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 import { ApplicationCommandOptionType, PermissionsBitField } from "discord.js";
 import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { setPresence } from "../functions/SetPresence.js";
+import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 let Mod = class Mod {
     async presence(text, interaction) {
+        await safeDeferReply(interaction);
         const okToUseCommand = await isModerator(interaction);
         if (okToUseCommand) {
             await setPresence(interaction, text);
-            await interaction.reply({
+            await safeReply(interaction, {
                 content: `I'm now playing: ${text}!`
             });
         }
@@ -57,7 +59,7 @@ export async function isModerator(interaction) {
         // @ts-ignore
         const isAdmin = await interaction.member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.Administrator);
         if (!isAdmin) {
-            await interaction.reply({
+            await safeReply(interaction, {
                 content: 'Access denied.  Command requires Moderator role or above.'
             });
         }

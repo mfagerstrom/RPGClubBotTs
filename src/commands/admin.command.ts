@@ -2,6 +2,7 @@ import { ApplicationCommandOptionType, PermissionsBitField } from "discord.js";
 import type { CommandInteraction } from "discord.js";
 import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { setPresence } from "../functions/SetPresence.js";
+import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 
 @Discord()
 @SlashGroup({ description: "Admin Commands", name: "admin" })
@@ -18,6 +19,8 @@ export class Admin {
     text: string,
     interaction: CommandInteraction
   ): Promise<void> {
+    await safeDeferReply(interaction);
+
     const okToUseCommand: boolean = await isAdmin(interaction);
 
     if (okToUseCommand) {
@@ -25,7 +28,7 @@ export class Admin {
         interaction,
         text
       );
-      await interaction.reply({
+      await safeReply(interaction, {
         content: `I'm now playing: ${text}!`
       });
     }
@@ -37,7 +40,7 @@ export async function isAdmin(interaction: CommandInteraction) {
   const isAdmin = await interaction.member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.Administrator);
 
   if (!isAdmin) {
-    await interaction.reply({
+    await safeReply(interaction, {
       content: 'Access denied.  Command requires Administrator role.'
     });
   }

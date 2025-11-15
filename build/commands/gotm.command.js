@@ -11,6 +11,7 @@ import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
 import { Discord, Slash, SlashChoice, SlashOption } from "discordx";
 // Use relative import with .js for ts-node ESM compatibility
 import Gotm from "../classes/Gotm.js";
+import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 const ANNOUNCEMENTS_CHANNEL_ID = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 // Precompute dropdown choices
 const MONTH_CHOICES = [
@@ -45,10 +46,7 @@ const YEAR_CHOICES = (() => {
 let GotmSearch = class GotmSearch {
     async gotm(round, year, month, title, interaction) {
         // Acknowledge early to avoid interaction timeouts while fetching images
-        try {
-            await interaction.deferReply?.();
-        }
-        catch { }
+        await safeDeferReply(interaction);
         // Determine search mode
         let results = [];
         let criteriaLabel;
@@ -288,20 +286,4 @@ function appendWithTailTruncate(body, tail) {
         return tail.slice(0, MAX);
     const trimmedBody = body.slice(0, Math.max(0, availForBody - 3)) + '...';
     return trimmedBody + sep + tail;
-}
-// Ensure we do not hit "Interaction already acknowledged" when errors occur
-async function safeReply(interaction, options) {
-    const deferred = interaction.deferred;
-    const replied = interaction.replied;
-    if (deferred && !replied) {
-        const { ephemeral, ...rest } = options ?? {};
-        await interaction.editReply(rest);
-        return;
-    }
-    if (replied || deferred) {
-        const { ephemeral, ...rest } = options ?? {};
-        await interaction.followUp(rest);
-        return;
-    }
-    await interaction.reply(options);
 }

@@ -3,6 +3,7 @@ import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
 import { Discord, Slash, SlashChoice, SlashOption } from "discordx";
 // Use relative import with .js for ts-node ESM compatibility
 import Gotm, { GotmEntry, GotmGame } from "../classes/Gotm.js";
+import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 
 const ANNOUNCEMENTS_CHANNEL_ID: string | undefined = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 
@@ -78,7 +79,7 @@ export class GotmSearch {
     interaction: CommandInteraction,
   ): Promise<void> {
     // Acknowledge early to avoid interaction timeouts while fetching images
-    try { await (interaction as any).deferReply?.(); } catch {}
+    await safeDeferReply(interaction);
 
     // Determine search mode
     let results: GotmEntry[] = [];
@@ -291,21 +292,4 @@ function appendWithTailTruncate(body: string, tail: string): string {
   if (availForBody <= 0) return tail.slice(0, MAX);
   const trimmedBody = body.slice(0, Math.max(0, availForBody - 3)) + '...';
   return trimmedBody + sep + tail;
-}
-
-// Ensure we do not hit "Interaction already acknowledged" when errors occur
-async function safeReply(interaction: CommandInteraction, options: any): Promise<void> {
-  const deferred = (interaction as any).deferred;
-  const replied = (interaction as any).replied;
-  if (deferred && !replied) {
-    const { ephemeral, ...rest } = options ?? {};
-    await interaction.editReply(rest as any);
-    return;
-  }
-  if (replied || deferred) {
-    const { ephemeral, ...rest } = options ?? {};
-    await interaction.followUp(rest as any);
-    return;
-  }
-  await interaction.reply(options as any);
 }
