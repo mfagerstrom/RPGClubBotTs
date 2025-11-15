@@ -88,7 +88,12 @@ bot.on("messageCreate", async (message: Message) => {
   await bot.executeCommand(message);
 });
 
-bot.on("error", (err) => {
+bot.on("error", (err: any) => {
+  const code = err?.code ?? err?.rawError?.code;
+  if (code === 40060 || code === 10062) {
+    // Ignore ack/unknown-interaction noise
+    return;
+  }
   console.error("Discord client error:", err);
 });
 

@@ -48,6 +48,15 @@ async function ensureChannel(): Promise<any | null> {
 
 async function sendToDiscord(level: ConsoleLevel, message: string): Promise<void> {
   try {
+    // Filter out noisy Discord client acknowledgement errors
+    if (
+      level === "error" &&
+      message.includes("Discord client error:") &&
+      (message.includes("DiscordAPIError[40060]") || message.includes("DiscordAPIError[10062]"))
+    ) {
+      return;
+    }
+
     const channel = await ensureChannel();
     if (!channel) return;
 
@@ -77,4 +86,3 @@ export function installConsoleLogging(): void {
 export function setConsoleLoggingClient(client: any): void {
   discordClient = client;
 }
-

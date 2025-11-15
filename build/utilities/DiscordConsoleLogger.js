@@ -46,6 +46,12 @@ async function ensureChannel() {
 }
 async function sendToDiscord(level, message) {
     try {
+        // Filter out noisy Discord client acknowledgement errors
+        if (level === "error" &&
+            message.includes("Discord client error:") &&
+            (message.includes("DiscordAPIError[40060]") || message.includes("DiscordAPIError[10062]"))) {
+            return;
+        }
         const channel = await ensureChannel();
         if (!channel)
             return;
