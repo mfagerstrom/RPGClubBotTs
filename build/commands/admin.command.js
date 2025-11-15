@@ -11,6 +11,7 @@ import { ApplicationCommandOptionType, EmbedBuilder, PermissionsBitField } from 
 import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { getPresenceHistory, setPresence } from "../functions/SetPresence.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
 import Gotm, { updateGotmGameFieldInDatabase, insertGotmRoundInDatabase, } from "../classes/Gotm.js";
 import NrGotm, { updateNrGotmGameFieldInDatabase, insertNrGotmRoundInDatabase, } from "../classes/NrGotm.js";
 let Admin = class Admin {
@@ -128,16 +129,10 @@ let Admin = class Admin {
         try {
             await insertGotmRoundInDatabase(nextRound, monthYear, games);
             const newEntry = Gotm.addRound(nextRound, monthYear, games);
-            const summary = formatGotmEntryForEdit(newEntry);
+            const embed = await buildGotmEntryEmbed(newEntry, interaction.guildId ?? undefined, interaction.client);
             await safeReply(interaction, {
-                content: [
-                    `Created GOTM round ${nextRound}.`,
-                    "",
-                    "New data:",
-                    "```",
-                    summary,
-                    "```",
-                ].join("\n"),
+                content: `Created GOTM round ${nextRound}.`,
+                embeds: [embed],
             });
         }
         catch (err) {
@@ -225,16 +220,10 @@ let Admin = class Admin {
         try {
             await insertNrGotmRoundInDatabase(nextRound, monthYear, games);
             const newEntry = NrGotm.addRound(nextRound, monthYear, games);
-            const summary = formatGotmEntryForEdit(newEntry);
+            const embed = await buildNrGotmEntryEmbed(newEntry, interaction.guildId ?? undefined, interaction.client);
             await safeReply(interaction, {
-                content: [
-                    `Created NR-GOTM round ${nextRound}.`,
-                    "",
-                    "New data:",
-                    "```",
-                    summary,
-                    "```",
-                ].join("\n"),
+                content: `Created NR-GOTM round ${nextRound}.`,
+                embeds: [embed],
             });
         }
         catch (err) {
@@ -275,16 +264,10 @@ let Admin = class Admin {
             return;
         }
         const entry = entries[0];
-        const summary = formatGotmEntryForEdit(entry);
+        const embed = await buildGotmEntryEmbed(entry, interaction.guildId ?? undefined, interaction.client);
         await safeReply(interaction, {
-            content: [
-                `Editing GOTM round ${roundNumber}.`,
-                "",
-                "Current data:",
-                "```",
-                summary,
-                "```",
-            ].join("\n"),
+            content: `Editing GOTM round ${roundNumber}.`,
+            embeds: [embed],
         });
         const totalGames = entry.gameOfTheMonth.length;
         let gameIndex = 0;
@@ -350,16 +333,11 @@ let Admin = class Admin {
             else if (field === "redditUrl") {
                 updatedEntry = Gotm.updateRedditUrlByRound(roundNumber, newValue, gameIndex);
             }
-            const updatedSummary = updatedEntry ? formatGotmEntryForEdit(updatedEntry) : summary;
+            const entryToShow = updatedEntry ?? entry;
+            const updatedEmbed = await buildGotmEntryEmbed(entryToShow, interaction.guildId ?? undefined, interaction.client);
             await safeReply(interaction, {
-                content: [
-                    `GOTM round ${roundNumber} updated successfully.`,
-                    "",
-                    "Updated data:",
-                    "```",
-                    updatedSummary,
-                    "```",
-                ].join("\n"),
+                content: `GOTM round ${roundNumber} updated successfully.`,
+                embeds: [updatedEmbed],
             });
         }
         catch (err) {
@@ -400,16 +378,10 @@ let Admin = class Admin {
             return;
         }
         const entry = entries[0];
-        const summary = formatGotmEntryForEdit(entry);
+        const embed = await buildNrGotmEntryEmbed(entry, interaction.guildId ?? undefined, interaction.client);
         await safeReply(interaction, {
-            content: [
-                `Editing NR-GOTM round ${roundNumber}.`,
-                "",
-                "Current data:",
-                "```",
-                summary,
-                "```",
-            ].join("\n"),
+            content: `Editing NR-GOTM round ${roundNumber}.`,
+            embeds: [embed],
         });
         const totalGames = entry.gameOfTheMonth.length;
         let gameIndex = 0;
@@ -475,18 +447,11 @@ let Admin = class Admin {
             else if (field === "redditUrl") {
                 updatedEntry = NrGotm.updateRedditUrlByRound(roundNumber, newValue, gameIndex);
             }
-            const updatedSummary = updatedEntry
-                ? formatGotmEntryForEdit(updatedEntry)
-                : summary;
+            const entryToShow = updatedEntry ?? entry;
+            const updatedEmbed = await buildNrGotmEntryEmbed(entryToShow, interaction.guildId ?? undefined, interaction.client);
             await safeReply(interaction, {
-                content: [
-                    `NR-GOTM round ${roundNumber} updated successfully.`,
-                    "",
-                    "Updated data:",
-                    "```",
-                    updatedSummary,
-                    "```",
-                ].join("\n"),
+                content: `NR-GOTM round ${roundNumber} updated successfully.`,
+                embeds: [updatedEmbed],
             });
         }
         catch (err) {

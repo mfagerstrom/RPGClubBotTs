@@ -67,6 +67,9 @@ bot.on("messageCreate", async (message) => {
     }
     await bot.executeCommand(message);
 });
+bot.on("error", (err) => {
+    console.error("Discord client error:", err);
+});
 async function run() {
     if (!process.env.BOT_TOKEN) {
         throw Error("Could not find BOT_TOKEN in your environment");
