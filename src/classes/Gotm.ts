@@ -1,4 +1,4 @@
-import { writeFileSync, readFileSync } from 'node:fs';
+﻿import { writeFileSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
@@ -12,6 +12,7 @@ export interface GotmEntry {
   round: number;
   monthYear: string;
   gameOfTheMonth: GotmGame[];
+  votingResultsMessageId?: string | null;
 }
 
 // Load JSON as text to preserve large integers (Discord snowflakes) as strings.
@@ -20,7 +21,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const DATA_PATH = resolve(__dirname, '../data/gotm.json');
 const rawJson = readFileSync(DATA_PATH, 'utf8');
-const normalizedJson = rawJson.replace(/("threadId"\s*:\s*)(\d+)/g, '$1"$2"');
+const normalizedJson = rawJson
+  .replace(/("threadId"\s*:\s*)(\d+)/g, '$1"$2"')
+  .replace(/("votingResultsMessageId"\s*:\s*)(\d+)/g, '$1"$2"');
 let gotmData: GotmEntry[];
 try {
   gotmData = JSON.parse(normalizedJson) as GotmEntry[];
@@ -146,6 +149,10 @@ export default class Gotm {
     const normalized: GotmEntry[] = gotmData.map((e) => ({
       round: e.round,
       monthYear: e.monthYear,
+      votingResultsMessageId:
+        e.votingResultsMessageId === null || e.votingResultsMessageId === undefined
+          ? null
+          : String(e.votingResultsMessageId),
       gameOfTheMonth: e.gameOfTheMonth.map((g) => ({
         title: g.title,
         threadId: g.threadId === null ? null : String(g.threadId),

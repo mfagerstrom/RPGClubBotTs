@@ -11,6 +11,7 @@ import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
 import { Discord, Slash, SlashChoice, SlashOption } from "discordx";
 // Use relative import with .js for ts-node ESM compatibility
 import Gotm from "../classes/Gotm.js";
+const ANNOUNCEMENTS_CHANNEL_ID = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 // Precompute dropdown choices
 const MONTH_CHOICES = [
     { name: "January", value: "January" },
@@ -153,12 +154,15 @@ async function buildGotmEmbeds(results, criteriaLabel, guildId, client) {
     }
     const embeds = [];
     for (const entry of results) {
-        const desc = formatGames(entry.gameOfTheMonth, guildId);
+        const desc = formatGamesWithJump(entry, guildId);
         const embed = new EmbedBuilder()
             .setColor(0x0099ff)
             .setTitle(`Round ${entry.round} - ${entry.monthYear}`)
-            .setDescription(truncateField(desc));
-        // Do not include the query per-embed; it will be shown once in message content
+            .setDescription(desc);
+        // Also set the embed URL so the title becomes a clickable jump link
+        const jumpLink = buildResultsJumpLink(entry, guildId);
+        if (jumpLink)
+            embed.setURL(jumpLink);
         // Find first available thread image among this entry's games
         for (const g of entry.gameOfTheMonth) {
             if (!g.threadId)
@@ -181,7 +185,7 @@ function buildCompactEmbeds(results, criteriaLabel, guildId) {
     let fieldCount = 0;
     for (const entry of results) {
         const name = `Round ${entry.round} - ${entry.monthYear}`;
-        const value = truncateField(formatGames(entry.gameOfTheMonth, guildId));
+        const value = formatGamesWithJump(entry, guildId);
         if (fieldCount >= MAX_FIELDS) {
             embeds.push(current);
             current = new EmbedBuilder().setColor(0x0099ff).setTitle("GOTM Search Results (cont.)");
@@ -256,6 +260,34 @@ function truncateField(value) {
     if (value.length <= MAX)
         return value;
     return value.slice(0, MAX - 3) + '...';
+}
+function buildResultsJumpLink(entry, guildId) {
+    if (!guildId || !ANNOUNCEMENTS_CHANNEL_ID)
+        return undefined;
+    const msgId = entry.votingResultsMessageId;
+    if (!msgId)
+        return undefined;
+    return `https://discord.com/channels/${guildId}/${ANNOUNCEMENTS_CHANNEL_ID}/${msgId}`;
+}
+function formatGamesWithJump(entry, guildId) {
+    const body = formatGames(entry.gameOfTheMonth, guildId);
+    const link = buildResultsJumpLink(entry, guildId);
+    if (!link)
+        return truncateField(body);
+    const tail = `[Voting Results](${link})`;
+    return appendWithTailTruncate(body, tail);
+}
+function appendWithTailTruncate(body, tail) {
+    const MAX = 1024; // Align with existing truncateField limit
+    const sep = body ? '\n\n' : '';
+    const total = body.length + sep.length + tail.length;
+    if (total <= MAX)
+        return body + sep + tail;
+    const availForBody = MAX - tail.length - sep.length;
+    if (availForBody <= 0)
+        return tail.slice(0, MAX);
+    const trimmedBody = body.slice(0, Math.max(0, availForBody - 3)) + '...';
+    return trimmedBody + sep + tail;
 }
 // Ensure we do not hit "Interaction already acknowledged" when errors occur
 async function safeReply(interaction, options) {
