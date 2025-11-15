@@ -3,6 +3,7 @@ import { IntentsBitField } from "discord.js";
 import { Client } from "discordx";
 import dotenv from 'dotenv';
 import { updateBotPresence } from "./functions/SetPresence.js";
+import { initOraclePool } from "./db/oracleClient.js";
 dotenv.config();
 export const bot = new Client({
     // To use only guild command
@@ -50,7 +51,7 @@ async function run() {
     if (!process.env.BOT_TOKEN) {
         throw Error("Could not find BOT_TOKEN in your environment");
     }
-    // Log in with your bot token
+    await initOraclePool();
     await bot.login(process.env.BOT_TOKEN);
 }
 void run();
