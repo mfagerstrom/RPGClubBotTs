@@ -44,11 +44,27 @@ bot.once("clientReady", async () => {
     //  );
     console.log("Bot started");
 });
-bot.on("interactionCreate", (interaction) => {
-    bot.executeInteraction(interaction);
+bot.on("interactionCreate", async (interaction) => {
+    if ("isChatInputCommand" in interaction && interaction.isChatInputCommand()) {
+        const userTag = interaction.user?.tag ?? interaction.user?.id ?? "unknown";
+        const channel = interaction.channel;
+        const channelName = channel?.name ? `#${channel.name}` : channel?.id ?? "unknown";
+        console.log(`[SlashCommand] /${interaction.commandName} by ${userTag} in ${channelName}`);
+    }
+    await bot.executeInteraction(interaction);
 });
-bot.on("messageCreate", (message) => {
-    void bot.executeCommand(message);
+bot.on("messageCreate", async (message) => {
+    const content = message.content ?? "";
+    const prefix = "!";
+    if (content.startsWith(prefix)) {
+        const withoutPrefix = content.slice(prefix.length).trim();
+        const [commandName, ...args] = withoutPrefix.split(/\s+/);
+        const userTag = message.author?.tag ?? message.author?.id ?? "unknown";
+        const channel = message.channel;
+        const channelName = channel?.name ? `#${channel.name}` : channel?.id ?? "unknown";
+        console.log(`[MessageCommand] ${prefix}${commandName} by ${userTag} in ${channelName} args=${args.join(" ")}`);
+    }
+    await bot.executeCommand(message);
 });
 async function run() {
     if (!process.env.BOT_TOKEN) {
