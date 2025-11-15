@@ -1,34 +1,97 @@
-import { writeFileSync, readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-// Load JSON as text to preserve large integers (Discord snowflakes) as strings.
-// Convert threadId numeric literals to strings before JSON.parse to avoid precision loss.
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const DATA_PATH = resolve(__dirname, '../data/gotm.json');
-const rawJson = readFileSync(DATA_PATH, 'utf8');
-const normalizedJson = rawJson
-    .replace(/("threadId"\s*:\s*)(\d+)/g, '$1"$2"')
-    .replace(/("votingResultsMessageId"\s*:\s*)(\d+)/g, '$1"$2"');
-let gotmData;
-try {
-    gotmData = JSON.parse(normalizedJson);
-}
-catch {
-    // Fallback: strip BOM if present
-    gotmData = JSON.parse(normalizedJson.replace(/^\uFEFF/, ''));
-}
+import oracledb from "oracledb";
+import { getOraclePool } from "../db/oracleClient.js";
 const MONTHS = [
-    'january', 'february', 'march', 'april', 'may', 'june',
-    'july', 'august', 'september', 'october', 'november', 'december',
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
 ];
+let gotmData = [];
+let loadPromise = null;
+let gotmLoaded = false;
+async function loadFromDatabaseInternal() {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+    try {
+        const result = await connection.execute(`SELECT ROUND_NUMBER,
+              MONTH_YEAR,
+              GAME_INDEX,
+              GAME_TITLE,
+              THREAD_ID,
+              REDDIT_URL,
+              VOTING_RESULTS_MESSAGE_ID
+         FROM GOTM_ENTRIES
+        ORDER BY ROUND_NUMBER, GAME_INDEX`, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const rows = result.rows ?? [];
+        const byRound = new Map();
+        for (const anyRow of rows) {
+            const row = anyRow;
+            const round = Number(row.ROUND_NUMBER);
+            if (!Number.isFinite(round))
+                continue;
+            const monthYear = row.MONTH_YEAR;
+            const votingId = row.VOTING_RESULTS_MESSAGE_ID ?? null;
+            let entry = byRound.get(round);
+            if (!entry) {
+                entry = {
+                    round,
+                    monthYear,
+                    gameOfTheMonth: [],
+                };
+                if (votingId) {
+                    entry.votingResultsMessageId = votingId;
+                }
+                byRound.set(round, entry);
+            }
+            else if (!entry.votingResultsMessageId && votingId) {
+                entry.votingResultsMessageId = votingId;
+            }
+            const game = {
+                title: row.GAME_TITLE,
+                threadId: row.THREAD_ID ?? null,
+                redditUrl: row.REDDIT_URL ?? null,
+            };
+            entry.gameOfTheMonth.push(game);
+        }
+        const data = Array.from(byRound.values()).sort((a, b) => a.round - b.round);
+        gotmData = data;
+        gotmLoaded = true;
+        return gotmData;
+    }
+    finally {
+        await connection.close();
+    }
+}
+export async function loadGotmFromDb() {
+    if (gotmLoaded)
+        return;
+    if (!loadPromise) {
+        loadPromise = loadFromDatabaseInternal().catch((err) => {
+            loadPromise = null;
+            throw err;
+        });
+    }
+    await loadPromise;
+}
+function ensureInitialized() {
+    if (!gotmLoaded) {
+        throw new Error("GOTM data not initialized. Call loadGotmFromDb() during startup.");
+    }
+}
 function parseYear(value) {
     const m = value.match(/(\d{4})\s*$/);
     return m ? Number(m[1]) : null;
 }
 function parseMonthLabel(value) {
-    // Remove trailing year and trim
-    const label = value.replace(/\s*\d{4}\s*$/, '').trim();
+    const label = value.replace(/\s*\d{4}\s*$/, "").trim();
     return label;
 }
 function monthNumberToName(month) {
@@ -38,18 +101,19 @@ function monthNumberToName(month) {
 }
 export default class Gotm {
     static all() {
+        ensureInitialized();
         return gotmData.slice();
     }
     static getByRound(round) {
+        ensureInitialized();
         return gotmData.filter((e) => e.round === round);
     }
     static getByYearMonth(year, month) {
+        ensureInitialized();
         const yearNum = Number(year);
         if (!Number.isFinite(yearNum))
             return [];
-        const wantedLabel = typeof month === 'number'
-            ? monthNumberToName(month)
-            : month?.trim() ?? null;
+        const wantedLabel = typeof month === "number" ? monthNumberToName(month) : month?.trim() ?? null;
         if (!wantedLabel)
             return [];
         const wantedLower = wantedLabel.toLowerCase();
@@ -62,18 +126,21 @@ export default class Gotm {
         });
     }
     static getByYear(year) {
+        ensureInitialized();
         const yearNum = Number(year);
         if (!Number.isFinite(yearNum))
             return [];
         return gotmData.filter((e) => parseYear(e.monthYear) === yearNum);
     }
     static searchByTitle(query) {
+        ensureInitialized();
         if (!query?.trim())
             return [];
         const q = query.toLowerCase();
         return gotmData.filter((e) => e.gameOfTheMonth.some((g) => g.title.toLowerCase().includes(q)));
     }
     static getRoundEntry(round) {
+        ensureInitialized();
         const r = Number(round);
         if (!Number.isFinite(r))
             return null;
@@ -107,7 +174,6 @@ export default class Gotm {
         if (!entry)
             return null;
         const i = this.resolveIndex(entry, index);
-        // Coerce to string to preserve snowflake precision when saved
         entry.gameOfTheMonth[i].threadId = threadId === null ? null : String(threadId);
         return entry;
     }
@@ -118,23 +184,5 @@ export default class Gotm {
         const i = this.resolveIndex(entry, index);
         entry.gameOfTheMonth[i].redditUrl = redditUrl;
         return entry;
-    }
-    static save() {
-        // Persist current in-memory data back to JSON file (pretty-printed)
-        // Ensure all threadId values are strings (or null) before writing
-        const normalized = gotmData.map((e) => ({
-            round: e.round,
-            monthYear: e.monthYear,
-            votingResultsMessageId: e.votingResultsMessageId === null || e.votingResultsMessageId === undefined
-                ? null
-                : String(e.votingResultsMessageId),
-            gameOfTheMonth: e.gameOfTheMonth.map((g) => ({
-                title: g.title,
-                threadId: g.threadId === null ? null : String(g.threadId),
-                redditUrl: g.redditUrl ?? null,
-            })),
-        }));
-        const json = JSON.stringify(normalized, null, 2);
-        writeFileSync(DATA_PATH, json, { encoding: 'utf8' });
     }
 }
