@@ -163,10 +163,6 @@ async function buildGotmEmbeds(
       .setTitle(`Round ${entry.round} - ${entry.monthYear}`)
       .setDescription(desc);
 
-    // Also set the embed URL so the title becomes a clickable jump link
-    const jumpLink = buildResultsJumpLink(entry, guildId);
-    if (jumpLink) embed.setURL(jumpLink);
-
     // Find first available thread image among this entry's games
     for (const g of entry.gameOfTheMonth) {
       if (!g.threadId) continue;

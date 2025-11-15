@@ -28,6 +28,18 @@ export class BotHelp {
             "Notes: If round is provided, it takes precedence. year+month target a specific month. title searches by game title.",
         },
         {
+          name: "/round",
+          value:
+            "Show the current voting round, including GOTM and NR-GOTM winners.\n" +
+            "Syntax: /round",
+        },
+        {
+          name: "/nextvote",
+          value:
+            "Show the date of the next GOTM/NR-GOTM vote and the discussion channels.\n" +
+            "Syntax: /nextvote",
+        },
+        {
           name: "/hltb",
           value:
             "Search HowLongToBeat for game completion times.\n" +

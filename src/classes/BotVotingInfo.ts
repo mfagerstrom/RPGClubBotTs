@@ -127,6 +127,48 @@ export default class BotVotingInfo {
   }
 
   /**
+   * Return the entry for the highest round number in BOT_VOTING_INFO,
+   * or null if the table is empty.
+   */
+  static async getCurrentRound(): Promise<BotVotingInfoEntry | null> {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+
+    try {
+      const result = await connection.execute<{
+        ROUND_NUMBER: number;
+        NOMINATION_LIST_ID: number | null;
+        NEXT_VOTE_AT: Date | string;
+      }>(
+        `SELECT ROUND_NUMBER,
+                NOMINATION_LIST_ID,
+                NEXT_VOTE_AT
+           FROM BOT_VOTING_INFO
+          WHERE ROUND_NUMBER = (
+            SELECT MAX(ROUND_NUMBER) FROM BOT_VOTING_INFO
+          )`,
+        [],
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      const rows = (result.rows ?? []) as any[];
+      if (!rows.length) {
+        return null;
+      }
+
+      const row = rows[0] as {
+        ROUND_NUMBER: number;
+        NOMINATION_LIST_ID: number | null;
+        NEXT_VOTE_AT: Date | string;
+      };
+
+      return mapRowToEntry(row);
+    } finally {
+      await connection.close();
+    }
+  }
+
+  /**
    * Create or update a voting info row for the given round.
    */
   static async setRoundInfo(
@@ -266,4 +308,3 @@ export default class BotVotingInfo {
     }
   }
 }
-

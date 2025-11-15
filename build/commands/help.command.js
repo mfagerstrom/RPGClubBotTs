@@ -24,6 +24,11 @@ let BotHelp = class BotHelp {
                 "Syntax: /nr-gotm [round:<integer>] [year:<integer>] [month:<string>] [title:<string>]\n" +
                 "Notes: If round is provided, it takes precedence. year+month target a specific month. title searches by game title.",
         }, {
+            name: "/round",
+            value: "Show the current voting round, including GOTM and NR-GOTM winners and next vote information.\n" +
+                "Syntax: /round\n" +
+                "Notes: Uses the latest round from the BOT_VOTING_INFO table.",
+        }, {
             name: "/hltb",
             value: "Search HowLongToBeat for game completion times.\n" +
                 "Syntax: /hltb title:<string>\n" +
