@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import { updateBotPresence } from "./functions/SetPresence.js";
 import { initOraclePool } from "./db/oracleClient.js";
 import { loadGotmFromDb } from "./classes/Gotm.js";
+import { loadNrGotmFromDb } from "./classes/NrGotm.js";
 import { installConsoleLogging, setConsoleLoggingClient } from "./utilities/DiscordConsoleLogger.js";
 dotenv.config();
 installConsoleLogging();
@@ -72,6 +73,7 @@ async function run() {
     }
     await initOraclePool();
     await loadGotmFromDb();
+    await loadNrGotmFromDb();
     await importx(`${dirname(import.meta.url)}/{events,commands}/**/*.command.{ts,js}`);
     await bot.login(process.env.BOT_TOKEN);
 }

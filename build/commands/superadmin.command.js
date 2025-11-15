@@ -12,6 +12,7 @@ import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { getPresenceHistory, setPresence } from "../functions/SetPresence.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import Gotm, { updateGotmGameFieldInDatabase, insertGotmRoundInDatabase, deleteGotmRoundFromDatabase, } from "../classes/Gotm.js";
+import NrGotm, { updateNrGotmGameFieldInDatabase, insertNrGotmRoundInDatabase, deleteNrGotmRoundFromDatabase, } from "../classes/NrGotm.js";
 let SuperAdmin = class SuperAdmin {
     async presence(text, interaction) {
         await safeDeferReply(interaction);
@@ -146,6 +147,103 @@ let SuperAdmin = class SuperAdmin {
             });
         }
     }
+    async addNrGotm(interaction) {
+        await safeDeferReply(interaction);
+        const okToUseCommand = await isSuperAdmin(interaction);
+        if (!okToUseCommand) {
+            return;
+        }
+        let allEntries;
+        try {
+            allEntries = NrGotm.all();
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeReply(interaction, {
+                content: `Error loading existing NR-GOTM data: ${msg}`,
+            });
+            return;
+        }
+        const nextRound = allEntries.length > 0 ? Math.max(...allEntries.map((e) => e.round)) + 1 : 1;
+        await safeReply(interaction, {
+            content: `Preparing to create NR-GOTM round ${nextRound}.`,
+        });
+        const monthYearRaw = await promptUserForInput(interaction, `Enter the month/year label for NR-GOTM round ${nextRound} (for example: "March 2024"). Type \`cancel\` to abort.`);
+        if (monthYearRaw === null) {
+            return;
+        }
+        const monthYear = monthYearRaw.trim();
+        if (!monthYear) {
+            await safeReply(interaction, {
+                content: "Month/year label cannot be empty. Creation cancelled.",
+            });
+            return;
+        }
+        const gameCountRaw = await promptUserForInput(interaction, "How many games are in this NR-GOTM round? (1-5). Type `cancel` to abort.");
+        if (gameCountRaw === null) {
+            return;
+        }
+        const gameCount = Number(gameCountRaw);
+        if (!Number.isInteger(gameCount) || gameCount < 1 || gameCount > 5) {
+            await safeReply(interaction, {
+                content: `Invalid game count "${gameCountRaw}". Creation cancelled.`,
+            });
+            return;
+        }
+        const games = [];
+        for (let i = 0; i < gameCount; i++) {
+            const n = i + 1;
+            const titleRaw = await promptUserForInput(interaction, `Enter the title for NR-GOTM game #${n}.`);
+            if (titleRaw === null) {
+                return;
+            }
+            const title = titleRaw.trim();
+            if (!title) {
+                await safeReply(interaction, {
+                    content: "Game title cannot be empty. Creation cancelled.",
+                });
+                return;
+            }
+            const threadRaw = await promptUserForInput(interaction, `Enter the thread ID for NR-GOTM game #${n} (or type \`none\` / \`null\` to leave blank).`);
+            if (threadRaw === null) {
+                return;
+            }
+            const threadTrimmed = threadRaw.trim();
+            const threadId = threadTrimmed && !/^none|null$/i.test(threadTrimmed) ? threadTrimmed : null;
+            const redditRaw = await promptUserForInput(interaction, `Enter the Reddit URL for NR-GOTM game #${n} (or type \`none\` / \`null\` to leave blank).`);
+            if (redditRaw === null) {
+                return;
+            }
+            const redditTrimmed = redditRaw.trim();
+            const redditUrl = redditTrimmed && !/^none|null$/i.test(redditTrimmed) ? redditTrimmed : null;
+            games.push({
+                title,
+                threadId,
+                redditUrl,
+            });
+        }
+        try {
+            await insertNrGotmRoundInDatabase(nextRound, monthYear, games);
+            const newEntry = NrGotm.addRound(nextRound, monthYear, games);
+            const summary = formatGotmEntryForEdit(newEntry);
+            await safeReply(interaction, {
+                content: [
+                    `Created NR-GOTM round ${nextRound}.`,
+                    "",
+                    "New data:",
+                    "```",
+                    summary,
+                    "```",
+                ].join("\n"),
+            });
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeReply(interaction, {
+                content: `Failed to create NR-GOTM round ${nextRound}: ${msg}`,
+            });
+        }
+    }
     async editGotm(round, interaction) {
         await safeDeferReply(interaction);
         const okToUseCommand = await isSuperAdmin(interaction);
@@ -272,6 +370,133 @@ let SuperAdmin = class SuperAdmin {
             });
         }
     }
+    async editNrGotm(round, interaction) {
+        await safeDeferReply(interaction);
+        const okToUseCommand = await isSuperAdmin(interaction);
+        if (!okToUseCommand) {
+            return;
+        }
+        const roundNumber = Number(round);
+        if (!Number.isFinite(roundNumber)) {
+            await safeReply(interaction, {
+                content: "Invalid NR-GOTM round number.",
+            });
+            return;
+        }
+        let entries;
+        try {
+            entries = NrGotm.getByRound(roundNumber);
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeReply(interaction, {
+                content: `Error loading NR-GOTM data: ${msg}`,
+            });
+            return;
+        }
+        if (!entries.length) {
+            await safeReply(interaction, {
+                content: `No NR-GOTM entry found for round ${roundNumber}.`,
+            });
+            return;
+        }
+        const entry = entries[0];
+        const summary = formatGotmEntryForEdit(entry);
+        await safeReply(interaction, {
+            content: [
+                `Editing NR-GOTM round ${roundNumber}.`,
+                "",
+                "Current data:",
+                "```",
+                summary,
+                "```",
+            ].join("\n"),
+        });
+        const totalGames = entry.gameOfTheMonth.length;
+        let gameIndex = 0;
+        if (totalGames > 1) {
+            const gameAnswer = await promptUserForInput(interaction, `Which game number (1-${totalGames}) do you want to edit? Type \`cancel\` to abort.`);
+            if (gameAnswer === null) {
+                return;
+            }
+            const idx = Number(gameAnswer);
+            if (!Number.isInteger(idx) || idx < 1 || idx > totalGames) {
+                await safeReply(interaction, {
+                    content: `Invalid game number "${gameAnswer}". Edit cancelled.`,
+                });
+                return;
+            }
+            gameIndex = idx - 1;
+        }
+        const fieldAnswerRaw = await promptUserForInput(interaction, "Which field do you want to edit? Type one of: `title`, `thread`, `reddit`. Type `cancel` to abort.");
+        if (fieldAnswerRaw === null) {
+            return;
+        }
+        const fieldAnswer = fieldAnswerRaw.toLowerCase();
+        let field = null;
+        let nullableField = false;
+        if (fieldAnswer === "title") {
+            field = "title";
+        }
+        else if (fieldAnswer === "thread") {
+            field = "threadId";
+            nullableField = true;
+        }
+        else if (fieldAnswer === "reddit") {
+            field = "redditUrl";
+            nullableField = true;
+        }
+        else {
+            await safeReply(interaction, {
+                content: `Unknown field "${fieldAnswerRaw}". Edit cancelled.`,
+            });
+            return;
+        }
+        const valuePrompt = nullableField
+            ? `Enter the new value for ${fieldAnswer} (or type \`none\` / \`null\` to clear it).`
+            : `Enter the new value for ${fieldAnswer}.`;
+        const valueAnswerRaw = await promptUserForInput(interaction, valuePrompt, 5 * 60_000);
+        if (valueAnswerRaw === null) {
+            return;
+        }
+        const valueTrimmed = valueAnswerRaw.trim();
+        let newValue = valueTrimmed;
+        if (nullableField && /^none|null$/i.test(valueTrimmed)) {
+            newValue = null;
+        }
+        try {
+            await updateNrGotmGameFieldInDatabase(roundNumber, gameIndex, field, newValue);
+            let updatedEntry = null;
+            if (field === "title") {
+                updatedEntry = NrGotm.updateTitleByRound(roundNumber, newValue ?? "", gameIndex);
+            }
+            else if (field === "threadId") {
+                updatedEntry = NrGotm.updateThreadIdByRound(roundNumber, newValue, gameIndex);
+            }
+            else if (field === "redditUrl") {
+                updatedEntry = NrGotm.updateRedditUrlByRound(roundNumber, newValue, gameIndex);
+            }
+            const updatedSummary = updatedEntry
+                ? formatGotmEntryForEdit(updatedEntry)
+                : summary;
+            await safeReply(interaction, {
+                content: [
+                    `NR-GOTM round ${roundNumber} updated successfully.`,
+                    "",
+                    "Updated data:",
+                    "```",
+                    updatedSummary,
+                    "```",
+                ].join("\n"),
+            });
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeReply(interaction, {
+                content: `Failed to update NR-GOTM round ${roundNumber}: ${msg}`,
+            });
+        }
+    }
     async deleteGotm(interaction) {
         await safeDeferReply(interaction);
         const okToUseCommand = await isSuperAdmin(interaction);
@@ -352,6 +577,86 @@ let SuperAdmin = class SuperAdmin {
             });
         }
     }
+    async deleteNrGotm(interaction) {
+        await safeDeferReply(interaction);
+        const okToUseCommand = await isSuperAdmin(interaction);
+        if (!okToUseCommand) {
+            return;
+        }
+        let allEntries;
+        try {
+            allEntries = NrGotm.all();
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeReply(interaction, {
+                content: `Error loading NR-GOTM data: ${msg}`,
+            });
+            return;
+        }
+        if (!allEntries.length) {
+            await safeReply(interaction, {
+                content: "No NR-GOTM rounds exist to delete.",
+            });
+            return;
+        }
+        const latestRound = Math.max(...allEntries.map((e) => e.round));
+        const latestEntry = allEntries.find((e) => e.round === latestRound);
+        if (!latestEntry) {
+            await safeReply(interaction, {
+                content: "Could not determine the most recent NR-GOTM round to delete.",
+            });
+            return;
+        }
+        const summary = formatGotmEntryForEdit(latestEntry);
+        await safeReply(interaction, {
+            content: [
+                `You are about to delete NR-GOTM round ${latestRound} (${latestEntry.monthYear}).`,
+                "",
+                "Current data:",
+                "```",
+                summary,
+                "```",
+            ].join("\n"),
+        });
+        const confirm = await promptUserForInput(interaction, `Type \`yes\` to confirm deletion of NR-GOTM round ${latestRound}, or \`cancel\` to abort.`);
+        if (confirm === null) {
+            return;
+        }
+        if (confirm.toLowerCase() !== "yes") {
+            await safeReply(interaction, {
+                content: "Delete cancelled.",
+            });
+            return;
+        }
+        try {
+            const rowsDeleted = await deleteNrGotmRoundFromDatabase(latestRound);
+            if (!rowsDeleted) {
+                await safeReply(interaction, {
+                    content: `No database rows were deleted for NR-GOTM round ${latestRound}. It may not exist in the database.`,
+                });
+                return;
+            }
+            NrGotm.deleteRound(latestRound);
+            await safeReply(interaction, {
+                content: [
+                    `Deleted NR-GOTM round ${latestRound} (${latestEntry.monthYear}).`,
+                    `Database rows deleted: ${rowsDeleted}.`,
+                    "",
+                    "Deleted data:",
+                    "```",
+                    summary,
+                    "```",
+                ].join("\n"),
+            });
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeReply(interaction, {
+                content: `Failed to delete NR-GOTM round ${latestRound}: ${msg}`,
+            });
+        }
+    }
     async help(interaction) {
         await safeDeferReply(interaction);
         const okToUseCommand = await isSuperAdmin(interaction);
@@ -387,6 +692,21 @@ let SuperAdmin = class SuperAdmin {
                 "**Syntax:** `/superadmin delete-gotm`\n" +
                 "**Notes:** This removes the latest GOTM round from the database. Use this if a round was added too early or by mistake.",
         }, {
+            name: "/superadmin add-nr-gotm",
+            value: "Interactively add a new NR-GOTM (Non-RPG Game of the Month) round.\n" +
+                "**Syntax:** `/superadmin add-nr-gotm`\n" +
+                "**Notes:** The round number is always assigned automatically as the next round after the current highest NR-GOTM round.",
+        }, {
+            name: "/superadmin edit-nr-gotm",
+            value: "Interactively edit NR-GOTM data for a given round.\n" +
+                "**Syntax:** `/superadmin edit-nr-gotm round:<integer>`\n" +
+                "**Parameters:** `round` (required integer) - NR-GOTM round number to edit. The bot will show current data and prompt you for which game and field to update.",
+        }, {
+            name: "/superadmin delete-nr-gotm",
+            value: "Delete the most recent NR-GOTM round.\n" +
+                "**Syntax:** `/superadmin delete-nr-gotm`\n" +
+                "**Notes:** This removes the latest NR-GOTM round from the database. Use this if a round was added too early or by mistake.",
+        }, {
             name: "/superadmin help",
             value: "Show this help information.\n" +
                 "**Syntax:** `/superadmin help`",
@@ -418,6 +738,9 @@ __decorate([
     Slash({ description: "Add a new GOTM round", name: "add-gotm" })
 ], SuperAdmin.prototype, "addGotm", null);
 __decorate([
+    Slash({ description: "Add a new NR-GOTM round", name: "add-nr-gotm" })
+], SuperAdmin.prototype, "addNrGotm", null);
+__decorate([
     Slash({ description: "Edit GOTM data by round", name: "edit-gotm" }),
     __param(0, SlashOption({
         description: "Round number to edit",
@@ -427,11 +750,26 @@ __decorate([
     }))
 ], SuperAdmin.prototype, "editGotm", null);
 __decorate([
+    Slash({ description: "Edit NR-GOTM data by round", name: "edit-nr-gotm" }),
+    __param(0, SlashOption({
+        description: "NR-GOTM Round number to edit",
+        name: "round",
+        required: true,
+        type: ApplicationCommandOptionType.Integer,
+    }))
+], SuperAdmin.prototype, "editNrGotm", null);
+__decorate([
     Slash({
         description: "Delete the most recent GOTM round",
         name: "delete-gotm",
     })
 ], SuperAdmin.prototype, "deleteGotm", null);
+__decorate([
+    Slash({
+        description: "Delete the most recent NR-GOTM round",
+        name: "delete-nr-gotm",
+    })
+], SuperAdmin.prototype, "deleteNrGotm", null);
 __decorate([
     Slash({ description: "Show help for server owner commands", name: "help" })
 ], SuperAdmin.prototype, "help", null);

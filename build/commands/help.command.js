@@ -19,6 +19,11 @@ let BotHelp = class BotHelp {
                 "Syntax: /gotm [round:<integer>] [year:<integer>] [month:<string>] [title:<string>]\n" +
                 "Notes: If round is provided, it takes precedence. year+month target a specific month. title searches by game title.",
         }, {
+            name: "/nr-gotm",
+            value: "Search Non-RPG Game of the Month (NR-GOTM) data.\n" +
+                "Syntax: /nr-gotm [round:<integer>] [year:<integer>] [month:<string>] [title:<string>]\n" +
+                "Notes: If round is provided, it takes precedence. year+month target a specific month. title searches by game title.",
+        }, {
             name: "/hltb",
             value: "Search HowLongToBeat for game completion times.\n" +
                 "Syntax: /hltb title:<string>\n" +
@@ -30,11 +35,11 @@ let BotHelp = class BotHelp {
                 "Parameters: title (required string) - game title and optional descriptors.",
         }, {
             name: "/admin ... (Admin only)",
-            value: "Admin-only commands for managing bot presence and related features.\n" +
+            value: "Admin-only commands for managing bot presence and GOTM/NR-GOTM data.\n" +
                 "Use /admin help for a detailed list of admin subcommands, their syntax, and parameters.",
         }, {
             name: "/mod ... (Moderator or above)",
-            value: "Moderator commands for managing bot presence and related features.\n" +
+            value: "Moderator commands for managing bot presence and NR-GOTM data.\n" +
                 "Use /mod help for a detailed list of moderator subcommands, their syntax, and parameters.",
         });
         await safeReply(interaction, {
