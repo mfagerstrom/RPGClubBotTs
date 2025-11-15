@@ -207,6 +207,17 @@ export default class Gotm {
         entry.gameOfTheMonth[i].redditUrl = redditUrl;
         return entry;
     }
+    static deleteRound(round) {
+        ensureInitialized();
+        const r = Number(round);
+        if (!Number.isFinite(r))
+            return null;
+        const index = gotmData.findIndex((e) => e.round === r);
+        if (index === -1)
+            return null;
+        const [removed] = gotmData.splice(index, 1);
+        return removed ?? null;
+    }
 }
 export async function updateGotmGameFieldInDatabase(round, gameIndex, field, value) {
     const pool = getOraclePool();
@@ -291,6 +302,22 @@ export async function insertGotmRoundInDatabase(round, monthYear, games) {
                 redditUrl: g.redditUrl ?? null,
             }, { autoCommit: true });
         }
+    }
+    finally {
+        await connection.close();
+    }
+}
+export async function deleteGotmRoundFromDatabase(round) {
+    if (!Number.isFinite(round) || round <= 0) {
+        throw new Error("Invalid round number for GOTM delete.");
+    }
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+    try {
+        const result = await connection.execute(`DELETE FROM GOTM_ENTRIES
+        WHERE ROUND_NUMBER = :round`, { round }, { autoCommit: true });
+        const rowsAffected = result.rowsAffected ?? 0;
+        return rowsAffected;
     }
     finally {
         await connection.close();
