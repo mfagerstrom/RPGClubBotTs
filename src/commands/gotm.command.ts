@@ -1,4 +1,4 @@
-import type { CommandInteraction } from "discord.js";
+import type { CommandInteraction, Client } from "discord.js";
 import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
 import { Discord, Slash, SlashChoice, SlashOption } from "discordx";
 // Use relative import with .js for ts-node ESM compatibility
@@ -75,6 +75,9 @@ export class GotmSearch {
     title: string | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
+    // Acknowledge early to avoid interaction timeouts while fetching images
+    try { await (interaction as any).deferReply?.(); } catch {}
+
     // Determine search mode
     let results: GotmEntry[] = [];
     let criteriaLabel: string | undefined;
@@ -113,8 +116,17 @@ export class GotmSearch {
         return;
       }
 
-      const embeds = buildGotmEmbeds(results, criteriaLabel, interaction.guildId ?? undefined);
-      await safeReply(interaction, { embeds });
+      const embeds = await buildGotmEmbeds(results, criteriaLabel, interaction.guildId ?? undefined, interaction.client);
+      const content = criteriaLabel ? `Query: "${criteriaLabel}"` : undefined;
+      if (embeds.length <= 10) {
+        await safeReply(interaction, { content, embeds });
+      } else {
+        const chunks = chunkEmbeds(embeds, 10);
+        await safeReply(interaction, { content, embeds: chunks[0] });
+        for (let i = 1; i < chunks.length; i++) {
+          await interaction.followUp({ embeds: chunks[i] });
+        }
+      }
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, { content: `Error processing request: ${msg}`, ephemeral: true });
@@ -129,42 +141,104 @@ function parseMonthValue(input: string): number | string {
   return trimmed;
 }
 
-function buildGotmEmbeds(results: GotmEntry[], criteriaLabel?: string, guildId?: string): EmbedBuilder[] {
-  // Create a base embed with styling similar to ThreadCreated event
+async function buildGotmEmbeds(
+  results: GotmEntry[],
+  criteriaLabel: string | undefined,
+  guildId: string | undefined,
+  client: Client,
+): Promise<EmbedBuilder[]> {
+  // If many results, fall back to compact, field-based embeds (no thumbnails)
+  if (results.length > 12) {
+    return buildCompactEmbeds(results, criteriaLabel, guildId);
+  }
+
+  const embeds: EmbedBuilder[] = [];
+  for (const entry of results) {
+    const desc = formatGames(entry.gameOfTheMonth, guildId);
+    const embed = new EmbedBuilder()
+      .setColor(0x0099ff)
+      .setTitle(`Round ${entry.round} - ${entry.monthYear}`)
+      .setDescription(truncateField(desc));
+
+    // Do not include the query per-embed; it will be shown once in message content
+
+    // Find first available thread image among this entry's games
+    for (const g of entry.gameOfTheMonth) {
+      if (!g.threadId) continue;
+      const imgUrl = await resolveThreadImageUrl(client, g.threadId).catch(() => undefined);
+      if (imgUrl) {
+        embed.setThumbnail(imgUrl);
+        break;
+      }
+    }
+
+    embeds.push(embed);
+  }
+
+  return embeds;
+}
+
+function buildCompactEmbeds(results: GotmEntry[], criteriaLabel: string | undefined, guildId?: string): EmbedBuilder[] {
   const embeds: EmbedBuilder[] = [];
   const MAX_FIELDS = 25;
 
-  const baseEmbed = new EmbedBuilder()
-    .setColor(0x0099ff)
-    .setTitle("GOTM Search Results");
-  if (criteriaLabel) {
-    baseEmbed.setDescription(`Query: "${criteriaLabel}"`);
-  }
+  const baseEmbed = new EmbedBuilder().setColor(0x0099ff).setTitle("GOTM Search Results");
 
   let current = baseEmbed;
   let fieldCount = 0;
-
   for (const entry of results) {
-    const fieldName = `Round ${entry.round} - ${entry.monthYear}`;
-    const fieldValue = formatGames(entry.gameOfTheMonth, guildId);
-    const value = truncateField(fieldValue);
-
+    const name = `Round ${entry.round} - ${entry.monthYear}`;
+    const value = truncateField(formatGames(entry.gameOfTheMonth, guildId));
     if (fieldCount >= MAX_FIELDS) {
       embeds.push(current);
-      current = new EmbedBuilder()
-        .setColor(0x0099ff)
-        .setTitle("GOTM Search Results (cont.)");
-      if (criteriaLabel) {
-        current.setDescription(criteriaLabel);
-      }
+      current = new EmbedBuilder().setColor(0x0099ff).setTitle("GOTM Search Results (cont.)");
       fieldCount = 0;
     }
-    current.addFields({ name: fieldName, value, inline: false });
+    current.addFields({ name, value, inline: false });
     fieldCount++;
   }
-
   embeds.push(current);
   return embeds;
+}
+
+// Heavily inspired by ThreadCreated.command.ts logic, simplified for lookups
+async function resolveThreadImageUrl(client: Client, threadId: string): Promise<string | undefined> {
+  try {
+    const channel = await client.channels.fetch(threadId);
+    const anyThread = channel as any;
+    if (!anyThread || typeof anyThread.fetchStarterMessage !== 'function') return undefined;
+    const starter = await anyThread.fetchStarterMessage().catch(() => null);
+    if (!starter) return undefined;
+
+    // attachments first
+    for (const att of starter.attachments?.values?.() ?? []) {
+      const anyAtt: any = att as any;
+      const nameLc = (anyAtt.name ?? '').toLowerCase();
+      const ctype = (anyAtt.contentType ?? '').toLowerCase();
+      if (ctype.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp|bmp|tiff)$/.test(nameLc) || anyAtt.width) {
+        return anyAtt.url ?? anyAtt.proxyURL;
+      }
+    }
+    // embeds images and thumbnails (consider proxy urls)
+    for (const emb of starter.embeds ?? []) {
+      const anyEmb: any = emb as any;
+      const imgUrl: string | undefined = emb.image?.url || anyEmb?.image?.proxyURL || anyEmb?.image?.proxy_url;
+      const thumbUrl: string | undefined = emb.thumbnail?.url || anyEmb?.thumbnail?.proxyURL || anyEmb?.thumbnail?.proxy_url;
+      if (imgUrl) return imgUrl;
+      if (thumbUrl) return thumbUrl;
+    }
+  } catch {
+    // ignore
+  }
+  return undefined;
+}
+
+function chunkEmbeds(list: EmbedBuilder[], size: number): EmbedBuilder[][] {
+  const out: EmbedBuilder[][] = [];
+  for (let i = 0; i < list.length; i += size) {
+    out.push(list.slice(i, i + size));
+  }
+  return out;
 }
 
 function formatGames(games: GotmGame[], guildId?: string): string {
@@ -191,9 +265,17 @@ function truncateField(value: string): string {
 
 // Ensure we do not hit "Interaction already acknowledged" when errors occur
 async function safeReply(interaction: CommandInteraction, options: any): Promise<void> {
-  if ((interaction as any).deferred || (interaction as any).replied) {
-    await interaction.followUp(options as any);
-  } else {
-    await interaction.reply(options as any);
+  const deferred = (interaction as any).deferred;
+  const replied = (interaction as any).replied;
+  if (deferred && !replied) {
+    const { ephemeral, ...rest } = options ?? {};
+    await interaction.editReply(rest as any);
+    return;
   }
+  if (replied || deferred) {
+    const { ephemeral, ...rest } = options ?? {};
+    await interaction.followUp(rest as any);
+    return;
+  }
+  await interaction.reply(options as any);
 }
