@@ -68,19 +68,19 @@ let GotmSearch = class GotmSearch {
                 }
             }
             else {
-                await interaction.reply({ content: "Please provide at least one of: round, (year and optionally month), or title.", ephemeral: true });
+                await safeReply(interaction, { content: "Please provide at least one of: round, (year and optionally month), or title.", ephemeral: true });
                 return;
             }
             if (!results || results.length === 0) {
-                await interaction.reply({ content: `No GOTM entries found for ${criteriaLabel}.`, ephemeral: true });
+                await safeReply(interaction, { content: `No GOTM entries found for ${criteriaLabel}.`, ephemeral: true });
                 return;
             }
             const embeds = buildGotmEmbeds(results, criteriaLabel, interaction.guildId ?? undefined);
-            await interaction.reply({ embeds });
+            await safeReply(interaction, { embeds });
         }
         catch (err) {
             const msg = err?.message ?? String(err);
-            await interaction.reply({ content: `Error processing request: ${msg}`, ephemeral: true });
+            await safeReply(interaction, { content: `Error processing request: ${msg}`, ephemeral: true });
         }
     }
 };
@@ -131,7 +131,7 @@ function buildGotmEmbeds(results, criteriaLabel, guildId) {
     const baseEmbed = new EmbedBuilder()
         .setColor(0x0099ff)
         .setTitle("GOTM Search Results")
-        .setDescription(criteriaLabel);
+        .setDescription(`Query: "${criteriaLabel}"`);
     let current = baseEmbed;
     let fieldCount = 0;
     for (const entry of results) {
@@ -158,13 +158,13 @@ function formatGames(games, guildId) {
     const lines = [];
     for (const g of games) {
         const parts = [];
-        parts.push(g.title);
+        const titleWithThread = g.threadId ? `${g.title} - <#${g.threadId}>` : g.title;
+        parts.push(titleWithThread);
         if (g.redditUrl) {
             parts.push(`[Reddit](${g.redditUrl})`);
         }
         const firstLine = `- ${parts.join(' | ')}`;
-        const threadLine = g.threadId ? `<#${g.threadId}>` : '';
-        lines.push(firstLine + threadLine);
+        lines.push(firstLine);
     }
     return lines.join('\n');
 }
@@ -173,4 +173,13 @@ function truncateField(value) {
     if (value.length <= MAX)
         return value;
     return value.slice(0, MAX - 3) + '...';
+}
+// Ensure we do not hit "Interaction already acknowledged" when errors occur
+async function safeReply(interaction, options) {
+    if (interaction.deferred || interaction.replied) {
+        await interaction.followUp(options);
+    }
+    else {
+        await interaction.reply(options);
+    }
 }
