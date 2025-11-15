@@ -1,9 +1,8 @@
 import { dirname, importx } from "@discordx/importer";
-import { ActivityType, IntentsBitField } from "discord.js";
+import { IntentsBitField } from "discord.js";
 import { Client } from "discordx";
-import { scanGuild } from "./utilities/ScanGuild.js";
 import dotenv from 'dotenv';
-//import { updateBotPresence } from "./functions/SetPresence.js";
+import { updateBotPresence } from "./functions/SetPresence.js";
 dotenv.config();
 export const bot = new Client({
     // To use only guild command
@@ -27,14 +26,8 @@ export const bot = new Client({
 bot.once("clientReady", async () => {
     // Make sure all guilds are cached
     await bot.guilds.fetch();
-    // Set presence state, hardcoded for now to the NR GOTM since Bamiji's bot features the GOTM
-    bot.user.setPresence({
-        activities: [{
-                name: 'Ghost of Yōtei [NR GOTM Round 131]',
-                type: ActivityType.Playing,
-            }],
-        status: 'online',
-    });
+    // Set presence state from stored value
+    await updateBotPresence(bot);
     // Synchronize applications commands with Discord
     void bot.initApplicationCommands();
     // To clear all guild commands, uncomment this line,
@@ -45,10 +38,6 @@ bot.once("clientReady", async () => {
     //    ...bot.guilds.cache.map((g) => g.id)
     //  );
     console.log("Bot started");
-    // scan guild members
-    scanGuild(bot);
-    // Set stored presence state
-    // await updateBotPresence(bot);
 });
 bot.on("interactionCreate", (interaction) => {
     bot.executeInteraction(interaction);

@@ -71,6 +71,6 @@ export class MessageCreated {
     }
 
     // Logging of messages, mostly for development / testing
-    // console.log(consoleOutputString);
+    console.log(consoleOutputString);
   }
 }

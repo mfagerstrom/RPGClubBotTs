@@ -3,7 +3,6 @@ import type { ArgsOf, Client } from "discordx";
 import { Discord, On } from "discordx";
 
 const NOW_PLAYING_FORUM_ID: string = '1059875931356938240';
-const RPGCLUBBOT_DEVELOPMENT_CHANNEL_ID: string = '549603388334014464';
 const WHATCHA_PLAYING_CHANNEL_ID: string = '360819470836695042';
 
 @Discord()

@@ -1,41 +1,65 @@
-// import { ActivityType, Client, CommandInteraction } from "discord.js";
-// import Presence from '../models/Presence.js';
+import { ActivityType, Client, CommandInteraction } from "discord.js";
+import fs from "node:fs/promises";
+import path from "node:path";
 
-// // export async function setPresence(interaction: CommandInteraction, activityName: string) {
-// //     interaction.client.user!.setPresence({
-// //         activities: [{
-// //             name: activityName,
-// //             type: ActivityType.Playing,
-// //         }],
-// //         status: 'online',
-// //     });
+const presenceFilePath = path.resolve(process.cwd(), "src", "data", "presence.json");
 
-// //     try {
-// //         const presence = new Presence({ activityName });
-// //         await presence.save();
-// //         console.log('Presence data saved to MongoDB.');
-// //     } catch (error) {
-// //         console.error('Error saving presence data:', error);
-// //     }
-// // }
+async function savePresenceToFile(activityName: string): Promise<void> {
+    const data = { activityName };
+    try {
+        await fs.mkdir(path.dirname(presenceFilePath), { recursive: true });
+        await fs.writeFile(presenceFilePath, JSON.stringify(data, null, 2), "utf8");
+        console.log("Presence data saved to presence.json.");
+    } catch (error) {
+        console.error("Error saving presence data to file:", error);
+    }
+}
 
-// export async function updateBotPresence(bot: Client) {
-//     try {
-//         const latestPresence = await Presence.findOne().sort({ timestamp: -1 }).exec();
+async function readPresenceFromFile(): Promise<string | null> {
+    try {
+        const content = await fs.readFile(presenceFilePath, "utf8");
+        const trimmed = content.trim();
+        if (!trimmed) return null;
+        const json = JSON.parse(trimmed);
+        if (json && typeof json.activityName === "string" && json.activityName.trim().length > 0) {
+            return json.activityName;
+        }
+        return null;
+    } catch (error: any) {
+        if (error?.code === "ENOENT") {
+            return null;
+        }
+        console.error("Error reading presence data from file:", error);
+        return null;
+    }
+}
 
-//         if (latestPresence) {
-//             bot.user!.setPresence({
-//                 activities: [{
-//                     name: latestPresence.activityName,
-//                     type: ActivityType.Playing,
-//                 }],
-//                 status: 'online',
-//             });
-//             console.log('Bot presence updated from MongoDB.');
-//         } else {
-//             console.log('No presence data found in MongoDB.');
-//         }
-//     } catch (error) {
-//         console.error('Error retrieving presence data:', error);
-//     }
-// }
+export async function setPresence(interaction: CommandInteraction, activityName: string) {
+    interaction.client.user!.setPresence({
+        activities: [{
+            name: activityName,
+            type: ActivityType.Playing,
+        }],
+        status: "online",
+    });
+
+    await savePresenceToFile(activityName);
+}
+
+export async function updateBotPresence(bot: Client) {
+    const activityName = await readPresenceFromFile();
+    if (activityName) {
+        bot.user!.setPresence({
+            activities: [
+                {
+                    name: activityName,
+                    type: ActivityType.Playing,
+                },
+            ],
+            status: "online",
+        });
+        console.log("Bot presence updated from presence.json.");
+    } else {
+        console.log("No presence data found in presence.json.");
+    }
+}

@@ -7,7 +7,6 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 import { EmbedBuilder, ChannelType } from "discord.js";
 import { Discord, On } from "discordx";
 const NOW_PLAYING_FORUM_ID = '1059875931356938240';
-const RPGCLUBBOT_DEVELOPMENT_CHANNEL_ID = '549603388334014464';
 const WHATCHA_PLAYING_CHANNEL_ID = '360819470836695042';
 let ThreadCreated = class ThreadCreated {
     async threadCreate([thread], client) {

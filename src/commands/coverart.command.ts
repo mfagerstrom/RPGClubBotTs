@@ -1,7 +1,6 @@
 import type { CommandInteraction } from "discord.js";
 import { ApplicationCommandOptionType } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
-import { EmbedBuilder } from "discord.js";
 import { searchHltb } from "../functions/SearchHltb.js";
 
 @Discord()
