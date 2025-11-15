@@ -1,12 +1,21 @@
-import { createRequire } from 'node:module';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-const require = createRequire(import.meta.url);
-const gotmData = require('../data/gotm.json');
+// Load JSON as text to preserve large integers (Discord snowflakes) as strings.
+// Convert threadId numeric literals to strings before JSON.parse to avoid precision loss.
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const DATA_PATH = resolve(__dirname, '../data/gotm.json');
+const rawJson = readFileSync(DATA_PATH, 'utf8');
+const normalizedJson = rawJson.replace(/("threadId"\s*:\s*)(\d+)/g, '$1"$2"');
+let gotmData;
+try {
+    gotmData = JSON.parse(normalizedJson);
+}
+catch {
+    // Fallback: strip BOM if present
+    gotmData = JSON.parse(normalizedJson.replace(/^\uFEFF/, ''));
+}
 const MONTHS = [
     'january', 'february', 'march', 'april', 'may', 'june',
     'july', 'august', 'september', 'october', 'november', 'december',
@@ -96,7 +105,8 @@ export default class Gotm {
         if (!entry)
             return null;
         const i = this.resolveIndex(entry, index);
-        entry.gameOfTheMonth[i].threadId = threadId;
+        // Coerce to string to preserve snowflake precision when saved
+        entry.gameOfTheMonth[i].threadId = threadId === null ? null : String(threadId);
         return entry;
     }
     static updateRedditUrlByRound(round, redditUrl, index) {
@@ -109,7 +119,17 @@ export default class Gotm {
     }
     static save() {
         // Persist current in-memory data back to JSON file (pretty-printed)
-        const json = JSON.stringify(gotmData, null, 2);
+        // Ensure all threadId values are strings (or null) before writing
+        const normalized = gotmData.map((e) => ({
+            round: e.round,
+            monthYear: e.monthYear,
+            gameOfTheMonth: e.gameOfTheMonth.map((g) => ({
+                title: g.title,
+                threadId: g.threadId === null ? null : String(g.threadId),
+                redditUrl: g.redditUrl ?? null,
+            })),
+        }));
+        const json = JSON.stringify(normalized, null, 2);
         writeFileSync(DATA_PATH, json, { encoding: 'utf8' });
     }
 }

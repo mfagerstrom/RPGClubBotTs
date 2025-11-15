@@ -9,6 +9,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
 import { Discord, Slash, SlashChoice, SlashOption } from "discordx";
+// Use relative import with .js for ts-node ESM compatibility
 import Gotm from "../classes/Gotm.js";
 // Precompute dropdown choices
 const MONTH_CHOICES = [
@@ -161,10 +162,9 @@ function formatGames(games, guildId) {
         if (g.redditUrl) {
             parts.push(`[Reddit](${g.redditUrl})`);
         }
-        if (g.threadId && guildId) {
-            parts.push(`[Thread](https://discord.com/channels/${guildId}/${g.threadId})`);
-        }
-        lines.push(`- ${parts.join(' | ')}`);
+        const firstLine = `- ${parts.join(' | ')}`;
+        const threadLine = g.threadId ? `<#${g.threadId}>` : '';
+        lines.push(firstLine + threadLine);
     }
     return lines.join('\n');
 }
