@@ -1,65 +1,149 @@
 import { ActivityType, Client, CommandInteraction } from "discord.js";
-import fs from "node:fs/promises";
-import path from "node:path";
+import oracledb from "oracledb";
+import { getOraclePool } from "../db/oracleClient.js";
 
-const presenceFilePath = path.resolve(process.cwd(), "src", "data", "presence.json");
+const PRESENCE_TABLE = "BOT_PRESENCE_HISTORY";
 
-async function savePresenceToFile(activityName: string): Promise<void> {
-    const data = { activityName };
+async function savePresenceToDatabase(
+  interaction: CommandInteraction,
+  activityName: string,
+): Promise<void> {
+  try {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+
     try {
-        await fs.mkdir(path.dirname(presenceFilePath), { recursive: true });
-        await fs.writeFile(presenceFilePath, JSON.stringify(data, null, 2), "utf8");
-        console.log("Presence data saved to presence.json.");
-    } catch (error) {
-        console.error("Error saving presence data to file:", error);
+      await connection.execute(
+        `INSERT INTO ${PRESENCE_TABLE} (ACTIVITY_NAME, SET_AT, SET_BY_USER_ID, SET_BY_USERNAME)
+         VALUES (:activityName, SYSTIMESTAMP, :userId, :username)`,
+        {
+          activityName,
+          userId: interaction.user?.id ?? null,
+          username: interaction.user?.tag ?? null,
+        },
+        { autoCommit: true },
+      );
+      console.log("Presence saved to database.");
+    } finally {
+      await connection.close();
     }
+  } catch (error) {
+    console.error("Error saving presence to database:", error);
+  }
 }
 
-async function readPresenceFromFile(): Promise<string | null> {
+async function readLatestPresenceFromDatabase(): Promise<string | null> {
+  try {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+
     try {
-        const content = await fs.readFile(presenceFilePath, "utf8");
-        const trimmed = content.trim();
-        if (!trimmed) return null;
-        const json = JSON.parse(trimmed);
-        if (json && typeof json.activityName === "string" && json.activityName.trim().length > 0) {
-            return json.activityName;
-        }
+      const result = await connection.execute<{ ACTIVITY_NAME: string }>(
+        `SELECT ACTIVITY_NAME
+           FROM ${PRESENCE_TABLE}
+          ORDER BY SET_AT DESC
+          FETCH FIRST 1 ROW ONLY`,
+        [],
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      const rows = result.rows ?? [];
+      if (!rows.length) {
         return null;
-    } catch (error: any) {
-        if (error?.code === "ENOENT") {
-            return null;
-        }
-        console.error("Error reading presence data from file:", error);
-        return null;
+      }
+
+      const row = rows[0] as any;
+      const activityName = row.ACTIVITY_NAME;
+      if (typeof activityName === "string" && activityName.trim().length > 0) {
+        return activityName;
+      }
+
+      return null;
+    } finally {
+      await connection.close();
     }
+  } catch (error) {
+    console.error("Error reading presence from database:", error);
+    return null;
+  }
+}
+
+export interface PresenceHistoryEntry {
+  activityName: string;
+  setAt: Date | null;
+  setByUserId: string | null;
+  setByUsername: string | null;
+}
+
+export async function getPresenceHistory(limit: number): Promise<PresenceHistoryEntry[]> {
+  const safeLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 50) : 5;
+
+  try {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+
+    try {
+      const result = await connection.execute<{
+        ACTIVITY_NAME: string;
+        SET_AT: Date;
+        SET_BY_USER_ID: string | null;
+        SET_BY_USERNAME: string | null;
+      }>(
+        `SELECT ACTIVITY_NAME,
+                SET_AT,
+                SET_BY_USER_ID,
+                SET_BY_USERNAME
+           FROM ${PRESENCE_TABLE}
+          ORDER BY SET_AT DESC
+          FETCH FIRST :limit ROWS ONLY`,
+        { limit: safeLimit },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      const rows = (result.rows ?? []) as any[];
+      return rows.map((row) => ({
+        activityName: row.ACTIVITY_NAME,
+        setAt: row.SET_AT ?? null,
+        setByUserId: row.SET_BY_USER_ID ?? null,
+        setByUsername: row.SET_BY_USERNAME ?? null,
+      }));
+    } finally {
+      await connection.close();
+    }
+  } catch (error) {
+    console.error("Error loading presence history from database:", error);
+    return [];
+  }
 }
 
 export async function setPresence(interaction: CommandInteraction, activityName: string) {
-    interaction.client.user!.setPresence({
-        activities: [{
-            name: activityName,
-            type: ActivityType.Playing,
-        }],
-        status: "online",
-    });
+  interaction.client.user!.setPresence({
+    activities: [
+      {
+        name: activityName,
+        type: ActivityType.Playing,
+      },
+    ],
+    status: "online",
+  });
 
-    await savePresenceToFile(activityName);
+  await savePresenceToDatabase(interaction, activityName);
 }
 
 export async function updateBotPresence(bot: Client) {
-    const activityName = await readPresenceFromFile();
-    if (activityName) {
-        bot.user!.setPresence({
-            activities: [
-                {
-                    name: activityName,
-                    type: ActivityType.Playing,
-                },
-            ],
-            status: "online",
-        });
-        console.log("Bot presence updated from presence.json.");
-    } else {
-        console.log("No presence data found in presence.json.");
-    }
+  const activityName = await readLatestPresenceFromDatabase();
+  if (activityName) {
+    bot.user!.setPresence({
+      activities: [
+        {
+          name: activityName,
+          type: ActivityType.Playing,
+        },
+      ],
+      status: "online",
+    });
+    console.log("Bot presence updated from database.");
+  } else {
+    console.log("No presence data found in database.");
+  }
 }

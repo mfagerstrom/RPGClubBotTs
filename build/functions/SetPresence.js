@@ -1,50 +1,101 @@
 import { ActivityType } from "discord.js";
-import fs from "node:fs/promises";
-import path from "node:path";
-const presenceFilePath = path.resolve(process.cwd(), "src", "data", "presence.json");
-async function savePresenceToFile(activityName) {
-    const data = { activityName };
+import oracledb from "oracledb";
+import { getOraclePool } from "../db/oracleClient.js";
+const PRESENCE_TABLE = "BOT_PRESENCE_HISTORY";
+async function savePresenceToDatabase(interaction, activityName) {
     try {
-        await fs.mkdir(path.dirname(presenceFilePath), { recursive: true });
-        await fs.writeFile(presenceFilePath, JSON.stringify(data, null, 2), "utf8");
-        console.log("Presence data saved to presence.json.");
+        const pool = getOraclePool();
+        const connection = await pool.getConnection();
+        try {
+            await connection.execute(`INSERT INTO ${PRESENCE_TABLE} (ACTIVITY_NAME, SET_AT, SET_BY_USER_ID, SET_BY_USERNAME)
+         VALUES (:activityName, SYSTIMESTAMP, :userId, :username)`, {
+                activityName,
+                userId: interaction.user?.id ?? null,
+                username: interaction.user?.tag ?? null,
+            }, { autoCommit: true });
+            console.log("Presence saved to database.");
+        }
+        finally {
+            await connection.close();
+        }
     }
     catch (error) {
-        console.error("Error saving presence data to file:", error);
+        console.error("Error saving presence to database:", error);
     }
 }
-async function readPresenceFromFile() {
+async function readLatestPresenceFromDatabase() {
     try {
-        const content = await fs.readFile(presenceFilePath, "utf8");
-        const trimmed = content.trim();
-        if (!trimmed)
+        const pool = getOraclePool();
+        const connection = await pool.getConnection();
+        try {
+            const result = await connection.execute(`SELECT ACTIVITY_NAME
+           FROM ${PRESENCE_TABLE}
+          ORDER BY SET_AT DESC
+          FETCH FIRST 1 ROW ONLY`, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+            const rows = result.rows ?? [];
+            if (!rows.length) {
+                return null;
+            }
+            const row = rows[0];
+            const activityName = row.ACTIVITY_NAME;
+            if (typeof activityName === "string" && activityName.trim().length > 0) {
+                return activityName;
+            }
             return null;
-        const json = JSON.parse(trimmed);
-        if (json && typeof json.activityName === "string" && json.activityName.trim().length > 0) {
-            return json.activityName;
         }
-        return null;
+        finally {
+            await connection.close();
+        }
     }
     catch (error) {
-        if (error?.code === "ENOENT") {
-            return null;
-        }
-        console.error("Error reading presence data from file:", error);
+        console.error("Error reading presence from database:", error);
         return null;
+    }
+}
+export async function getPresenceHistory(limit) {
+    const safeLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 50) : 5;
+    try {
+        const pool = getOraclePool();
+        const connection = await pool.getConnection();
+        try {
+            const result = await connection.execute(`SELECT ACTIVITY_NAME,
+                SET_AT,
+                SET_BY_USER_ID,
+                SET_BY_USERNAME
+           FROM ${PRESENCE_TABLE}
+          ORDER BY SET_AT DESC
+          FETCH FIRST :limit ROWS ONLY`, { limit: safeLimit }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+            const rows = (result.rows ?? []);
+            return rows.map((row) => ({
+                activityName: row.ACTIVITY_NAME,
+                setAt: row.SET_AT ?? null,
+                setByUserId: row.SET_BY_USER_ID ?? null,
+                setByUsername: row.SET_BY_USERNAME ?? null,
+            }));
+        }
+        finally {
+            await connection.close();
+        }
+    }
+    catch (error) {
+        console.error("Error loading presence history from database:", error);
+        return [];
     }
 }
 export async function setPresence(interaction, activityName) {
     interaction.client.user.setPresence({
-        activities: [{
+        activities: [
+            {
                 name: activityName,
                 type: ActivityType.Playing,
-            }],
+            },
+        ],
         status: "online",
     });
-    await savePresenceToFile(activityName);
+    await savePresenceToDatabase(interaction, activityName);
 }
 export async function updateBotPresence(bot) {
-    const activityName = await readPresenceFromFile();
+    const activityName = await readLatestPresenceFromDatabase();
     if (activityName) {
         bot.user.setPresence({
             activities: [
@@ -55,9 +106,9 @@ export async function updateBotPresence(bot) {
             ],
             status: "online",
         });
-        console.log("Bot presence updated from presence.json.");
+        console.log("Bot presence updated from database.");
     }
     else {
-        console.log("No presence data found in presence.json.");
+        console.log("No presence data found in database.");
     }
 }
