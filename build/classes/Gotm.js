@@ -139,6 +139,28 @@ export default class Gotm {
         const q = query.toLowerCase();
         return gotmData.filter((e) => e.gameOfTheMonth.some((g) => g.title.toLowerCase().includes(q)));
     }
+    static addRound(round, monthYear, games) {
+        ensureInitialized();
+        const r = Number(round);
+        if (!Number.isFinite(r)) {
+            throw new Error("Invalid round number for new GOTM round.");
+        }
+        if (gotmData.some((e) => e.round === r)) {
+            throw new Error(`GOTM round ${r} already exists.`);
+        }
+        const entry = {
+            round: r,
+            monthYear,
+            gameOfTheMonth: games.map((g) => ({
+                title: g.title,
+                threadId: g.threadId ?? null,
+                redditUrl: g.redditUrl ?? null,
+            })),
+        };
+        gotmData.push(entry);
+        gotmData.sort((a, b) => a.round - b.round);
+        return entry;
+    }
     static getRoundEntry(round) {
         ensureInitialized();
         const r = Number(round);
@@ -184,5 +206,93 @@ export default class Gotm {
         const i = this.resolveIndex(entry, index);
         entry.gameOfTheMonth[i].redditUrl = redditUrl;
         return entry;
+    }
+}
+export async function updateGotmGameFieldInDatabase(round, gameIndex, field, value) {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+    try {
+        const columnMap = {
+            title: "GAME_TITLE",
+            threadId: "THREAD_ID",
+            redditUrl: "REDDIT_URL",
+        };
+        const columnName = columnMap[field];
+        const result = await connection.execute(`SELECT ROUND_NUMBER,
+              GAME_INDEX
+         FROM GOTM_ENTRIES
+        WHERE ROUND_NUMBER = :round
+        ORDER BY GAME_INDEX`, { round }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const rows = (result.rows ?? []);
+        if (!rows.length) {
+            throw new Error(`No GOTM database rows found for round ${round}.`);
+        }
+        if (!Number.isInteger(gameIndex) || gameIndex < 0 || gameIndex >= rows.length) {
+            throw new Error(`Game index ${gameIndex} is out of range for round ${round} (have ${rows.length} games).`);
+        }
+        const targetRow = rows[gameIndex];
+        const dbGameIndex = targetRow.GAME_INDEX;
+        await connection.execute(`UPDATE GOTM_ENTRIES
+          SET ${columnName} = :value
+        WHERE ROUND_NUMBER = :round
+          AND GAME_INDEX = :gameIndex`, {
+            round,
+            gameIndex: dbGameIndex,
+            value,
+        }, { autoCommit: true });
+    }
+    finally {
+        await connection.close();
+    }
+}
+export async function insertGotmRoundInDatabase(round, monthYear, games) {
+    if (!Number.isFinite(round) || round <= 0) {
+        throw new Error("Invalid round number for GOTM insert.");
+    }
+    if (!games.length) {
+        throw new Error("At least one game is required for a GOTM round.");
+    }
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+    try {
+        // Optional safety check to avoid duplicate rounds in the database
+        const existing = await connection.execute(`SELECT COUNT(*) AS CNT
+         FROM GOTM_ENTRIES
+        WHERE ROUND_NUMBER = :round`, { round }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const rows = (existing.rows ?? []);
+        const count = rows.length ? Number(rows[0].CNT) : 0;
+        if (Number.isFinite(count) && count > 0) {
+            throw new Error(`GOTM round ${round} already exists in the database.`);
+        }
+        for (let i = 0; i < games.length; i++) {
+            const g = games[i];
+            await connection.execute(`INSERT INTO GOTM_ENTRIES (
+           ROUND_NUMBER,
+           MONTH_YEAR,
+           GAME_INDEX,
+           GAME_TITLE,
+           THREAD_ID,
+           REDDIT_URL,
+           VOTING_RESULTS_MESSAGE_ID
+         ) VALUES (
+           :round,
+           :monthYear,
+           :gameIndex,
+           :title,
+           :threadId,
+           :redditUrl,
+           NULL
+         )`, {
+                round,
+                monthYear,
+                gameIndex: i,
+                title: g.title,
+                threadId: g.threadId ?? null,
+                redditUrl: g.redditUrl ?? null,
+            }, { autoCommit: true });
+        }
+    }
+    finally {
+        await connection.close();
     }
 }
