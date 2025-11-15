@@ -45,7 +45,7 @@ let GotmSearch = class GotmSearch {
     async gotm(round, year, month, title, interaction) {
         // Determine search mode
         let results = [];
-        let criteriaLabel = "";
+        let criteriaLabel;
         try {
             if (round !== undefined && round !== null) {
                 results = Gotm.getByRound(Number(round));
@@ -68,8 +68,15 @@ let GotmSearch = class GotmSearch {
                 }
             }
             else {
-                await safeReply(interaction, { content: "Please provide at least one of: round, (year and optionally month), or title.", ephemeral: true });
-                return;
+                // Default: show current round (highest round number in data)
+                const all = Gotm.all();
+                if (!all.length) {
+                    await safeReply(interaction, { content: "No GOTM data available.", ephemeral: true });
+                    return;
+                }
+                const currentRound = Math.max(...all.map((e) => e.round));
+                results = Gotm.getByRound(currentRound);
+                // no criteriaLabel so the embed omits the query line
             }
             if (!results || results.length === 0) {
                 await safeReply(interaction, { content: `No GOTM entries found for ${criteriaLabel}.`, ephemeral: true });
@@ -130,8 +137,10 @@ function buildGotmEmbeds(results, criteriaLabel, guildId) {
     const MAX_FIELDS = 25;
     const baseEmbed = new EmbedBuilder()
         .setColor(0x0099ff)
-        .setTitle("GOTM Search Results")
-        .setDescription(`Query: "${criteriaLabel}"`);
+        .setTitle("GOTM Search Results");
+    if (criteriaLabel) {
+        baseEmbed.setDescription(`Query: "${criteriaLabel}"`);
+    }
     let current = baseEmbed;
     let fieldCount = 0;
     for (const entry of results) {
@@ -142,8 +151,10 @@ function buildGotmEmbeds(results, criteriaLabel, guildId) {
             embeds.push(current);
             current = new EmbedBuilder()
                 .setColor(0x0099ff)
-                .setTitle("GOTM Search Results (cont.)")
-                .setDescription(criteriaLabel);
+                .setTitle("GOTM Search Results (cont.)");
+            if (criteriaLabel) {
+                current.setDescription(criteriaLabel);
+            }
             fieldCount = 0;
         }
         current.addFields({ name: fieldName, value, inline: false });
