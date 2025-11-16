@@ -10,9 +10,15 @@ import type {
   ButtonInteraction,
   CommandInteraction,
   RepliableInteraction,
+  Message,
 } from "discord.js";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
-import { getPresenceHistory, setPresence } from "../functions/SetPresence.js";
+import {
+  getPresenceHistory,
+  setPresence,
+  setPresenceFromInteraction,
+  type PresenceHistoryEntry,
+} from "../functions/SetPresence.js";
 import { AnyRepliable, safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
 import Gotm, {
@@ -35,7 +41,6 @@ import BotVotingInfo from "../classes/BotVotingInfo.js";
 
 type SuperAdminHelpTopicId =
   | "presence"
-  | "presence-history"
   | "add-gotm"
   | "edit-gotm"
   | "delete-gotm"
@@ -53,20 +58,15 @@ type SuperAdminHelpTopic = {
   notes?: string;
 };
 
+const SUPERADMIN_PRESENCE_CHOICES = new Map<string, string[]>();
+
 export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
   {
     id: "presence",
     label: "/superadmin presence",
-    summary: 'Set the bot\'s "Now Playing" text.',
-    syntax: "Syntax: /superadmin presence text:<string>",
-    parameters: "text (required string) - new presence text.",
-  },
-  {
-    id: "presence-history",
-    label: "/superadmin presence-history",
-    summary: "Show the most recent presence changes.",
-    syntax: "Syntax: /superadmin presence-history [count:<integer>]",
-    parameters: "count (optional integer, default 5, max 50) - number of entries.",
+    summary: 'Set the bot\'s "Now Playing" text or browse/restore presence history.',
+    syntax: "Syntax: /superadmin presence [text:<string>]",
+    parameters: "text (optional string) - new presence text; omit to see recent history and restore.",
   },
   {
     id: "add-gotm",
@@ -162,7 +162,7 @@ export function buildSuperAdminHelpEmbed(topic: SuperAdminHelpTopic): EmbedBuild
     .setTitle(`${topic.label} help`)
     .setDescription(topic.summary)
     .addFields({ name: "Syntax", value: topic.syntax });
-
+  
   if (topic.parameters) {
     embed.addFields({ name: "Parameters", value: topic.parameters });
   }
@@ -182,6 +182,40 @@ function chunkArray<T>(items: T[], chunkSize: number): T[][] {
   return chunks;
 }
 
+async function showSuperAdminPresenceHistory(interaction: CommandInteraction): Promise<void> {
+  const limit = 5;
+  const entries = await getPresenceHistory(limit);
+
+  if (!entries.length) {
+    await safeReply(interaction, {
+      content: "No presence history found.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const embed = buildPresenceHistoryEmbed(entries as any);
+  const components = buildSuperAdminPresenceButtons(entries.length);
+
+  await safeReply(interaction, {
+    embeds: [embed],
+    components,
+    ephemeral: true,
+  });
+
+  try {
+    const msg = (await interaction.fetchReply()) as Message | undefined;
+    if (msg?.id) {
+      SUPERADMIN_PRESENCE_CHOICES.set(
+        msg.id,
+        entries.map((e: any) => e.activityName ?? ""),
+      );
+    }
+  } catch {
+    // ignore
+  }
+}
+
 @Discord()
 @SlashGroup({ description: "Server Owner Commands", name: "superadmin" })
 @SlashGroup("superadmin")
@@ -189,71 +223,80 @@ export class SuperAdmin {
   @Slash({ description: "Set Presence", name: "presence" })
   async presence(
     @SlashOption({
-      description: "What should the 'Now Playing' value be?",
+      description: "What should the 'Now Playing' value be? Leave empty to browse history.",
       name: "text",
-      required: true,
+      required: false,
       type: ApplicationCommandOptionType.String,
     })
-    text: string,
+    text: string | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction);
+    await safeDeferReply(interaction, { ephemeral: true });
 
     const okToUseCommand: boolean = await isSuperAdmin(interaction);
 
-    if (okToUseCommand) {
-      await setPresence(interaction, text);
+    if (!okToUseCommand) return;
+
+    if (text && text.trim()) {
+      await setPresence(interaction, text.trim());
       await safeReply(interaction, {
-        content: `I'm now playing: ${text}!`,
+        content: `I'm now playing: ${text.trim()}!`,
+        ephemeral: true,
       });
+      return;
+    }
+
+    await showSuperAdminPresenceHistory(interaction);
+  }
+
+  @ButtonComponent({ id: /^superadmin-presence-restore-\d+$/ })
+  async handleSuperAdminPresenceRestore(interaction: ButtonInteraction): Promise<void> {
+    const okToUseCommand: boolean = await isSuperAdmin(interaction);
+    if (!okToUseCommand) return;
+
+    const messageId = interaction.message?.id;
+    const entries = messageId ? SUPERADMIN_PRESENCE_CHOICES.get(messageId) : undefined;
+    const idx = Number(interaction.customId.replace("superadmin-presence-restore-", ""));
+
+    if (!entries || !Number.isInteger(idx) || idx < 0 || idx >= entries.length) {
+      await safeUpdate(interaction, {
+        content: "Sorry, I couldn't find that presence entry. Please run `/superadmin presence` again.",
+        components: [],
+      });
+      if (messageId) SUPERADMIN_PRESENCE_CHOICES.delete(messageId);
+      return;
+    }
+
+    const presenceText = entries[idx];
+
+    try {
+      await setPresenceFromInteraction(interaction, presenceText);
+      await safeUpdate(interaction, {
+        content: `Restored presence to: ${presenceText}`,
+        components: [],
+      });
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      await safeUpdate(interaction, {
+        content: `Failed to restore presence: ${msg}`,
+        components: [],
+      });
+    } finally {
+      if (messageId) SUPERADMIN_PRESENCE_CHOICES.delete(messageId);
     }
   }
 
-  @Slash({ description: "Show presence history", name: "presence-history" })
-  async presenceHistory(
-    @SlashOption({
-      description: "How many entries to show (default 5, max 50)",
-      name: "count",
-      required: false,
-      type: ApplicationCommandOptionType.Integer,
-    })
-    count: number | undefined,
-    interaction: CommandInteraction,
-  ): Promise<void> {
-    await safeDeferReply(interaction);
-
+  @ButtonComponent({ id: "superadmin-presence-cancel" })
+  async handleSuperAdminPresenceCancel(interaction: ButtonInteraction): Promise<void> {
     const okToUseCommand: boolean = await isSuperAdmin(interaction);
-    if (!okToUseCommand) {
-      return;
-    }
+    if (!okToUseCommand) return;
 
-    const limit =
-      typeof count === "number" && Number.isFinite(count)
-        ? Math.max(1, Math.min(50, Math.trunc(count)))
-        : 5;
+    const messageId = interaction.message?.id;
+    if (messageId) SUPERADMIN_PRESENCE_CHOICES.delete(messageId);
 
-    const entries = await getPresenceHistory(limit);
-
-    if (!entries.length) {
-      await safeReply(interaction, {
-        content: "No presence history found.",
-      });
-      return;
-    }
-
-    const lines = entries.map((entry) => {
-      const timestamp =
-        entry.setAt instanceof Date ? entry.setAt.toLocaleString() : String(entry.setAt);
-      const userDisplay = entry.setByUsername ?? entry.setByUserId ?? "unknown user";
-      return `�?� [${timestamp}] ${entry.activityName} (set by ${userDisplay})`;
-    });
-
-    const header = `Last ${entries.length} presence entr${
-      entries.length === 1 ? "y" : "ies"
-    }:\n`;
-
-    await safeReply(interaction, {
-      content: header + lines.join("\n"),
+    await safeUpdate(interaction, {
+      content: "No presence was restored.",
+      components: [],
     });
   }
 
@@ -1261,4 +1304,53 @@ export function buildSuperAdminHelpResponse(
     embeds: [embed],
     components,
   };
+}
+
+function buildPresenceHistoryEmbed(entries: PresenceHistoryEntry[]): EmbedBuilder {
+  const descriptionLines: string[] = entries.map((entry, index) => {
+    const timestamp =
+      entry.setAt instanceof Date
+        ? entry.setAt.toLocaleString()
+        : entry.setAt
+          ? String(entry.setAt)
+          : "unknown date";
+    const userDisplay = entry.setByUsername ?? entry.setByUserId ?? "unknown user";
+    return `${index + 1}. ${entry.activityName} — ${timestamp} (by ${userDisplay})`;
+  });
+
+  descriptionLines.push("");
+  descriptionLines.push("Would you like to restore a previous presence?");
+
+  return new EmbedBuilder()
+    .setTitle("Presence History")
+    .setDescription(descriptionLines.join("\n"));
+}
+
+function buildSuperAdminPresenceButtons(count: number): ActionRowBuilder<ButtonBuilder>[] {
+  const buttons: ButtonBuilder[] = [];
+
+  for (let i = 0; i < count; i++) {
+    buttons.push(
+      new ButtonBuilder()
+        .setCustomId(`superadmin-presence-restore-${i}`)
+        .setLabel(String(i + 1))
+        .setStyle(ButtonStyle.Success),
+    );
+  }
+
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let i = 0; i < buttons.length; i += 5) {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(buttons.slice(i, i + 5)));
+  }
+
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("superadmin-presence-cancel")
+        .setLabel("No")
+        .setStyle(ButtonStyle.Danger),
+    ),
+  );
+
+  return rows;
 }

@@ -1,11 +1,12 @@
-import { ActivityType, Client, CommandInteraction } from "discord.js";
+import { ActivityType, Client, type CommandInteraction } from "discord.js";
+import type { AnyRepliable } from "./InteractionUtils.js";
 import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
 
 const PRESENCE_TABLE = "BOT_PRESENCE_HISTORY";
 
 async function savePresenceToDatabase(
-  interaction: CommandInteraction,
+  interaction: AnyRepliable,
   activityName: string,
 ): Promise<void> {
   try {
@@ -117,6 +118,20 @@ export async function getPresenceHistory(limit: number): Promise<PresenceHistory
 }
 
 export async function setPresence(interaction: CommandInteraction, activityName: string) {
+  interaction.client.user!.setPresence({
+    activities: [
+      {
+        name: activityName,
+        type: ActivityType.Playing,
+      },
+    ],
+    status: "online",
+  });
+
+  await savePresenceToDatabase(interaction, activityName);
+}
+
+export async function setPresenceFromInteraction(interaction: AnyRepliable, activityName: string) {
   interaction.client.user!.setPresence({
     activities: [
       {

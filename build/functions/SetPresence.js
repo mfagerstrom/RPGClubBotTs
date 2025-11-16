@@ -94,6 +94,18 @@ export async function setPresence(interaction, activityName) {
     });
     await savePresenceToDatabase(interaction, activityName);
 }
+export async function setPresenceFromInteraction(interaction, activityName) {
+    interaction.client.user.setPresence({
+        activities: [
+            {
+                name: activityName,
+                type: ActivityType.Playing,
+            },
+        ],
+        status: "online",
+    });
+    await savePresenceToDatabase(interaction, activityName);
+}
 export async function updateBotPresence(bot) {
     const activityName = await readLatestPresenceFromDatabase();
     if (activityName) {

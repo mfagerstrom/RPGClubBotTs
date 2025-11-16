@@ -9,26 +9,20 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 import { ActionRowBuilder, ApplicationCommandOptionType, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, PermissionsBitField, } from "discord.js";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
-import { getPresenceHistory, setPresence } from "../functions/SetPresence.js";
+import { getPresenceHistory, setPresence, setPresenceFromInteraction, } from "../functions/SetPresence.js";
 import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
 import Gotm, { updateGotmGameFieldInDatabase, insertGotmRoundInDatabase, } from "../classes/Gotm.js";
 import NrGotm, { updateNrGotmGameFieldInDatabase, insertNrGotmRoundInDatabase, } from "../classes/NrGotm.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
+const ADMIN_PRESENCE_CHOICES = new Map();
 export const ADMIN_HELP_TOPICS = [
     {
         id: "presence",
         label: "/admin presence",
-        summary: 'Set the bot\'s "Now Playing" text.',
-        syntax: "Syntax: /admin presence text:<string>",
-        parameters: "text (required string) - new presence text.",
-    },
-    {
-        id: "presence-history",
-        label: "/admin presence-history",
-        summary: "Show the most recent presence changes.",
-        syntax: "Syntax: /admin presence-history [count:<integer>]",
-        parameters: "count (optional integer, default 5, max 50) - number of entries.",
+        summary: 'Set the bot\'s "Now Playing" text or browse/restore presence history.',
+        syntax: "Syntax: /admin presence [text:<string>]",
+        parameters: "text (optional string) - new presence text; omit to see recent history and restore.",
     },
     {
         id: "add-gotm",
@@ -118,41 +112,130 @@ export function buildAdminHelpResponse(activeTopicId) {
         components,
     };
 }
-let Admin = class Admin {
-    async presence(text, interaction) {
-        await safeDeferReply(interaction);
-        const okToUseCommand = await isAdmin(interaction);
-        if (okToUseCommand) {
-            await setPresence(interaction, text);
-            await safeReply(interaction, {
-                content: `I'm now playing: ${text}!`
-            });
+function buildPresenceHistoryEmbed(entries) {
+    const descriptionLines = entries.map((entry, index) => {
+        const timestamp = entry.setAt instanceof Date
+            ? entry.setAt.toLocaleString()
+            : entry.setAt
+                ? String(entry.setAt)
+                : "unknown date";
+        const userDisplay = entry.setByUsername ?? entry.setByUserId ?? "unknown user";
+        return `${index + 1}. ${entry.activityName} — ${timestamp} (by ${userDisplay})`;
+    });
+    descriptionLines.push("");
+    descriptionLines.push("Would you like to restore a previous presence?");
+    return new EmbedBuilder()
+        .setTitle("Presence History")
+        .setDescription(descriptionLines.join("\n"));
+}
+function buildAdminPresenceButtons(count) {
+    const buttons = [];
+    for (let i = 0; i < count; i++) {
+        buttons.push(new ButtonBuilder()
+            .setCustomId(`admin-presence-restore-${i}`)
+            .setLabel(String(i + 1))
+            .setStyle(ButtonStyle.Success));
+    }
+    const rows = [];
+    for (let i = 0; i < buttons.length; i += 5) {
+        rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
+    }
+    rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
+        .setCustomId("admin-presence-cancel")
+        .setLabel("No")
+        .setStyle(ButtonStyle.Danger)));
+    return rows;
+}
+async function showAdminPresenceHistory(interaction) {
+    const limit = 5;
+    const entries = await getPresenceHistory(limit);
+    if (!entries.length) {
+        await safeReply(interaction, {
+            content: "No presence history found.",
+            ephemeral: true,
+        });
+        return;
+    }
+    const embed = buildPresenceHistoryEmbed(entries);
+    const components = buildAdminPresenceButtons(entries.length);
+    await safeReply(interaction, {
+        embeds: [embed],
+        components,
+        ephemeral: true,
+    });
+    try {
+        const msg = (await interaction.fetchReply());
+        if (msg?.id) {
+            ADMIN_PRESENCE_CHOICES.set(msg.id, entries.map((e) => e.activityName ?? ""));
         }
     }
-    async presenceHistory(count, interaction) {
-        await safeDeferReply(interaction);
+    catch {
+        // ignore
+    }
+}
+let Admin = class Admin {
+    async presence(text, interaction) {
+        await safeDeferReply(interaction, { ephemeral: true });
         const okToUseCommand = await isAdmin(interaction);
         if (!okToUseCommand) {
             return;
         }
-        const limit = typeof count === "number" && Number.isFinite(count)
-            ? Math.max(1, Math.min(50, Math.trunc(count)))
-            : 5;
-        const entries = await getPresenceHistory(limit);
-        if (!entries.length) {
+        if (text && text.trim()) {
+            await setPresence(interaction, text.trim());
             await safeReply(interaction, {
-                content: "No presence history found.",
+                content: `I'm now playing: ${text.trim()}!`,
+                ephemeral: true,
             });
             return;
         }
-        const lines = entries.map((entry) => {
-            const timestamp = entry.setAt instanceof Date ? entry.setAt.toLocaleString() : String(entry.setAt);
-            const userDisplay = entry.setByUsername ?? entry.setByUserId ?? "unknown user";
-            return `• [${timestamp}] ${entry.activityName} (set by ${userDisplay})`;
-        });
-        const header = `Last ${entries.length} presence entr${entries.length === 1 ? "y" : "ies"}:\n`;
-        await safeReply(interaction, {
-            content: header + lines.join("\n"),
+        await showAdminPresenceHistory(interaction);
+    }
+    async handleAdminPresenceRestore(interaction) {
+        const okToUseCommand = await isAdmin(interaction);
+        if (!okToUseCommand)
+            return;
+        const messageId = interaction.message?.id;
+        const entries = messageId ? ADMIN_PRESENCE_CHOICES.get(messageId) : undefined;
+        const idx = Number(interaction.customId.replace("admin-presence-restore-", ""));
+        if (!entries || !Number.isInteger(idx) || idx < 0 || idx >= entries.length) {
+            await safeUpdate(interaction, {
+                content: "Sorry, I couldn't find that presence entry. Please run `/admin presence` again.",
+                components: [],
+            });
+            if (messageId)
+                ADMIN_PRESENCE_CHOICES.delete(messageId);
+            return;
+        }
+        const presenceText = entries[idx];
+        try {
+            await setPresenceFromInteraction(interaction, presenceText);
+            await safeUpdate(interaction, {
+                content: `Restored presence to: ${presenceText}`,
+                components: [],
+            });
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeUpdate(interaction, {
+                content: `Failed to restore presence: ${msg}`,
+                components: [],
+            });
+        }
+        finally {
+            if (messageId)
+                ADMIN_PRESENCE_CHOICES.delete(messageId);
+        }
+    }
+    async handleAdminPresenceCancel(interaction) {
+        const okToUseCommand = await isAdmin(interaction);
+        if (!okToUseCommand)
+            return;
+        const messageId = interaction.message?.id;
+        if (messageId)
+            ADMIN_PRESENCE_CHOICES.delete(messageId);
+        await safeUpdate(interaction, {
+            content: "No presence was restored.",
+            components: [],
         });
     }
     async setNextVote(dateText, interaction) {
@@ -635,21 +718,18 @@ let Admin = class Admin {
 __decorate([
     Slash({ description: "Set Presence", name: "presence" }),
     __param(0, SlashOption({
-        description: "What should the 'Now Playing' value be?",
+        description: "What should the 'Now Playing' value be? Leave empty to browse history.",
         name: "text",
-        required: true,
+        required: false,
         type: ApplicationCommandOptionType.String,
     }))
 ], Admin.prototype, "presence", null);
 __decorate([
-    Slash({ description: "Show presence history", name: "presence-history" }),
-    __param(0, SlashOption({
-        description: "How many entries to show (default 5, max 50)",
-        name: "count",
-        required: false,
-        type: ApplicationCommandOptionType.Integer,
-    }))
-], Admin.prototype, "presenceHistory", null);
+    ButtonComponent({ id: /^admin-presence-restore-\d+$/ })
+], Admin.prototype, "handleAdminPresenceRestore", null);
+__decorate([
+    ButtonComponent({ id: "admin-presence-cancel" })
+], Admin.prototype, "handleAdminPresenceCancel", null);
 __decorate([
     Slash({
         description: "Votes are typically held the last Friday of the month",
