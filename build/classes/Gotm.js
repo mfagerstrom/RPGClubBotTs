@@ -207,6 +207,13 @@ export default class Gotm {
         entry.gameOfTheMonth[i].redditUrl = redditUrl;
         return entry;
     }
+    static updateVotingResultsByRound(round, messageId) {
+        const entry = this.getRoundEntry(round);
+        if (!entry)
+            return null;
+        entry.votingResultsMessageId = messageId;
+        return entry;
+    }
     static deleteRound(round) {
         ensureInitialized();
         const r = Number(round);
@@ -251,6 +258,18 @@ export async function updateGotmGameFieldInDatabase(round, gameIndex, field, val
             gameIndex: dbGameIndex,
             value,
         }, { autoCommit: true });
+    }
+    finally {
+        await connection.close();
+    }
+}
+export async function updateGotmVotingResultsInDatabase(round, messageId) {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+    try {
+        await connection.execute(`UPDATE GOTM_ENTRIES
+          SET VOTING_RESULTS_MESSAGE_ID = :value
+        WHERE ROUND_NUMBER = :round`, { round, value: messageId }, { autoCommit: true });
     }
     finally {
         await connection.close();

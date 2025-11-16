@@ -273,6 +273,13 @@ export default class Gotm {
     return entry;
   }
 
+  static updateVotingResultsByRound(round: number, messageId: string | null): GotmEntry | null {
+    const entry = this.getRoundEntry(round);
+    if (!entry) return null;
+    entry.votingResultsMessageId = messageId;
+    return entry;
+  }
+
   static deleteRound(round: number): GotmEntry | null {
     ensureInitialized();
     const r = Number(round);
@@ -346,6 +353,26 @@ export async function updateGotmGameFieldInDatabase(
         gameIndex: dbGameIndex,
         value,
       },
+      { autoCommit: true },
+    );
+  } finally {
+    await connection.close();
+  }
+}
+
+export async function updateGotmVotingResultsInDatabase(
+  round: number,
+  messageId: string | null,
+): Promise<void> {
+  const pool = getOraclePool();
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.execute(
+      `UPDATE GOTM_ENTRIES
+          SET VOTING_RESULTS_MESSAGE_ID = :value
+        WHERE ROUND_NUMBER = :round`,
+      { round, value: messageId },
       { autoCommit: true },
     );
   } finally {
