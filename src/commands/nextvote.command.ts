@@ -1,5 +1,5 @@
-import { type CommandInteraction, EmbedBuilder } from "discord.js";
-import { Discord, Slash } from "discordx";
+import { type CommandInteraction, EmbedBuilder, ApplicationCommandOptionType } from "discord.js";
+import { Discord, Slash, SlashOption } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
 import { NOMINATION_DISCUSSION_CHANNEL_IDS } from "../config/nominationChannels.js";
@@ -10,8 +10,18 @@ export class NextVoteCommand {
     description: "Show the date of the next GOTM/NR-GOTM vote",
     name: "nextvote",
   })
-  async nextvote(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction);
+  async nextvote(
+    @SlashOption({
+      description: "If true, show results in the channel instead of ephemerally.",
+      name: "showinchat",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    showInChat: boolean | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    const ephemeral = !showInChat;
+    await safeDeferReply(interaction, { ephemeral });
 
     try {
       const current = await BotVotingInfo.getCurrentRound();
@@ -50,6 +60,7 @@ export class NextVoteCommand {
 
       await safeReply(interaction, {
         embeds: [embed],
+        ephemeral,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);

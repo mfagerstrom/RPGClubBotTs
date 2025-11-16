@@ -4,14 +4,18 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
-import { EmbedBuilder } from "discord.js";
-import { Discord, Slash } from "discordx";
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
+import { EmbedBuilder, ApplicationCommandOptionType } from "discord.js";
+import { Discord, Slash, SlashOption } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
 import { NOMINATION_DISCUSSION_CHANNEL_IDS } from "../config/nominationChannels.js";
 let NextVoteCommand = class NextVoteCommand {
-    async nextvote(interaction) {
-        await safeDeferReply(interaction);
+    async nextvote(showInChat, interaction) {
+        const ephemeral = !showInChat;
+        await safeDeferReply(interaction, { ephemeral });
         try {
             const current = await BotVotingInfo.getCurrentRound();
             if (!current || !current.nextVoteAt) {
@@ -44,6 +48,7 @@ let NextVoteCommand = class NextVoteCommand {
                 .setDescription(descriptionLines.join("\n"));
             await safeReply(interaction, {
                 embeds: [embed],
+                ephemeral,
             });
         }
         catch (err) {
@@ -59,7 +64,13 @@ __decorate([
     Slash({
         description: "Show the date of the next GOTM/NR-GOTM vote",
         name: "nextvote",
-    })
+    }),
+    __param(0, SlashOption({
+        description: "If true, show results in the channel instead of ephemerally.",
+        name: "showinchat",
+        required: false,
+        type: ApplicationCommandOptionType.Boolean,
+    }))
 ], NextVoteCommand.prototype, "nextvote", null);
 NextVoteCommand = __decorate([
     Discord()

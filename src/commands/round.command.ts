@@ -1,5 +1,5 @@
-import { type CommandInteraction, EmbedBuilder } from "discord.js";
-import { Discord, Slash } from "discordx";
+import { type CommandInteraction, EmbedBuilder, ApplicationCommandOptionType } from "discord.js";
+import { Discord, Slash, SlashOption } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
 import Gotm from "../classes/Gotm.js";
@@ -15,8 +15,18 @@ export class CurrentRoundCommand {
     description: "Show the current GOTM round and winners",
     name: "round",
   })
-  async round(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction);
+  async round(
+    @SlashOption({
+      description: "If true, show results in the channel instead of ephemerally.",
+      name: "showinchat",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    showInChat: boolean | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    const ephemeral = !showInChat;
+    await safeDeferReply(interaction, { ephemeral });
 
     try {
       const current = await BotVotingInfo.getCurrentRound();
@@ -99,6 +109,7 @@ export class CurrentRoundCommand {
 
       await safeReply(interaction, {
         embeds,
+        ephemeral,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
