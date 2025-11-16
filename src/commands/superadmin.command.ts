@@ -1217,6 +1217,8 @@ export async function isSuperAdmin(interaction: AnyRepliable): Promise<boolean> 
   if (!isOwner) {
     await safeReply(interaction, {
       content: "Access denied. Command is restricted to the server owner.",
+      ephemeral: true,
+      __forceFollowUp: true,
     });
   }
 

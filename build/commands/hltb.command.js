@@ -13,15 +13,17 @@ import { EmbedBuilder } from "discord.js";
 import { searchHltb } from "../functions/SearchHltb.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 let hltb = class hltb {
-    async hltb(title, interaction) {
-        await safeDeferReply(interaction);
+    async hltb(title, showInChat, interaction) {
+        const ephemeral = !showInChat;
+        await safeDeferReply(interaction, { ephemeral });
         try {
             const result = await searchHltb(title);
-            await outputHltbResultsAsEmbed(interaction, result, title);
+            await outputHltbResultsAsEmbed(interaction, result, title, { ephemeral });
         }
         catch (error) {
             await safeReply(interaction, {
-                content: `Sorry, there was an error searching for "${title}". Please try again later.`
+                content: `Sorry, there was an error searching for "${title}". Please try again later.`,
+                ephemeral,
             });
         }
     }
@@ -33,13 +35,19 @@ __decorate([
         name: "title",
         required: true,
         type: ApplicationCommandOptionType.String,
+    })),
+    __param(1, SlashOption({
+        description: "If set to true, show the results in the channel instead of ephemerally.",
+        name: "showinchat",
+        required: false,
+        type: ApplicationCommandOptionType.Boolean,
     }))
 ], hltb.prototype, "hltb", null);
 hltb = __decorate([
     Discord()
 ], hltb);
 export { hltb };
-async function outputHltbResultsAsEmbed(interaction, result, hltbQuery) {
+async function outputHltbResultsAsEmbed(interaction, result, hltbQuery, options) {
     if (result) {
         const hltb_result = result;
         const fields = [];
@@ -96,11 +104,12 @@ async function outputHltbResultsAsEmbed(interaction, result, hltbQuery) {
         })
             .setFields(fields)
             .setImage(hltb_result.imageUrl);
-        await safeReply(interaction, { embeds: [hltbEmbed] });
+        await safeReply(interaction, { embeds: [hltbEmbed], ephemeral: options.ephemeral });
     }
     else {
         await safeReply(interaction, {
-            content: `Sorry, no results were found for "${hltbQuery}"`
+            content: `Sorry, no results were found for "${hltbQuery}"`,
+            ephemeral: options.ephemeral,
         });
     }
 }

@@ -958,6 +958,8 @@ export async function isSuperAdmin(interaction) {
     if (!isOwner) {
         await safeReply(interaction, {
             content: "Access denied. Command is restricted to the server owner.",
+            ephemeral: true,
+            __forceFollowUp: true,
         });
     }
     return isOwner;

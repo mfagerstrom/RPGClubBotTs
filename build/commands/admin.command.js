@@ -776,7 +776,9 @@ export async function isAdmin(interaction) {
     const isAdmin = await interaction.member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.Administrator);
     if (!isAdmin) {
         await safeReply(interaction, {
-            content: 'Access denied.  Command requires Administrator role.'
+            content: "Access denied. Command requires Administrator role.",
+            ephemeral: true,
+            __forceFollowUp: true,
         });
     }
     return isAdmin;

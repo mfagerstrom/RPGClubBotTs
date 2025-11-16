@@ -1015,7 +1015,9 @@ export async function isAdmin(interaction: AnyRepliable) {
 
   if (!isAdmin) {
     await safeReply(interaction, {
-      content: 'Access denied.  Command requires Administrator role.'
+      content: "Access denied. Command requires Administrator role.",
+      ephemeral: true,
+      __forceFollowUp: true,
     });
   }
 

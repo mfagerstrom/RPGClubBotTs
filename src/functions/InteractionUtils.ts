@@ -12,13 +12,15 @@ function normalizeOptions(options: any): any {
     return options;
   }
 
+  const { __forceFollowUp, ...restOptions } = options as any;
+
   if ("ephemeral" in options) {
-    const { ephemeral, flags, ...rest } = options as any;
+    const { ephemeral, flags, ...rest } = restOptions as any;
     const newFlags = ephemeral ? ((flags ?? 0) | MessageFlags.Ephemeral) : flags;
     return { ...rest, flags: newFlags };
   }
 
-  return options;
+  return restOptions;
 }
 
 // Safely defer a reply, ignoring errors and avoiding double-deferral
@@ -52,6 +54,7 @@ const isAckError = (err: any): boolean => {
 
 export async function safeReply(interaction: AnyRepliable, options: any): Promise<void> {
   const anyInteraction = interaction as any;
+  const forceFollowUp = Boolean(options?.__forceFollowUp);
   const normalizedOptions = normalizeOptions(options);
 
   const deferred: boolean = Boolean(
@@ -79,7 +82,7 @@ export async function safeReply(interaction: AnyRepliable, options: any): Promis
 
   // If we've already replied, or we know the interaction was acknowledged,
   // send a follow-up message instead of trying to reply again.
-  if (replied || acked) {
+  if (replied || acked || forceFollowUp) {
     try {
       if (typeof options === "string") {
         await interaction.followUp({ content: options });

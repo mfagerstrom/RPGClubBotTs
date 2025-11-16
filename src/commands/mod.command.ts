@@ -220,7 +220,9 @@ export async function isModerator(interaction: AnyRepliable) {
 
     if (!isAdmin) {
       await safeReply(interaction, {
-        content: 'Access denied.  Command requires Moderator role or above.'
+        content: "Access denied. Command requires Moderator role or above.",
+        ephemeral: true,
+        __forceFollowUp: true,
       });
     } else {
       isMod = true;
