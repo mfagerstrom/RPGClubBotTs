@@ -7,14 +7,117 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ApplicationCommandOptionType, EmbedBuilder, } from "discord.js";
-import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
+import { ActionRowBuilder, ApplicationCommandOptionType, ButtonBuilder, ButtonStyle, EmbedBuilder, } from "discord.js";
+import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { getPresenceHistory, setPresence } from "../functions/SetPresence.js";
-import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
 import Gotm, { updateGotmGameFieldInDatabase, insertGotmRoundInDatabase, deleteGotmRoundFromDatabase, } from "../classes/Gotm.js";
 import NrGotm, { updateNrGotmGameFieldInDatabase, insertNrGotmRoundInDatabase, deleteNrGotmRoundFromDatabase, } from "../classes/NrGotm.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
+export const SUPERADMIN_HELP_TOPICS = [
+    {
+        id: "presence",
+        label: "/superadmin presence",
+        summary: 'Set the bot\'s "Now Playing" text.',
+        syntax: "Syntax: /superadmin presence text:<string>",
+        parameters: "text (required string) - new presence text.",
+    },
+    {
+        id: "presence-history",
+        label: "/superadmin presence-history",
+        summary: "Show the most recent presence changes.",
+        syntax: "Syntax: /superadmin presence-history [count:<integer>]",
+        parameters: "count (optional integer, default 5, max 50) - number of entries.",
+    },
+    {
+        id: "add-gotm",
+        label: "/superadmin add-gotm",
+        summary: "Interactively add a new GOTM round.",
+        syntax: "Syntax: /superadmin add-gotm",
+        notes: "The round number is always assigned automatically as the next round after the current highest GOTM round.",
+    },
+    {
+        id: "edit-gotm",
+        label: "/superadmin edit-gotm",
+        summary: "Interactively edit GOTM data for a given round.",
+        syntax: "Syntax: /superadmin edit-gotm round:<integer>",
+        parameters: "round (required integer) - GOTM round number to edit. The bot will show current data and prompt you for which game and field to update.",
+    },
+    {
+        id: "delete-gotm",
+        label: "/superadmin delete-gotm",
+        summary: "Delete the most recent GOTM round.",
+        syntax: "Syntax: /superadmin delete-gotm",
+        notes: "This removes the latest GOTM round from the database. Use this if a round was added too early or by mistake.",
+    },
+    {
+        id: "add-nr-gotm",
+        label: "/superadmin add-nr-gotm",
+        summary: "Interactively add a new NR-GOTM (Non-RPG Game of the Month) round.",
+        syntax: "Syntax: /superadmin add-nr-gotm",
+        notes: "The round number is always assigned automatically as the next round after the current highest NR-GOTM round.",
+    },
+    {
+        id: "edit-nr-gotm",
+        label: "/superadmin edit-nr-gotm",
+        summary: "Interactively edit NR-GOTM data for a given round.",
+        syntax: "Syntax: /superadmin edit-nr-gotm round:<integer>",
+        parameters: "round (required integer) - NR-GOTM round number to edit. The bot will show current data and prompt you for which game and field to update.",
+    },
+    {
+        id: "delete-nr-gotm",
+        label: "/superadmin delete-nr-gotm",
+        summary: "Delete the most recent NR-GOTM round.",
+        syntax: "Syntax: /superadmin delete-nr-gotm",
+        notes: "This removes the latest NR-GOTM round from the database. Use this if a round was added too early or by mistake.",
+    },
+    {
+        id: "set-nextvote",
+        label: "/superadmin set-nextvote",
+        summary: "Set the date of the next GOTM/NR-GOTM vote.",
+        syntax: "Syntax: /superadmin set-nextvote date:<date>",
+        notes: "Votes are typically held the last Friday of the month.",
+    },
+];
+function buildSuperAdminHelpButtons(activeId) {
+    const rows = [];
+    for (const chunk of chunkArray(SUPERADMIN_HELP_TOPICS, 5)) {
+        rows.push(new ActionRowBuilder().addComponents(chunk.map((topic) => new ButtonBuilder()
+            .setCustomId(`superadmin-help-${topic.id}`)
+            .setLabel(topic.label)
+            .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary))));
+    }
+    return rows;
+}
+function extractSuperAdminTopicId(customId) {
+    const prefix = "superadmin-help-";
+    const startIndex = customId.indexOf(prefix);
+    if (startIndex === -1)
+        return null;
+    const raw = customId.slice(startIndex + prefix.length).trim();
+    return (SUPERADMIN_HELP_TOPICS.find((entry) => entry.id === raw)?.id ?? null);
+}
+export function buildSuperAdminHelpEmbed(topic) {
+    const embed = new EmbedBuilder()
+        .setTitle(`${topic.label} help`)
+        .setDescription(topic.summary)
+        .addFields({ name: "Syntax", value: topic.syntax });
+    if (topic.parameters) {
+        embed.addFields({ name: "Parameters", value: topic.parameters });
+    }
+    if (topic.notes) {
+        embed.addFields({ name: "Notes", value: topic.notes });
+    }
+    return embed;
+}
+function chunkArray(items, chunkSize) {
+    const chunks = [];
+    for (let i = 0; i < items.length; i += chunkSize) {
+        chunks.push(items.slice(i, i + chunkSize));
+    }
+    return chunks;
+}
 let SuperAdmin = class SuperAdmin {
     async presence(text, interaction) {
         await safeDeferReply(interaction);
@@ -660,66 +763,33 @@ let SuperAdmin = class SuperAdmin {
         }
     }
     async help(interaction) {
-        await safeDeferReply(interaction);
+        await safeDeferReply(interaction, { ephemeral: true });
         const okToUseCommand = await isSuperAdmin(interaction);
         if (!okToUseCommand) {
             return;
         }
-        const embed = new EmbedBuilder()
-            .setTitle("Superadmin Commands Help")
-            .setDescription("Available `/superadmin` subcommands (server owner only)")
-            .addFields({
-            name: "/superadmin presence",
-            value: "Set the bot's \"Now Playing\" text.\n" +
-                "**Syntax:** `/superadmin presence text:<string>`\n" +
-                "**Parameters:** `text` (required string) - new presence text.",
-        }, {
-            name: "/superadmin presence-history",
-            value: "Show the most recent presence changes.\n" +
-                "**Syntax:** `/superadmin presence-history [count:<integer>]`\n" +
-                "**Parameters:** `count` (optional integer, default 5, max 50) - number of entries.",
-        }, {
-            name: "/superadmin add-gotm",
-            value: "Interactively add a new GOTM round.\n" +
-                "**Syntax:** `/superadmin add-gotm`\n" +
-                "**Notes:** The round number is always assigned automatically as the next round after the current highest GOTM round.",
-        }, {
-            name: "/superadmin edit-gotm",
-            value: "Interactively edit GOTM data for a given round.\n" +
-                "**Syntax:** `/superadmin edit-gotm round:<integer>`\n" +
-                "**Parameters:** `round` (required integer) - GOTM round number to edit. The bot will show current data and prompt you for which game and field to update.",
-        }, {
-            name: "/superadmin delete-gotm",
-            value: "Delete the most recent GOTM round.\n" +
-                "**Syntax:** `/superadmin delete-gotm`\n" +
-                "**Notes:** This removes the latest GOTM round from the database. Use this if a round was added too early or by mistake.",
-        }, {
-            name: "/superadmin add-nr-gotm",
-            value: "Interactively add a new NR-GOTM (Non-RPG Game of the Month) round.\n" +
-                "**Syntax:** `/superadmin add-nr-gotm`\n" +
-                "**Notes:** The round number is always assigned automatically as the next round after the current highest NR-GOTM round.",
-        }, {
-            name: "/superadmin edit-nr-gotm",
-            value: "Interactively edit NR-GOTM data for a given round.\n" +
-                "**Syntax:** `/superadmin edit-nr-gotm round:<integer>`\n" +
-                "**Parameters:** `round` (required integer) - NR-GOTM round number to edit. The bot will show current data and prompt you for which game and field to update.",
-        }, {
-            name: "/superadmin delete-nr-gotm",
-            value: "Delete the most recent NR-GOTM round.\n" +
-                "**Syntax:** `/superadmin delete-nr-gotm`\n" +
-                "**Notes:** This removes the latest NR-GOTM round from the database. Use this if a round was added too early or by mistake.",
-        }, {
-            name: "/superadmin set-nextvote",
-            value: "Set the date of the next GOTM/NR-GOTM vote.\n" +
-                "**Syntax:** `/superadmin set-nextvote date:<date>`\n" +
-                "**Notes:** Votes are typically held the last Friday of the month.",
-        }, {
-            name: "/superadmin help",
-            value: "Show this help information.\n" +
-                "**Syntax:** `/superadmin help`",
-        });
+        const response = buildSuperAdminHelpResponse();
         await safeReply(interaction, {
-            embeds: [embed],
+            ...response,
+            ephemeral: true,
+        });
+    }
+    async handleSuperAdminHelpButton(interaction) {
+        const topicId = extractSuperAdminTopicId(interaction.customId);
+        const topic = topicId ? SUPERADMIN_HELP_TOPICS.find((entry) => entry.id === topicId) : null;
+        if (!topic) {
+            const response = buildSuperAdminHelpResponse();
+            await safeUpdate(interaction, {
+                ...response,
+                content: "Sorry, I don't recognize that superadmin help topic. Showing the superadmin help menu.",
+            });
+            return;
+        }
+        const helpEmbed = buildSuperAdminHelpEmbed(topic);
+        const response = buildSuperAdminHelpResponse(topic.id);
+        await safeUpdate(interaction, {
+            embeds: [helpEmbed],
+            components: response.components,
         });
     }
 };
@@ -792,6 +862,9 @@ __decorate([
 __decorate([
     Slash({ description: "Show help for server owner commands", name: "help" })
 ], SuperAdmin.prototype, "help", null);
+__decorate([
+    ButtonComponent({ id: /^superadmin-help-.+/ })
+], SuperAdmin.prototype, "handleSuperAdminHelpButton", null);
 SuperAdmin = __decorate([
     Discord(),
     SlashGroup({ description: "Server Owner Commands", name: "superadmin" }),
@@ -888,4 +961,18 @@ export async function isSuperAdmin(interaction) {
         });
     }
     return isOwner;
+}
+export function buildSuperAdminHelpResponse(activeTopicId) {
+    const embed = new EmbedBuilder()
+        .setTitle("Superadmin Commands Help")
+        .setDescription("Choose a `/superadmin` subcommand button to view details (server owner only).");
+    const components = buildSuperAdminHelpButtons(activeTopicId);
+    components.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
+        .setCustomId("help-main")
+        .setLabel("Back to Help Main Menu")
+        .setStyle(ButtonStyle.Secondary)));
+    return {
+        embeds: [embed],
+        components,
+    };
 }

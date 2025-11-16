@@ -1,12 +1,19 @@
 import {
+  ActionRowBuilder,
   ApplicationCommandOptionType,
+  ButtonBuilder,
+  ButtonStyle,
   EmbedBuilder,
   PermissionsBitField,
 } from "discord.js";
-import type { CommandInteraction } from "discord.js";
-import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
+import type {
+  ButtonInteraction,
+  CommandInteraction,
+  RepliableInteraction,
+} from "discord.js";
+import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { getPresenceHistory, setPresence } from "../functions/SetPresence.js";
-import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { AnyRepliable, safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
 import Gotm, {
   type GotmEntry,
@@ -23,6 +30,159 @@ import NrGotm, {
   insertNrGotmRoundInDatabase,
 } from "../classes/NrGotm.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
+
+type AdminHelpTopicId =
+  | "presence"
+  | "presence-history"
+  | "add-gotm"
+  | "edit-gotm"
+  | "add-nr-gotm"
+  | "edit-nr-gotm"
+  | "set-nextvote";
+
+type AdminHelpTopic = {
+  id: AdminHelpTopicId;
+  label: string;
+  summary: string;
+  syntax: string;
+  parameters?: string;
+  notes?: string;
+};
+
+export const ADMIN_HELP_TOPICS: AdminHelpTopic[] = [
+  {
+    id: "presence",
+    label: "/admin presence",
+    summary: 'Set the bot\'s "Now Playing" text.',
+    syntax: "Syntax: /admin presence text:<string>",
+    parameters: "text (required string) - new presence text.",
+  },
+  {
+    id: "presence-history",
+    label: "/admin presence-history",
+    summary: "Show the most recent presence changes.",
+    syntax: "Syntax: /admin presence-history [count:<integer>]",
+    parameters: "count (optional integer, default 5, max 50) - number of entries.",
+  },
+  {
+    id: "add-gotm",
+    label: "/admin add-gotm",
+    summary: "Interactively add a new GOTM round.",
+    syntax: "Syntax: /admin add-gotm",
+    notes:
+      "The round number is always assigned automatically as the next round after the current highest GOTM round.",
+  },
+  {
+    id: "edit-gotm",
+    label: "/admin edit-gotm",
+    summary: "Interactively edit GOTM data for a given round.",
+    syntax: "Syntax: /admin edit-gotm round:<integer>",
+    parameters:
+      "round (required integer) - GOTM round number to edit. The bot will show current data and prompt you for which game and field to update.",
+  },
+  {
+    id: "add-nr-gotm",
+    label: "/admin add-nr-gotm",
+    summary: "Interactively add a new NR-GOTM (Non-RPG Game of the Month) round.",
+    syntax: "Syntax: /admin add-nr-gotm",
+    notes:
+      "The round number is always assigned automatically as the next round after the current highest NR-GOTM round.",
+  },
+  {
+    id: "edit-nr-gotm",
+    label: "/admin edit-nr-gotm",
+    summary: "Interactively edit NR-GOTM data for a given round.",
+    syntax: "Syntax: /admin edit-nr-gotm round:<integer>",
+    parameters:
+      "round (required integer) - NR-GOTM round number to edit. The bot will show current data and prompt you for which game and field to update.",
+  },
+  {
+    id: "set-nextvote",
+    label: "/admin set-nextvote",
+    summary: "Set the date of the next GOTM/NR-GOTM vote.",
+    syntax: "Syntax: /admin set-nextvote date:<date>",
+    notes: "Votes are typically held the last Friday of the month.",
+  },
+];
+
+function buildAdminHelpButtons(activeId?: AdminHelpTopicId): ActionRowBuilder<ButtonBuilder>[] {
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+
+  for (const chunk of chunkArray(ADMIN_HELP_TOPICS, 5)) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        chunk.map((topic) =>
+          new ButtonBuilder()
+            .setCustomId(`admin-help-${topic.id}`)
+            .setLabel(topic.label)
+            .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary),
+        ),
+      ),
+    );
+  }
+
+  return rows;
+}
+
+function extractAdminTopicId(customId: string): AdminHelpTopicId | null {
+  const prefix = "admin-help-";
+  const startIndex = customId.indexOf(prefix);
+  if (startIndex === -1) return null;
+
+  const raw = customId.slice(startIndex + prefix.length).trim();
+  return (ADMIN_HELP_TOPICS.find((entry) => entry.id === raw)?.id ?? null) as AdminHelpTopicId | null;
+}
+
+export function buildAdminHelpEmbed(topic: AdminHelpTopic): EmbedBuilder {
+  const embed = new EmbedBuilder()
+    .setTitle(`${topic.label} help`)
+    .setDescription(topic.summary)
+    .addFields({ name: "Syntax", value: topic.syntax });
+
+  if (topic.parameters) {
+    embed.addFields({ name: "Parameters", value: topic.parameters });
+  }
+
+  if (topic.notes) {
+    embed.addFields({ name: "Notes", value: topic.notes });
+  }
+
+  return embed;
+}
+
+function chunkArray<T>(items: T[], chunkSize: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    chunks.push(items.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+export function buildAdminHelpResponse(
+  activeTopicId?: AdminHelpTopicId,
+): {
+  embeds: EmbedBuilder[];
+  components: ActionRowBuilder<ButtonBuilder>[];
+} {
+  const embed = new EmbedBuilder()
+    .setTitle("Admin Commands Help")
+    .setDescription("Choose an `/admin` subcommand button to view details.");
+
+  const components = buildAdminHelpButtons(activeTopicId);
+  components.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("help-main")
+        .setLabel("Back to Help Main Menu")
+        .setStyle(ButtonStyle.Secondary),
+    ),
+  );
+
+  return {
+    embeds: [embed],
+    components,
+  };
+}
 
 @Discord()
 @SlashGroup({ description: "Admin Commands", name: "admin" })
@@ -724,76 +884,41 @@ export class Admin {
 
   @Slash({ description: "Show help for admin commands", name: "help" })
   async help(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction);
+    await safeDeferReply(interaction, { ephemeral: true });
 
     const okToUseCommand: boolean = await isAdmin(interaction);
     if (!okToUseCommand) {
       return;
     }
 
-    const embed = new EmbedBuilder()
-      .setTitle("Admin Commands Help")
-      .setDescription("Available `/admin` subcommands")
-      .addFields(
-        {
-          name: "/admin presence",
-          value:
-            "Set the bot's \"Now Playing\" text.\n" +
-            "**Syntax:** `/admin presence text:<string>`\n" +
-            "**Parameters:** `text` (required string) - new presence text.",
-        },
-        {
-          name: "/admin presence-history",
-          value:
-            "Show the most recent presence changes.\n" +
-            "**Syntax:** `/admin presence-history [count:<integer>]`\n" +
-            "**Parameters:** `count` (optional integer, default 5, max 50) - number of entries.",
-        },
-        {
-          name: "/admin add-gotm",
-          value:
-            "Interactively add a new GOTM round.\n" +
-            "**Syntax:** `/admin add-gotm`\n" +
-            "**Notes:** The round number is always assigned automatically as the next round after the current highest GOTM round.",
-        },
-        {
-          name: "/admin edit-gotm",
-          value:
-            "Interactively edit GOTM data for a given round.\n" +
-            "**Syntax:** `/admin edit-gotm round:<integer>`\n" +
-            "**Parameters:** `round` (required integer) - GOTM round number to edit. The bot will show current data and prompt you for which game and field to update.",
-        },
-        {
-          name: "/admin add-nr-gotm",
-          value:
-            "Interactively add a new NR-GOTM (Non-RPG Game of the Month) round.\n" +
-            "**Syntax:** `/admin add-nr-gotm`\n" +
-            "**Notes:** The round number is always assigned automatically as the next round after the current highest NR-GOTM round.",
-        },
-        {
-          name: "/admin edit-nr-gotm",
-          value:
-            "Interactively edit NR-GOTM data for a given round.\n" +
-            "**Syntax:** `/admin edit-nr-gotm round:<integer>`\n" +
-            "**Parameters:** `round` (required integer) - NR-GOTM round number to edit. The bot will show current data and prompt you for which game and field to update.",
-        },
-        {
-          name: "/admin set-nextvote",
-          value:
-            "Set the date of the next GOTM/NR-GOTM vote.\n" +
-            "**Syntax:** `/admin set-nextvote date:<date>`\n" +
-            "**Notes:** Votes are typically held the last Friday of the month.",
-        },
-        {
-          name: "/admin help",
-          value:
-            "Show this help information.\n" +
-            "**Syntax:** `/admin help`",
-        },
-      );
+    const response = buildAdminHelpResponse();
 
     await safeReply(interaction, {
-      embeds: [embed],
+      ...response,
+      ephemeral: true,
+    });
+  }
+
+  @ButtonComponent({ id: /^admin-help-.+/ })
+  async handleAdminHelpButton(interaction: ButtonInteraction): Promise<void> {
+    const topicId = extractAdminTopicId(interaction.customId);
+    const topic = topicId ? ADMIN_HELP_TOPICS.find((entry) => entry.id === topicId) : null;
+
+    if (!topic) {
+      const response = buildAdminHelpResponse();
+      await safeUpdate(interaction, {
+        ...response,
+        content: "Sorry, I don't recognize that admin help topic. Showing the admin help menu.",
+      });
+      return;
+    }
+
+    const helpEmbed = buildAdminHelpEmbed(topic);
+    const response = buildAdminHelpResponse(topic.id);
+
+    await safeUpdate(interaction, {
+      embeds: [helpEmbed],
+      components: response.components,
     });
   }
 }
@@ -884,7 +1009,7 @@ function formatGotmEntryForEdit(entry: GotmEntry): string {
   return lines.join("\n");
 }
 
-export async function isAdmin(interaction: CommandInteraction) {
+export async function isAdmin(interaction: AnyRepliable) {
   // @ts-ignore
   const isAdmin = await interaction.member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.Administrator);
 

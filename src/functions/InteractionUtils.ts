@@ -1,7 +1,31 @@
-import type { CommandInteraction } from "discord.js";
+import { MessageFlags } from "discord.js";
+import type {
+  CommandInteraction,
+  InteractionDeferReplyOptions,
+  RepliableInteraction,
+} from "discord.js";
+
+export type AnyRepliable = RepliableInteraction | CommandInteraction;
+
+function normalizeOptions(options: any): any {
+  if (typeof options === "string" || options === null || options === undefined) {
+    return options;
+  }
+
+  if ("ephemeral" in options) {
+    const { ephemeral, flags, ...rest } = options as any;
+    const newFlags = ephemeral ? ((flags ?? 0) | MessageFlags.Ephemeral) : flags;
+    return { ...rest, flags: newFlags };
+  }
+
+  return options;
+}
 
 // Safely defer a reply, ignoring errors and avoiding double-deferral
-export async function safeDeferReply(interaction: CommandInteraction): Promise<void> {
+export async function safeDeferReply(
+  interaction: AnyRepliable,
+  options?: InteractionDeferReplyOptions,
+): Promise<void> {
   const anyInteraction = interaction as any;
 
   // Custom flag so our helpers can reliably detect an acknowledgement
@@ -11,7 +35,7 @@ export async function safeDeferReply(interaction: CommandInteraction): Promise<v
 
   try {
     if (typeof anyInteraction.deferReply === "function") {
-      await anyInteraction.deferReply();
+      await anyInteraction.deferReply(options);
       anyInteraction.__rpgAcked = true;
       anyInteraction.__rpgDeferred = true;
     }
@@ -21,8 +45,14 @@ export async function safeDeferReply(interaction: CommandInteraction): Promise<v
 }
 
 // Ensure we do not hit "Interaction already acknowledged" when replying
-export async function safeReply(interaction: CommandInteraction, options: any): Promise<void> {
+const isAckError = (err: any): boolean => {
+  const code = err?.code ?? err?.rawError?.code;
+  return code === 40060 || code === 10062;
+};
+
+export async function safeReply(interaction: AnyRepliable, options: any): Promise<void> {
   const anyInteraction = interaction as any;
+  const normalizedOptions = normalizeOptions(options);
 
   const deferred: boolean = Boolean(
     anyInteraction.__rpgDeferred !== undefined
@@ -32,18 +62,13 @@ export async function safeReply(interaction: CommandInteraction, options: any): 
   const replied: boolean = Boolean(anyInteraction.replied);
   const acked: boolean = Boolean(anyInteraction.__rpgAcked ?? deferred ?? replied);
 
-  const isAckError = (err: any): boolean => {
-    const code = err?.code ?? err?.rawError?.code;
-    return code === 40060 || code === 10062;
-  };
-
   // If we've deferred but not yet replied, edit the original reply
   if (deferred && !replied) {
     try {
       if (typeof options === "string") {
         await interaction.editReply({ content: options });
       } else {
-        const { ephemeral, ...rest } = options ?? {};
+        const { ephemeral, ...rest } = normalizedOptions ?? {};
         await interaction.editReply(rest as any);
       }
     } catch (err: any) {
@@ -59,8 +84,7 @@ export async function safeReply(interaction: CommandInteraction, options: any): 
       if (typeof options === "string") {
         await interaction.followUp({ content: options });
       } else {
-        const { ephemeral, ...rest } = options ?? {};
-        await interaction.followUp(rest as any);
+        await interaction.followUp(normalizedOptions as any);
       }
     } catch (err: any) {
       if (!isAckError(err)) throw err;
@@ -73,10 +97,33 @@ export async function safeReply(interaction: CommandInteraction, options: any): 
     if (typeof options === "string") {
       await interaction.reply({ content: options });
     } else {
-      await interaction.reply(options as any);
+      await interaction.reply(normalizedOptions as any);
     }
     anyInteraction.__rpgAcked = true;
   } catch (err: any) {
     if (!isAckError(err)) throw err;
   }
+}
+
+// Try to update an existing interaction message; fall back to a normal reply if needed.
+export async function safeUpdate(interaction: AnyRepliable, options: any): Promise<void> {
+  const anyInteraction = interaction as any;
+  const normalizedOptions = normalizeOptions(options);
+
+  if (typeof anyInteraction.update === "function") {
+    try {
+      await anyInteraction.update(normalizedOptions);
+      anyInteraction.__rpgAcked = true;
+      anyInteraction.__rpgDeferred = false;
+      return;
+    } catch (err: any) {
+      if (!isAckError(err)) {
+        // Fall back to follow-up path below
+      } else {
+        return;
+      }
+    }
+  }
+
+  await safeReply(interaction, { ...normalizedOptions, ephemeral: true });
 }

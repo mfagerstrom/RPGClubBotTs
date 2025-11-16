@@ -7,10 +7,61 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ApplicationCommandOptionType, EmbedBuilder, PermissionsBitField } from "discord.js";
-import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
+import { ActionRowBuilder, ApplicationCommandOptionType, ButtonBuilder, ButtonStyle, EmbedBuilder, PermissionsBitField, } from "discord.js";
+import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { getPresenceHistory, setPresence } from "../functions/SetPresence.js";
-import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
+export const MOD_HELP_TOPICS = [
+    {
+        id: "presence",
+        label: "/mod presence",
+        summary: 'Set the bot\'s "Now Playing" text.',
+        syntax: "Syntax: /mod presence text:<string>",
+        parameters: "text (required string) - new presence text.",
+    },
+    {
+        id: "presence-history",
+        label: "/mod presence-history",
+        summary: "Show the most recent presence changes.",
+        syntax: "Syntax: /mod presence-history [count:<integer>]",
+        parameters: "count (optional integer, default 5, max 50) - number of entries.",
+    },
+];
+function buildModHelpButtons(activeId) {
+    const rows = [];
+    for (const chunk of chunkArray(MOD_HELP_TOPICS, 5)) {
+        rows.push(new ActionRowBuilder().addComponents(chunk.map((topic) => new ButtonBuilder()
+            .setCustomId(`mod-help-${topic.id}`)
+            .setLabel(topic.label)
+            .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary))));
+    }
+    return rows;
+}
+function extractModTopicId(customId) {
+    const prefix = "mod-help-";
+    const startIndex = customId.indexOf(prefix);
+    if (startIndex === -1)
+        return null;
+    const raw = customId.slice(startIndex + prefix.length).trim();
+    return (MOD_HELP_TOPICS.find((entry) => entry.id === raw)?.id ?? null);
+}
+export function buildModHelpEmbed(topic) {
+    const embed = new EmbedBuilder()
+        .setTitle(`${topic.label} help`)
+        .setDescription(topic.summary)
+        .addFields({ name: "Syntax", value: topic.syntax });
+    if (topic.parameters) {
+        embed.addFields({ name: "Parameters", value: topic.parameters });
+    }
+    return embed;
+}
+function chunkArray(items, chunkSize) {
+    const chunks = [];
+    for (let i = 0; i < items.length; i += chunkSize) {
+        chunks.push(items.slice(i, i + chunkSize));
+    }
+    return chunks;
+}
 let Mod = class Mod {
     async presence(text, interaction) {
         await safeDeferReply(interaction);
@@ -49,31 +100,33 @@ let Mod = class Mod {
         });
     }
     async help(interaction) {
-        await safeDeferReply(interaction);
+        await safeDeferReply(interaction, { ephemeral: true });
         const okToUseCommand = await isModerator(interaction);
         if (!okToUseCommand) {
             return;
         }
-        const embed = new EmbedBuilder()
-            .setTitle("Moderator Commands Help")
-            .setDescription("Available `/mod` subcommands")
-            .addFields({
-            name: "/mod presence",
-            value: "Set the bot's \"Now Playing\" text.\n" +
-                "**Syntax:** `/mod presence text:<string>`\n" +
-                "**Parameters:** `text` (required string) - new presence text.",
-        }, {
-            name: "/mod presence-history",
-            value: "Show the most recent presence changes.\n" +
-                "**Syntax:** `/mod presence-history [count:<integer>]`\n" +
-                "**Parameters:** `count` (optional integer, default 5, max 50) - number of entries.",
-        }, {
-            name: "/mod help",
-            value: "Show this help information.\n" +
-                "**Syntax:** `/mod help`",
-        });
+        const response = buildModHelpResponse();
         await safeReply(interaction, {
-            embeds: [embed],
+            ...response,
+            ephemeral: true,
+        });
+    }
+    async handleModHelpButton(interaction) {
+        const topicId = extractModTopicId(interaction.customId);
+        const topic = topicId ? MOD_HELP_TOPICS.find((entry) => entry.id === topicId) : null;
+        if (!topic) {
+            const response = buildModHelpResponse();
+            await safeUpdate(interaction, {
+                ...response,
+                content: "Sorry, I don't recognize that moderator help topic. Showing the moderator help menu.",
+            });
+            return;
+        }
+        const helpEmbed = buildModHelpEmbed(topic);
+        const response = buildModHelpResponse(topic.id);
+        await safeUpdate(interaction, {
+            embeds: [helpEmbed],
+            components: response.components,
         });
     }
 };
@@ -98,6 +151,9 @@ __decorate([
 __decorate([
     Slash({ description: "Show help for moderator commands", name: "help" })
 ], Mod.prototype, "help", null);
+__decorate([
+    ButtonComponent({ id: /^mod-help-.+/ })
+], Mod.prototype, "handleModHelpButton", null);
 Mod = __decorate([
     Discord(),
     SlashGroup({ description: "Moderator Commands", name: "mod" }),
@@ -120,4 +176,18 @@ export async function isModerator(interaction) {
         }
     }
     return isMod;
+}
+export function buildModHelpResponse(activeTopicId) {
+    const embed = new EmbedBuilder()
+        .setTitle("Moderator Commands Help")
+        .setDescription("Choose a `/mod` subcommand button to view details.");
+    const components = buildModHelpButtons(activeTopicId);
+    components.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
+        .setCustomId("help-main")
+        .setLabel("Back to Help Main Menu")
+        .setStyle(ButtonStyle.Secondary)));
+    return {
+        embeds: [embed],
+        components,
+    };
 }
