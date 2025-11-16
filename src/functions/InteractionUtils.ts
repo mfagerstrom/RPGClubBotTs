@@ -30,6 +30,20 @@ export async function safeDeferReply(
 ): Promise<void> {
   const anyInteraction = interaction as any;
 
+  let deferOptions: InteractionDeferReplyOptions | undefined = options;
+  try {
+    if (
+      !deferOptions &&
+      typeof (interaction as any).isChatInputCommand === "function" &&
+      (interaction as any).isChatInputCommand() &&
+      ["admin", "mod", "superadmin"].includes((interaction as any).commandName)
+    ) {
+      deferOptions = { ephemeral: true };
+    }
+  } catch {
+    // ignore detection issues
+  }
+
   // Custom flag so our helpers can reliably detect an acknowledgement
   if (anyInteraction.__rpgAcked || anyInteraction.deferred || anyInteraction.replied) {
     return;
@@ -37,7 +51,7 @@ export async function safeDeferReply(
 
   try {
     if (typeof anyInteraction.deferReply === "function") {
-      await anyInteraction.deferReply(options);
+      await anyInteraction.deferReply(deferOptions);
       anyInteraction.__rpgAcked = true;
       anyInteraction.__rpgDeferred = true;
     }
@@ -64,6 +78,19 @@ export async function safeReply(interaction: AnyRepliable, options: any): Promis
   );
   const replied: boolean = Boolean(anyInteraction.replied);
   const acked: boolean = Boolean(anyInteraction.__rpgAcked ?? deferred ?? replied);
+
+  if (forceFollowUp) {
+    try {
+      if (typeof options === "string") {
+        await interaction.followUp({ content: options });
+      } else {
+        await interaction.followUp(normalizedOptions as any);
+      }
+    } catch (err: any) {
+      if (!isAckError(err)) throw err;
+    }
+    return;
+  }
 
   // If we've deferred but not yet replied, edit the original reply
   if (deferred && !replied) {

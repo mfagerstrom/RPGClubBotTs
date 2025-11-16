@@ -4,6 +4,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  MessageFlags,
 } from "discord.js";
 import type {
   ButtonInteraction,
@@ -1201,6 +1202,7 @@ function formatGotmEntryForEdit(entry: GotmEntry): string {
 }
 
 export async function isSuperAdmin(interaction: AnyRepliable): Promise<boolean> {
+  const anyInteraction = interaction as any;
   const guild = interaction.guild;
   const userId = interaction.user.id;
 
@@ -1215,11 +1217,22 @@ export async function isSuperAdmin(interaction: AnyRepliable): Promise<boolean> 
   const isOwner = ownerId === userId;
 
   if (!isOwner) {
-    await safeReply(interaction, {
+    const denial = {
       content: "Access denied. Command is restricted to the server owner.",
-      ephemeral: true,
-      __forceFollowUp: true,
-    });
+      flags: MessageFlags.Ephemeral,
+    };
+
+    try {
+      if (anyInteraction.replied || anyInteraction.deferred || anyInteraction.__rpgAcked) {
+        await interaction.followUp(denial as any);
+      } else {
+        await interaction.reply(denial as any);
+        anyInteraction.__rpgAcked = true;
+        anyInteraction.__rpgDeferred = false;
+      }
+    } catch {
+      // ignore
+    }
   }
 
   return isOwner;

@@ -7,7 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ActionRowBuilder, ApplicationCommandOptionType, ButtonBuilder, ButtonStyle, EmbedBuilder, PermissionsBitField, } from "discord.js";
+import { ActionRowBuilder, ApplicationCommandOptionType, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, PermissionsBitField, } from "discord.js";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { getPresenceHistory, setPresence } from "../functions/SetPresence.js";
 import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
@@ -772,14 +772,27 @@ function formatGotmEntryForEdit(entry) {
     return lines.join("\n");
 }
 export async function isAdmin(interaction) {
+    const anyInteraction = interaction;
     // @ts-ignore
     const isAdmin = await interaction.member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.Administrator);
     if (!isAdmin) {
-        await safeReply(interaction, {
+        const denial = {
             content: "Access denied. Command requires Administrator role.",
-            ephemeral: true,
-            __forceFollowUp: true,
-        });
+            flags: MessageFlags.Ephemeral,
+        };
+        try {
+            if (anyInteraction.replied || anyInteraction.deferred || anyInteraction.__rpgAcked) {
+                await interaction.followUp(denial);
+            }
+            else {
+                await interaction.reply(denial);
+                anyInteraction.__rpgAcked = true;
+                anyInteraction.__rpgDeferred = false;
+            }
+        }
+        catch (err) {
+            // swallow to avoid leaking
+        }
     }
     return isAdmin;
 }

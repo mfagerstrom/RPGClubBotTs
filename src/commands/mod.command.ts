@@ -4,6 +4,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  MessageFlags,
   PermissionsBitField,
 } from "discord.js";
 import type {
@@ -211,6 +212,7 @@ export class Mod {
 }
 
 export async function isModerator(interaction: AnyRepliable) {
+  const anyInteraction = interaction as any;
   // @ts-ignore
   let isMod = await interaction.member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.ManageMessages);
 
@@ -219,11 +221,22 @@ export async function isModerator(interaction: AnyRepliable) {
     const isAdmin = await interaction.member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.Administrator);
 
     if (!isAdmin) {
-      await safeReply(interaction, {
+      const denial = {
         content: "Access denied. Command requires Moderator role or above.",
-        ephemeral: true,
-        __forceFollowUp: true,
-      });
+        flags: MessageFlags.Ephemeral,
+      };
+
+      try {
+        if (anyInteraction.replied || anyInteraction.deferred || anyInteraction.__rpgAcked) {
+          await interaction.followUp(denial as any);
+        } else {
+          await interaction.reply(denial as any);
+          anyInteraction.__rpgAcked = true;
+          anyInteraction.__rpgDeferred = false;
+        }
+      } catch {
+        // swallow
+      }
     } else {
       isMod = true;
     }

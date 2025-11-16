@@ -4,6 +4,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  MessageFlags,
   PermissionsBitField,
 } from "discord.js";
 import type {
@@ -1010,15 +1011,27 @@ function formatGotmEntryForEdit(entry: GotmEntry): string {
 }
 
 export async function isAdmin(interaction: AnyRepliable) {
+  const anyInteraction = interaction as any;
   // @ts-ignore
   const isAdmin = await interaction.member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.Administrator);
 
   if (!isAdmin) {
-    await safeReply(interaction, {
+    const denial = {
       content: "Access denied. Command requires Administrator role.",
-      ephemeral: true,
-      __forceFollowUp: true,
-    });
+      flags: MessageFlags.Ephemeral,
+    };
+
+    try {
+      if (anyInteraction.replied || anyInteraction.deferred || anyInteraction.__rpgAcked) {
+        await interaction.followUp(denial as any);
+      } else {
+        await interaction.reply(denial as any);
+        anyInteraction.__rpgAcked = true;
+        anyInteraction.__rpgDeferred = false;
+      }
+    } catch (err: any) {
+      // swallow to avoid leaking
+    }
   }
 
   return isAdmin;
