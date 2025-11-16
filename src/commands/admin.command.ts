@@ -1,4 +1,8 @@
-import { ApplicationCommandOptionType, EmbedBuilder, PermissionsBitField } from "discord.js";
+import {
+  ApplicationCommandOptionType,
+  EmbedBuilder,
+  PermissionsBitField,
+} from "discord.js";
 import type { CommandInteraction } from "discord.js";
 import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { getPresenceHistory, setPresence } from "../functions/SetPresence.js";
@@ -18,6 +22,7 @@ import NrGotm, {
   type NrGotmEditableField,
   insertNrGotmRoundInDatabase,
 } from "../classes/NrGotm.js";
+import BotVotingInfo from "../classes/BotVotingInfo.js";
 
 @Discord()
 @SlashGroup({ description: "Admin Commands", name: "admin" })
@@ -95,6 +100,65 @@ export class Admin {
     await safeReply(interaction, {
       content: header + lines.join("\n"),
     });
+  }
+
+  @Slash({
+    description: "Votes are typically held the last Friday of the month",
+    name: "set-nextvote",
+  })
+  async setNextVote(
+    @SlashOption({
+      description:
+        "Next vote date. Votes are typically held the last Friday of the month.",
+      name: "date",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    dateText: string,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction);
+
+    const okToUseCommand: boolean = await isAdmin(interaction);
+    if (!okToUseCommand) {
+      return;
+    }
+
+    const parsed = new Date(dateText);
+    if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
+      await safeReply(interaction, {
+        content:
+          "Invalid date format. Please use a recognizable date such as `YYYY-MM-DD`.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    try {
+      const current = await BotVotingInfo.getCurrentRound();
+      if (!current) {
+        await safeReply(interaction, {
+          content:
+            "No voting round information is available. Create a round before setting the next vote date.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      await BotVotingInfo.updateNextVoteAt(current.roundNumber, parsed);
+
+      await safeReply(interaction, {
+        content:
+          `Next vote date updated to ${parsed.toLocaleDateString()}. ` +
+          "Votes are typically held the last Friday of the month.",
+      });
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      await safeReply(interaction, {
+        content: `Error updating next vote date: ${msg}`,
+        ephemeral: true,
+      });
+    }
   }
 
   @Slash({ description: "Add a new GOTM round", name: "add-gotm" })
@@ -713,6 +777,13 @@ export class Admin {
             "Interactively edit NR-GOTM data for a given round.\n" +
             "**Syntax:** `/admin edit-nr-gotm round:<integer>`\n" +
             "**Parameters:** `round` (required integer) - NR-GOTM round number to edit. The bot will show current data and prompt you for which game and field to update.",
+        },
+        {
+          name: "/admin set-nextvote",
+          value:
+            "Set the date of the next GOTM/NR-GOTM vote.\n" +
+            "**Syntax:** `/admin set-nextvote date:<date>`\n" +
+            "**Notes:** Votes are typically held the last Friday of the month.",
         },
         {
           name: "/admin help",

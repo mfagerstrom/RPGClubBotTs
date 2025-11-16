@@ -7,13 +7,14 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
+import { ApplicationCommandOptionType, EmbedBuilder, } from "discord.js";
 import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { getPresenceHistory, setPresence } from "../functions/SetPresence.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
 import Gotm, { updateGotmGameFieldInDatabase, insertGotmRoundInDatabase, deleteGotmRoundFromDatabase, } from "../classes/Gotm.js";
 import NrGotm, { updateNrGotmGameFieldInDatabase, insertNrGotmRoundInDatabase, deleteNrGotmRoundFromDatabase, } from "../classes/NrGotm.js";
+import BotVotingInfo from "../classes/BotVotingInfo.js";
 let SuperAdmin = class SuperAdmin {
     async presence(text, interaction) {
         await safeDeferReply(interaction);
@@ -50,6 +51,42 @@ let SuperAdmin = class SuperAdmin {
         await safeReply(interaction, {
             content: header + lines.join("\n"),
         });
+    }
+    async setNextVote(dateText, interaction) {
+        await safeDeferReply(interaction);
+        const okToUseCommand = await isSuperAdmin(interaction);
+        if (!okToUseCommand) {
+            return;
+        }
+        const parsed = new Date(dateText);
+        if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
+            await safeReply(interaction, {
+                content: "Invalid date format. Please use a recognizable date such as `YYYY-MM-DD`.",
+                ephemeral: true,
+            });
+            return;
+        }
+        try {
+            const current = await BotVotingInfo.getCurrentRound();
+            if (!current) {
+                await safeReply(interaction, {
+                    content: "No voting round information is available. Create a round before setting the next vote date.",
+                    ephemeral: true,
+                });
+                return;
+            }
+            await BotVotingInfo.updateNextVoteAt(current.roundNumber, parsed);
+            await safeReply(interaction, {
+                content: `Next vote date updated to ${parsed.toLocaleDateString()}. `,
+            });
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeReply(interaction, {
+                content: `Error updating next vote date: ${msg}`,
+                ephemeral: true,
+            });
+        }
     }
     async addGotm(interaction) {
         await safeDeferReply(interaction);
@@ -672,6 +709,11 @@ let SuperAdmin = class SuperAdmin {
                 "**Syntax:** `/superadmin delete-nr-gotm`\n" +
                 "**Notes:** This removes the latest NR-GOTM round from the database. Use this if a round was added too early or by mistake.",
         }, {
+            name: "/superadmin set-nextvote",
+            value: "Set the date of the next GOTM/NR-GOTM vote.\n" +
+                "**Syntax:** `/superadmin set-nextvote date:<date>`\n" +
+                "**Notes:** Votes are typically held the last Friday of the month.",
+        }, {
             name: "/superadmin help",
             value: "Show this help information.\n" +
                 "**Syntax:** `/superadmin help`",
@@ -699,6 +741,18 @@ __decorate([
         type: ApplicationCommandOptionType.Integer,
     }))
 ], SuperAdmin.prototype, "presenceHistory", null);
+__decorate([
+    Slash({
+        description: "Votes are typically held the last Friday of the month",
+        name: "set-nextvote",
+    }),
+    __param(0, SlashOption({
+        description: "Next vote date. Votes are typically held the last Friday of the month.",
+        name: "date",
+        required: true,
+        type: ApplicationCommandOptionType.String,
+    }))
+], SuperAdmin.prototype, "setNextVote", null);
 __decorate([
     Slash({ description: "Add a new GOTM round", name: "add-gotm" })
 ], SuperAdmin.prototype, "addGotm", null);

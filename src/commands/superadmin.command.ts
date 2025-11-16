@@ -1,4 +1,7 @@
-import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
+import {
+  ApplicationCommandOptionType,
+  EmbedBuilder,
+} from "discord.js";
 import type { CommandInteraction } from "discord.js";
 import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { getPresenceHistory, setPresence } from "../functions/SetPresence.js";
@@ -20,6 +23,7 @@ import NrGotm, {
   insertNrGotmRoundInDatabase,
   deleteNrGotmRoundFromDatabase,
 } from "../classes/NrGotm.js";
+import BotVotingInfo from "../classes/BotVotingInfo.js";
 
 @Discord()
 @SlashGroup({ description: "Server Owner Commands", name: "superadmin" })
@@ -94,6 +98,64 @@ export class SuperAdmin {
     await safeReply(interaction, {
       content: header + lines.join("\n"),
     });
+  }
+
+  @Slash({
+    description: "Votes are typically held the last Friday of the month",
+    name: "set-nextvote",
+  })
+  async setNextVote(
+    @SlashOption({
+      description:
+        "Next vote date. Votes are typically held the last Friday of the month.",
+      name: "date",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    dateText: string,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction);
+
+    const okToUseCommand: boolean = await isSuperAdmin(interaction);
+    if (!okToUseCommand) {
+      return;
+    }
+
+    const parsed = new Date(dateText);
+    if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
+      await safeReply(interaction, {
+        content:
+          "Invalid date format. Please use a recognizable date such as `YYYY-MM-DD`.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    try {
+      const current = await BotVotingInfo.getCurrentRound();
+      if (!current) {
+        await safeReply(interaction, {
+          content:
+            "No voting round information is available. Create a round before setting the next vote date.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      await BotVotingInfo.updateNextVoteAt(current.roundNumber, parsed);
+
+      await safeReply(interaction, {
+        content:
+          `Next vote date updated to ${parsed.toLocaleDateString()}. `,
+      });
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      await safeReply(interaction, {
+        content: `Error updating next vote date: ${msg}`,
+        ephemeral: true,
+      });
+    }
   }
 
   @Slash({ description: "Add a new GOTM round", name: "add-gotm" })
@@ -923,6 +985,13 @@ export class SuperAdmin {
             "Delete the most recent NR-GOTM round.\n" +
             "**Syntax:** `/superadmin delete-nr-gotm`\n" +
             "**Notes:** This removes the latest NR-GOTM round from the database. Use this if a round was added too early or by mistake.",
+        },
+        {
+          name: "/superadmin set-nextvote",
+          value:
+            "Set the date of the next GOTM/NR-GOTM vote.\n" +
+            "**Syntax:** `/superadmin set-nextvote date:<date>`\n" +
+            "**Notes:** Votes are typically held the last Friday of the month.",
         },
         {
           name: "/superadmin help",
