@@ -78,9 +78,17 @@ export class NrGotmSearch {
       type: ApplicationCommandOptionType.String,
     })
     title: string | undefined,
+    @SlashOption({
+      description: "If true, show results in the channel instead of ephemerally.",
+      name: "showinchat",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    showInChat: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction);
+    const ephemeral = !showInChat;
+    await safeDeferReply(interaction, { ephemeral });
 
     let results: NrGotmEntry[] = [];
     let criteriaLabel: string | undefined;
@@ -132,12 +140,12 @@ export class NrGotmSearch {
       );
       const content = criteriaLabel ? `Query: "${criteriaLabel}"` : undefined;
       if (embeds.length <= 10) {
-        await safeReply(interaction, { content, embeds });
+        await safeReply(interaction, { content, embeds, ephemeral });
       } else {
         const chunks = chunkEmbeds(embeds, 10);
-        await safeReply(interaction, { content, embeds: chunks[0] });
+        await safeReply(interaction, { content, embeds: chunks[0], ephemeral });
         for (let i = 1; i < chunks.length; i++) {
-          await interaction.followUp({ embeds: chunks[i] });
+          await interaction.followUp({ embeds: chunks[i], ephemeral });
         }
       }
     } catch (err: any) {
@@ -333,4 +341,3 @@ function appendWithTailTruncate(body: string, tail: string): string {
   const trimmedBody = body.slice(0, Math.max(0, availForBody - 3)) + "...";
   return trimmedBody + sep + tail;
 }
-

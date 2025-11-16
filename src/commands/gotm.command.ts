@@ -69,17 +69,25 @@ export class GotmSearch {
       type: ApplicationCommandOptionType.String,
     })
     month: string | undefined,
-    @SlashOption({
-      description: "Search by title substring",
-      name: "title",
-      required: false,
-      type: ApplicationCommandOptionType.String,
-    })
-    title: string | undefined,
-    interaction: CommandInteraction,
-  ): Promise<void> {
+  @SlashOption({
+    description: "Search by title substring",
+    name: "title",
+    required: false,
+    type: ApplicationCommandOptionType.String,
+  })
+  title: string | undefined,
+  @SlashOption({
+    description: "If true, show results in the channel instead of ephemerally.",
+    name: "showinchat",
+    required: false,
+    type: ApplicationCommandOptionType.Boolean,
+  })
+  showInChat: boolean | undefined,
+  interaction: CommandInteraction,
+): Promise<void> {
+    const ephemeral = !showInChat;
     // Acknowledge early to avoid interaction timeouts while fetching images
-    await safeDeferReply(interaction);
+    await safeDeferReply(interaction, { ephemeral });
 
     // Determine search mode
     let results: GotmEntry[] = [];
@@ -122,12 +130,12 @@ export class GotmSearch {
       const embeds = await buildGotmEmbeds(results, criteriaLabel, interaction.guildId ?? undefined, interaction.client);
       const content = criteriaLabel ? `Query: "${criteriaLabel}"` : undefined;
       if (embeds.length <= 10) {
-        await safeReply(interaction, { content, embeds });
+        await safeReply(interaction, { content, embeds, ephemeral });
       } else {
         const chunks = chunkEmbeds(embeds, 10);
-        await safeReply(interaction, { content, embeds: chunks[0] });
+        await safeReply(interaction, { content, embeds: chunks[0], ephemeral });
         for (let i = 1; i < chunks.length; i++) {
-          await interaction.followUp({ embeds: chunks[i] });
+          await interaction.followUp({ embeds: chunks[i], ephemeral });
         }
       }
     } catch (err: any) {

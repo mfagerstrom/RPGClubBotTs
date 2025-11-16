@@ -43,8 +43,9 @@ const YEAR_CHOICES = (() => {
     }
 })();
 let NrGotmSearch = class NrGotmSearch {
-    async nrGotm(round, year, month, title, interaction) {
-        await safeDeferReply(interaction);
+    async nrGotm(round, year, month, title, showInChat, interaction) {
+        const ephemeral = !showInChat;
+        await safeDeferReply(interaction, { ephemeral });
         let results = [];
         let criteriaLabel;
         try {
@@ -90,13 +91,13 @@ let NrGotmSearch = class NrGotmSearch {
             const embeds = await buildNrGotmEmbeds(results, criteriaLabel, interaction.guildId ?? undefined, interaction.client);
             const content = criteriaLabel ? `Query: "${criteriaLabel}"` : undefined;
             if (embeds.length <= 10) {
-                await safeReply(interaction, { content, embeds });
+                await safeReply(interaction, { content, embeds, ephemeral });
             }
             else {
                 const chunks = chunkEmbeds(embeds, 10);
-                await safeReply(interaction, { content, embeds: chunks[0] });
+                await safeReply(interaction, { content, embeds: chunks[0], ephemeral });
                 for (let i = 1; i < chunks.length; i++) {
-                    await interaction.followUp({ embeds: chunks[i] });
+                    await interaction.followUp({ embeds: chunks[i], ephemeral });
                 }
             }
         }
@@ -139,6 +140,12 @@ __decorate([
         name: "title",
         required: false,
         type: ApplicationCommandOptionType.String,
+    })),
+    __param(4, SlashOption({
+        description: "If true, show results in the channel instead of ephemerally.",
+        name: "showinchat",
+        required: false,
+        type: ApplicationCommandOptionType.Boolean,
     }))
 ], NrGotmSearch.prototype, "nrGotm", null);
 NrGotmSearch = __decorate([

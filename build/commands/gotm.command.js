@@ -44,9 +44,10 @@ const YEAR_CHOICES = (() => {
     }
 })();
 let GotmSearch = class GotmSearch {
-    async gotm(round, year, month, title, interaction) {
+    async gotm(round, year, month, title, showInChat, interaction) {
+        const ephemeral = !showInChat;
         // Acknowledge early to avoid interaction timeouts while fetching images
-        await safeDeferReply(interaction);
+        await safeDeferReply(interaction, { ephemeral });
         // Determine search mode
         let results = [];
         let criteriaLabel;
@@ -89,13 +90,13 @@ let GotmSearch = class GotmSearch {
             const embeds = await buildGotmEmbeds(results, criteriaLabel, interaction.guildId ?? undefined, interaction.client);
             const content = criteriaLabel ? `Query: "${criteriaLabel}"` : undefined;
             if (embeds.length <= 10) {
-                await safeReply(interaction, { content, embeds });
+                await safeReply(interaction, { content, embeds, ephemeral });
             }
             else {
                 const chunks = chunkEmbeds(embeds, 10);
-                await safeReply(interaction, { content, embeds: chunks[0] });
+                await safeReply(interaction, { content, embeds: chunks[0], ephemeral });
                 for (let i = 1; i < chunks.length; i++) {
-                    await interaction.followUp({ embeds: chunks[i] });
+                    await interaction.followUp({ embeds: chunks[i], ephemeral });
                 }
             }
         }
@@ -132,6 +133,12 @@ __decorate([
         name: "title",
         required: false,
         type: ApplicationCommandOptionType.String,
+    })),
+    __param(4, SlashOption({
+        description: "If true, show results in the channel instead of ephemerally.",
+        name: "showinchat",
+        required: false,
+        type: ApplicationCommandOptionType.Boolean,
     }))
 ], GotmSearch.prototype, "gotm", null);
 GotmSearch = __decorate([
