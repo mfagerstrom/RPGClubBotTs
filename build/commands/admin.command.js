@@ -77,8 +77,7 @@ let Admin = class Admin {
             }
             await BotVotingInfo.updateNextVoteAt(current.roundNumber, parsed);
             await safeReply(interaction, {
-                content: `Next vote date updated to ${parsed.toLocaleDateString()}. ` +
-                    "Votes are typically held the last Friday of the month.",
+                content: `Next vote date updated to ${parsed.toLocaleDateString()}.`,
             });
         }
         catch (err) {

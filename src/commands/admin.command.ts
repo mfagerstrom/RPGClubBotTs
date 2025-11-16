@@ -149,8 +149,7 @@ export class Admin {
 
       await safeReply(interaction, {
         content:
-          `Next vote date updated to ${parsed.toLocaleDateString()}. ` +
-          "Votes are typically held the last Friday of the month.",
+          `Next vote date updated to ${parsed.toLocaleDateString()}.`,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);

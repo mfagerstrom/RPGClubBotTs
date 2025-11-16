@@ -8,6 +8,7 @@ import { EmbedBuilder } from "discord.js";
 import { Discord, Slash } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
+import { NOMINATION_DISCUSSION_CHANNEL_IDS } from "../config/nominationChannels.js";
 let NextVoteCommand = class NextVoteCommand {
     async nextvote(interaction) {
         await safeDeferReply(interaction);
@@ -34,8 +35,9 @@ let NextVoteCommand = class NextVoteCommand {
             descriptionLines.push(dateText);
             descriptionLines.push("");
             descriptionLines.push("For nominations and discussion about the upcoming vote:");
-            descriptionLines.push("- <#361717372970598401>");
-            descriptionLines.push("- <#1148682094936064010>");
+            for (const channelId of NOMINATION_DISCUSSION_CHANNEL_IDS) {
+                descriptionLines.push(`- <#${channelId}>`);
+            }
             const embed = new EmbedBuilder()
                 .setColor(0x0099ff)
                 .setTitle("Next Vote:")

@@ -10,6 +10,7 @@ import { initOraclePool } from "./db/oracleClient.js";
 import { loadGotmFromDb } from "./classes/Gotm.js";
 import { loadNrGotmFromDb } from "./classes/NrGotm.js";
 import { installConsoleLogging, setConsoleLoggingClient } from "./utilities/DiscordConsoleLogger.js";
+import { startNominationReminderService } from "./services/NominationReminderService.js";
 
 dotenv.config();
 installConsoleLogging();
@@ -56,6 +57,7 @@ bot.once("clientReady", async () => {
   //    ...bot.guilds.cache.map((g) => g.id)
   //  );
 
+  startNominationReminderService(bot);
   console.log("Bot started");
 });
 

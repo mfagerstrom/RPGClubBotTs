@@ -5,12 +5,16 @@ export interface BotVotingInfoEntry {
   roundNumber: number;
   nominationListId: number | null;
   nextVoteAt: Date;
+  fiveDayReminderSent: boolean;
+  oneDayReminderSent: boolean;
 }
 
 function mapRowToEntry(row: {
   ROUND_NUMBER: number;
   NOMINATION_LIST_ID: number | null;
   NEXT_VOTE_AT: Date | string;
+  FIVE_DAY_REMINDER_SENT: number | null;
+  ONE_DAY_REMINDER_SENT: number | null;
 }): BotVotingInfoEntry {
   const roundNumber = Number(row.ROUND_NUMBER);
   const nominationListId =
@@ -21,6 +25,9 @@ function mapRowToEntry(row: {
   const rawDate = row.NEXT_VOTE_AT;
   const nextVoteAt =
     rawDate instanceof Date ? rawDate : new Date(rawDate as string);
+
+  const fiveDayReminderSent = Boolean(row.FIVE_DAY_REMINDER_SENT ?? 0);
+  const oneDayReminderSent = Boolean(row.ONE_DAY_REMINDER_SENT ?? 0);
 
   if (!Number.isFinite(roundNumber)) {
     throw new Error("Invalid ROUND_NUMBER value in BOT_VOTING_INFO row.");
@@ -33,6 +40,8 @@ function mapRowToEntry(row: {
     roundNumber,
     nominationListId,
     nextVoteAt,
+    fiveDayReminderSent,
+    oneDayReminderSent,
   };
 }
 
@@ -68,10 +77,14 @@ export default class BotVotingInfo {
         ROUND_NUMBER: number;
         NOMINATION_LIST_ID: number | null;
         NEXT_VOTE_AT: Date;
+        FIVE_DAY_REMINDER_SENT: number | null;
+        ONE_DAY_REMINDER_SENT: number | null;
       }>(
         `SELECT ROUND_NUMBER,
                 NOMINATION_LIST_ID,
-                NEXT_VOTE_AT
+                NEXT_VOTE_AT,
+                FIVE_DAY_REMINDER_SENT,
+                ONE_DAY_REMINDER_SENT
            FROM BOT_VOTING_INFO
           ORDER BY ROUND_NUMBER`,
         [],
@@ -84,6 +97,8 @@ export default class BotVotingInfo {
           ROUND_NUMBER: number;
           NOMINATION_LIST_ID: number | null;
           NEXT_VOTE_AT: Date | string;
+          FIVE_DAY_REMINDER_SENT: number | null;
+          ONE_DAY_REMINDER_SENT: number | null;
         }),
       );
     } finally {
@@ -102,10 +117,14 @@ export default class BotVotingInfo {
         ROUND_NUMBER: number;
         NOMINATION_LIST_ID: number | null;
         NEXT_VOTE_AT: Date;
+        FIVE_DAY_REMINDER_SENT: number | null;
+        ONE_DAY_REMINDER_SENT: number | null;
       }>(
         `SELECT ROUND_NUMBER,
                 NOMINATION_LIST_ID,
-                NEXT_VOTE_AT
+                NEXT_VOTE_AT,
+                FIVE_DAY_REMINDER_SENT,
+                ONE_DAY_REMINDER_SENT
            FROM BOT_VOTING_INFO
           WHERE ROUND_NUMBER = :round`,
         { round },
@@ -119,6 +138,8 @@ export default class BotVotingInfo {
         ROUND_NUMBER: number;
         NOMINATION_LIST_ID: number | null;
         NEXT_VOTE_AT: Date | string;
+        FIVE_DAY_REMINDER_SENT: number | null;
+        ONE_DAY_REMINDER_SENT: number | null;
       };
       return mapRowToEntry(row);
     } finally {
@@ -142,7 +163,9 @@ export default class BotVotingInfo {
       }>(
         `SELECT ROUND_NUMBER,
                 NOMINATION_LIST_ID,
-                NEXT_VOTE_AT
+                NEXT_VOTE_AT,
+                FIVE_DAY_REMINDER_SENT,
+                ONE_DAY_REMINDER_SENT
            FROM BOT_VOTING_INFO
           WHERE ROUND_NUMBER = (
             SELECT MAX(ROUND_NUMBER) FROM BOT_VOTING_INFO
@@ -160,6 +183,8 @@ export default class BotVotingInfo {
         ROUND_NUMBER: number;
         NOMINATION_LIST_ID: number | null;
         NEXT_VOTE_AT: Date | string;
+        FIVE_DAY_REMINDER_SENT: number | null;
+        ONE_DAY_REMINDER_SENT: number | null;
       };
 
       return mapRowToEntry(row);
@@ -205,11 +230,15 @@ export default class BotVotingInfo {
         `INSERT INTO BOT_VOTING_INFO (
            ROUND_NUMBER,
            NOMINATION_LIST_ID,
-           NEXT_VOTE_AT
+           NEXT_VOTE_AT,
+           FIVE_DAY_REMINDER_SENT,
+           ONE_DAY_REMINDER_SENT
          ) VALUES (
            :round,
            :nominationListId,
-           :nextVoteAt
+           :nextVoteAt,
+           0,
+           0
          )`,
         {
           round,
@@ -218,6 +247,37 @@ export default class BotVotingInfo {
         },
         { autoCommit: true },
       );
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async markReminderSent(
+    roundNumber: number,
+    reminder: "fiveDay" | "oneDay",
+  ): Promise<void> {
+    const round = normalizeRoundNumber(roundNumber);
+    const column =
+      reminder === "fiveDay" ? "FIVE_DAY_REMINDER_SENT" : "ONE_DAY_REMINDER_SENT";
+
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+
+    try {
+      const result = await connection.execute(
+        `UPDATE BOT_VOTING_INFO
+            SET ${column} = 1
+          WHERE ROUND_NUMBER = :round`,
+        { round },
+        { autoCommit: true },
+      );
+
+      const rowsUpdated = result.rowsAffected ?? 0;
+      if (rowsUpdated === 0) {
+        throw new Error(
+          `No BOT_VOTING_INFO row found for round ${round} when updating ${column}.`,
+        );
+      }
     } finally {
       await connection.close();
     }
