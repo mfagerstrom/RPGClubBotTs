@@ -12,24 +12,28 @@ import { Discord, Slash, SlashOption } from "discordx";
 import { searchHltb } from "../functions/SearchHltb.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 let Coverart = class Coverart {
-    async coverart(title, interaction) {
-        await safeDeferReply(interaction);
+    async coverart(title, showInChat, interaction) {
+        const ephemeral = !showInChat;
+        await safeDeferReply(interaction, { ephemeral });
         try {
             const result = await searchHltb(title);
             if (result && result.imageUrl) {
                 await safeReply(interaction, {
                     content: result.imageUrl,
+                    ephemeral,
                 });
             }
             else {
                 await safeReply(interaction, {
                     content: `Sorry, no cover art was found for "${title}".`,
+                    ephemeral,
                 });
             }
         }
         catch (error) {
             await safeReply(interaction, {
                 content: `Sorry, there was an error searching for cover art for "${title}". Please try again later.`,
+                ephemeral,
             });
         }
     }
@@ -41,6 +45,12 @@ __decorate([
         name: "title",
         required: true,
         type: ApplicationCommandOptionType.String,
+    })),
+    __param(1, SlashOption({
+        description: "If set to true, show the results in the channel instead of ephemerally.",
+        name: "showinchat",
+        required: false,
+        type: ApplicationCommandOptionType.Boolean,
     }))
 ], Coverart.prototype, "coverart", null);
 Coverart = __decorate([
