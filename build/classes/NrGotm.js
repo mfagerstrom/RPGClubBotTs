@@ -55,6 +55,7 @@ async function loadFromDatabaseInternal() {
                 entry.votingResultsMessageId = votingId;
             }
             const game = {
+                id: Number(row.NR_GOTM_ID),
                 title: row.GAME_TITLE,
                 threadId: row.THREAD_ID ?? null,
                 redditUrl: row.REDDIT_URL ?? null,
@@ -152,6 +153,7 @@ export default class NrGotm {
             round: r,
             monthYear,
             gameOfTheMonth: games.map((g) => ({
+                id: g.id ?? null,
                 title: g.title,
                 threadId: g.threadId ?? null,
                 redditUrl: g.redditUrl ?? null,
@@ -226,7 +228,7 @@ export default class NrGotm {
         return removed ?? null;
     }
 }
-export async function updateNrGotmGameFieldInDatabase(round, gameIndex, field, value) {
+export async function updateNrGotmGameFieldInDatabase(opts) {
     const pool = getOraclePool();
     const connection = await pool.getConnection();
     try {
@@ -235,8 +237,27 @@ export async function updateNrGotmGameFieldInDatabase(round, gameIndex, field, v
             threadId: "THREAD_ID",
             redditUrl: "REDDIT_URL",
         };
-        const columnName = columnMap[field];
-        const result = await connection.execute(`SELECT ROUND_NUMBER,
+        const columnName = columnMap[opts.field];
+        // Prefer rowId if provided
+        if (opts.rowId) {
+            await connection.execute(`UPDATE NR_GOTM_ENTRIES
+            SET ${columnName} = :value
+          WHERE NR_GOTM_ID = :rowId`, {
+                rowId: opts.rowId,
+                value: opts.value,
+            }, { autoCommit: true });
+            return;
+        }
+        const round = opts.round;
+        const gameIndex = opts.gameIndex;
+        if (!Number.isInteger(round)) {
+            throw new Error("round is required when rowId is not provided.");
+        }
+        if (!Number.isInteger(gameIndex)) {
+            throw new Error("gameIndex is required when rowId is not provided.");
+        }
+        const result = await connection.execute(`SELECT NR_GOTM_ID,
+              ROUND_NUMBER,
               GAME_INDEX
          FROM NR_GOTM_ENTRIES
         WHERE ROUND_NUMBER = :round
@@ -245,18 +266,17 @@ export async function updateNrGotmGameFieldInDatabase(round, gameIndex, field, v
         if (!rows.length) {
             throw new Error(`No NR-GOTM database rows found for round ${round}.`);
         }
-        if (!Number.isInteger(gameIndex) || gameIndex < 0 || gameIndex >= rows.length) {
+        const gi = Number(gameIndex);
+        if (!Number.isInteger(gi) || gi < 0 || gi >= rows.length) {
             throw new Error(`Game index ${gameIndex} is out of range for NR-GOTM round ${round} (have ${rows.length} games).`);
         }
-        const targetRow = rows[gameIndex];
-        const dbGameIndex = targetRow.GAME_INDEX;
+        const targetRow = rows[gi];
+        const rowId = targetRow.NR_GOTM_ID;
         await connection.execute(`UPDATE NR_GOTM_ENTRIES
           SET ${columnName} = :value
-        WHERE ROUND_NUMBER = :round
-          AND GAME_INDEX = :gameIndex`, {
-            round,
-            gameIndex: dbGameIndex,
-            value,
+        WHERE NR_GOTM_ID = :rowId`, {
+            rowId,
+            value: opts.value,
         }, { autoCommit: true });
     }
     finally {
@@ -293,9 +313,10 @@ export async function insertNrGotmRoundInDatabase(round, monthYear, games) {
         if (Number.isFinite(count) && count > 0) {
             throw new Error(`NR-GOTM round ${round} already exists in the database.`);
         }
+        const insertedIds = [];
         for (let i = 0; i < games.length; i++) {
             const g = games[i];
-            await connection.execute(`INSERT INTO NR_GOTM_ENTRIES (
+            const result = await connection.execute(`INSERT INTO NR_GOTM_ENTRIES (
            ROUND_NUMBER,
            MONTH_YEAR,
            GAME_INDEX,
@@ -311,15 +332,23 @@ export async function insertNrGotmRoundInDatabase(round, monthYear, games) {
            :threadId,
            :redditUrl,
            NULL
-         )`, {
+         )
+         RETURNING NR_GOTM_ID INTO :outId`, {
                 round,
                 monthYear,
                 gameIndex: i,
                 title: g.title,
                 threadId: g.threadId ?? null,
                 redditUrl: g.redditUrl ?? null,
+                outId: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
             }, { autoCommit: true });
+            const outIdArr = result.outBinds?.outId;
+            const newId = Array.isArray(outIdArr) ? outIdArr[0] : outIdArr;
+            if (newId !== undefined && newId !== null) {
+                insertedIds.push(Number(newId));
+            }
         }
+        return insertedIds;
     }
     finally {
         await connection.close();

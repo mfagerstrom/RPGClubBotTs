@@ -647,8 +647,9 @@ export class Admin {
     }
 
     try {
-      await insertNrGotmRoundInDatabase(nextRound, monthYear, games);
-      const newEntry = NrGotm.addRound(nextRound, monthYear, games);
+      const insertedIds = await insertNrGotmRoundInDatabase(nextRound, monthYear, games);
+      const gamesWithIds = games.map((g, idx) => ({ ...g, id: insertedIds[idx] ?? null }));
+      const newEntry = NrGotm.addRound(nextRound, monthYear, gamesWithIds);
       const embed = await buildNrGotmEntryEmbed(
         newEntry,
         interaction.guildId ?? undefined,
@@ -943,7 +944,13 @@ export class Admin {
     }
 
     try {
-      await updateNrGotmGameFieldInDatabase(roundNumber, gameIndex, field!, newValue);
+      await updateNrGotmGameFieldInDatabase({
+        rowId: entry.gameOfTheMonth?.[gameIndex]?.id ?? null,
+        round: roundNumber,
+        gameIndex,
+        field: field!,
+        value: newValue,
+      });
 
       let updatedEntry: NrGotmEntry | null = null;
       if (field === "title") {

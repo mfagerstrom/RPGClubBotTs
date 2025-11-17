@@ -8,6 +8,15 @@ import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 
 const ANNOUNCEMENTS_CHANNEL_ID: string | undefined = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 
+function displayAuditValue(value: string | null | undefined): string | null {
+  if (value === AUDIT_NO_VALUE_SENTINEL) return null;
+  return value ?? null;
+}
+
+function isNoNrGotm(entry: NrGotmEntry): boolean {
+  return entry.gameOfTheMonth.some((g) => (g.title ?? "").trim().toLowerCase() === "n/a");
+}
+
 const MONTH_CHOICES = [
   { name: "January", value: "January" },
   { name: "February", value: "February" },
@@ -133,8 +142,28 @@ export class NrGotmSearch {
         return;
       }
 
+      const allEntries = NrGotm.all();
+      const latestRound = allEntries.length ? Math.max(...allEntries.map((e) => e.round)) : null;
+      const latestEntry = latestRound ? allEntries.find((e) => e.round === latestRound) : null;
+
+      let embedsResults = results.slice();
+      if (
+        results.length === 1 &&
+        latestEntry &&
+        results[0].round === latestEntry.round &&
+        isNoNrGotm(results[0])
+      ) {
+        const previous = allEntries
+          .filter((e) => e.round !== latestEntry.round && !isNoNrGotm(e))
+          .sort((a, b) => b.round - a.round)[0];
+        if (previous) {
+          embedsResults = [results[0], previous];
+          criteriaLabel = criteriaLabel ?? `Round ${results[0].round}`;
+        }
+      }
+
       const embeds = await buildNrGotmEmbeds(
-        results,
+        embedsResults,
         criteriaLabel,
         interaction.guildId ?? undefined,
         interaction.client,
@@ -172,24 +201,35 @@ async function buildNrGotmEmbeds(
   guildId: string | undefined,
   client: Client,
 ): Promise<EmbedBuilder[]> {
-  if (results.length > 12) {
-    return buildCompactEmbeds(results, criteriaLabel, guildId);
-  }
-
   const embeds: EmbedBuilder[] = [];
+
+  const buildNoEmbed = (entry: NrGotmEntry): EmbedBuilder => {
+    return new EmbedBuilder()
+      .setColor(0x0099ff)
+      .setTitle(`NR-GOTM Round ${entry.round} - ${entry.monthYear}`)
+      .setDescription("No Non-RPG nominations for this round.");
+  };
+
   for (const entry of results) {
+    if (isNoNrGotm(entry)) {
+      embeds.push(buildNoEmbed(entry));
+      continue;
+    }
+
+    const { body } = formatGames(entry, guildId);
     const desc = formatGamesWithJump(entry, guildId);
     const embed = new EmbedBuilder()
       .setColor(0x0099ff)
       .setTitle(`NR-GOTM Round ${entry.round} - ${entry.monthYear}`)
-      .setDescription(desc);
+      .setDescription(desc || body);
 
     const jumpLink = buildResultsJumpLink(entry, guildId);
     if (jumpLink) embed.setURL(jumpLink);
 
     for (const g of entry.gameOfTheMonth) {
-      if (!g.threadId) continue;
-      const imgUrl = await resolveThreadImageUrl(client, g.threadId).catch(
+      const threadId = displayAuditValue(g.threadId);
+      if (!threadId) continue;
+      const imgUrl = await resolveThreadImageUrl(client, threadId).catch(
         () => undefined,
       );
       if (imgUrl) {
@@ -199,6 +239,10 @@ async function buildNrGotmEmbeds(
     }
 
     embeds.push(embed);
+  }
+
+  if (embeds.length === 0 && results.length > 12) {
+    return buildCompactEmbeds(results, criteriaLabel, guildId);
   }
 
   return embeds;
@@ -284,18 +328,20 @@ function chunkEmbeds(list: EmbedBuilder[], size: number): EmbedBuilder[][] {
   return out;
 }
 
-function displayAuditValue(value: string | null | undefined): string | null {
+function displayValueSafe(value: string | null | undefined): string | null {
   if (value === AUDIT_NO_VALUE_SENTINEL) return null;
   return value ?? null;
 }
 
-function formatGames(games: NrGotmGame[], guildId?: string): string {
-  if (!games || games.length === 0) return "(no games listed)";
+function formatGames(entry: NrGotmEntry, guildId?: string): { body: string; winners: string[] } {
+  const games = entry.gameOfTheMonth;
+  if (!games || games.length === 0) return { body: "(no games listed)", winners: [] };
   const lines: string[] = [];
+  const winners: string[] = [];
   for (const g of games) {
     const parts: string[] = [];
-    const threadId = displayAuditValue(g.threadId);
-    const redditUrl = displayAuditValue(g.redditUrl);
+    const threadId = displayValueSafe(g.threadId);
+    const redditUrl = displayValueSafe(g.redditUrl);
     const titleWithThread = threadId ? `${g.title} - <#${threadId}>` : g.title;
     parts.push(titleWithThread);
     if (redditUrl) {
@@ -303,8 +349,9 @@ function formatGames(games: NrGotmGame[], guildId?: string): string {
     }
     const firstLine = `- ${parts.join(" | ")}`;
     lines.push(firstLine);
+    if (threadId) winners.push(threadId);
   }
-  return lines.join("\n");
+  return { body: lines.join("\n"), winners };
 }
 
 function truncateField(value: string): string {
@@ -322,7 +369,7 @@ function buildResultsJumpLink(
     | string
     | undefined
     | null;
-  const msgId = displayAuditValue(rawMsgId);
+  const msgId = displayValueSafe(rawMsgId);
   if (!msgId) return undefined;
   return `https://discord.com/channels/${guildId}/${ANNOUNCEMENTS_CHANNEL_ID}/${msgId}`;
 }
@@ -331,7 +378,7 @@ function formatGamesWithJump(
   entry: NrGotmEntry,
   guildId?: string,
 ): string {
-  const body = formatGames(entry.gameOfTheMonth, guildId);
+  const { body } = formatGames(entry, guildId);
   const link = buildResultsJumpLink(entry, guildId);
   if (!link) return truncateField(body);
   const tail = `[Voting Results](${link})`;

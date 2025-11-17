@@ -14,6 +14,14 @@ import { AUDIT_NO_VALUE_SENTINEL } from "./superadmin.command.js";
 import NrGotm from "../classes/NrGotm.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 const ANNOUNCEMENTS_CHANNEL_ID = process.env.ANNOUNCEMENTS_CHANNEL_ID;
+function displayAuditValue(value) {
+    if (value === AUDIT_NO_VALUE_SENTINEL)
+        return null;
+    return value ?? null;
+}
+function isNoNrGotm(entry) {
+    return entry.gameOfTheMonth.some((g) => (g.title ?? "").trim().toLowerCase() === "n/a");
+}
 const MONTH_CHOICES = [
     { name: "January", value: "January" },
     { name: "February", value: "February" },
@@ -89,7 +97,23 @@ let NrGotmSearch = class NrGotmSearch {
                 });
                 return;
             }
-            const embeds = await buildNrGotmEmbeds(results, criteriaLabel, interaction.guildId ?? undefined, interaction.client);
+            const allEntries = NrGotm.all();
+            const latestRound = allEntries.length ? Math.max(...allEntries.map((e) => e.round)) : null;
+            const latestEntry = latestRound ? allEntries.find((e) => e.round === latestRound) : null;
+            let embedsResults = results.slice();
+            if (results.length === 1 &&
+                latestEntry &&
+                results[0].round === latestEntry.round &&
+                isNoNrGotm(results[0])) {
+                const previous = allEntries
+                    .filter((e) => e.round !== latestEntry.round && !isNoNrGotm(e))
+                    .sort((a, b) => b.round - a.round)[0];
+                if (previous) {
+                    embedsResults = [results[0], previous];
+                    criteriaLabel = criteriaLabel ?? `Round ${results[0].round}`;
+                }
+            }
+            const embeds = await buildNrGotmEmbeds(embedsResults, criteriaLabel, interaction.guildId ?? undefined, interaction.client);
             const content = criteriaLabel ? `Query: "${criteriaLabel}"` : undefined;
             if (embeds.length <= 10) {
                 await safeReply(interaction, { content, embeds, ephemeral });
@@ -161,29 +185,41 @@ function parseMonthValue(input) {
     return trimmed;
 }
 async function buildNrGotmEmbeds(results, criteriaLabel, guildId, client) {
-    if (results.length > 12) {
-        return buildCompactEmbeds(results, criteriaLabel, guildId);
-    }
     const embeds = [];
+    const buildNoEmbed = (entry) => {
+        return new EmbedBuilder()
+            .setColor(0x0099ff)
+            .setTitle(`NR-GOTM Round ${entry.round} - ${entry.monthYear}`)
+            .setDescription("No Non-RPG nominations for this round.");
+    };
     for (const entry of results) {
+        if (isNoNrGotm(entry)) {
+            embeds.push(buildNoEmbed(entry));
+            continue;
+        }
+        const { body } = formatGames(entry, guildId);
         const desc = formatGamesWithJump(entry, guildId);
         const embed = new EmbedBuilder()
             .setColor(0x0099ff)
             .setTitle(`NR-GOTM Round ${entry.round} - ${entry.monthYear}`)
-            .setDescription(desc);
+            .setDescription(desc || body);
         const jumpLink = buildResultsJumpLink(entry, guildId);
         if (jumpLink)
             embed.setURL(jumpLink);
         for (const g of entry.gameOfTheMonth) {
-            if (!g.threadId)
+            const threadId = displayAuditValue(g.threadId);
+            if (!threadId)
                 continue;
-            const imgUrl = await resolveThreadImageUrl(client, g.threadId).catch(() => undefined);
+            const imgUrl = await resolveThreadImageUrl(client, threadId).catch(() => undefined);
             if (imgUrl) {
                 embed.setThumbnail(imgUrl);
                 break;
             }
         }
         embeds.push(embed);
+    }
+    if (embeds.length === 0 && results.length > 12) {
+        return buildCompactEmbeds(results, criteriaLabel, guildId);
     }
     return embeds;
 }
@@ -254,19 +290,21 @@ function chunkEmbeds(list, size) {
     }
     return out;
 }
-function displayAuditValue(value) {
+function displayValueSafe(value) {
     if (value === AUDIT_NO_VALUE_SENTINEL)
         return null;
     return value ?? null;
 }
-function formatGames(games, guildId) {
+function formatGames(entry, guildId) {
+    const games = entry.gameOfTheMonth;
     if (!games || games.length === 0)
-        return "(no games listed)";
+        return { body: "(no games listed)", winners: [] };
     const lines = [];
+    const winners = [];
     for (const g of games) {
         const parts = [];
-        const threadId = displayAuditValue(g.threadId);
-        const redditUrl = displayAuditValue(g.redditUrl);
+        const threadId = displayValueSafe(g.threadId);
+        const redditUrl = displayValueSafe(g.redditUrl);
         const titleWithThread = threadId ? `${g.title} - <#${threadId}>` : g.title;
         parts.push(titleWithThread);
         if (redditUrl) {
@@ -274,8 +312,10 @@ function formatGames(games, guildId) {
         }
         const firstLine = `- ${parts.join(" | ")}`;
         lines.push(firstLine);
+        if (threadId)
+            winners.push(threadId);
     }
-    return lines.join("\n");
+    return { body: lines.join("\n"), winners };
 }
 function truncateField(value) {
     const MAX = 1024;
@@ -287,13 +327,13 @@ function buildResultsJumpLink(entry, guildId) {
     if (!guildId || !ANNOUNCEMENTS_CHANNEL_ID)
         return undefined;
     const rawMsgId = entry.votingResultsMessageId;
-    const msgId = displayAuditValue(rawMsgId);
+    const msgId = displayValueSafe(rawMsgId);
     if (!msgId)
         return undefined;
     return `https://discord.com/channels/${guildId}/${ANNOUNCEMENTS_CHANNEL_ID}/${msgId}`;
 }
 function formatGamesWithJump(entry, guildId) {
-    const body = formatGames(entry.gameOfTheMonth, guildId);
+    const { body } = formatGames(entry, guildId);
     const link = buildResultsJumpLink(entry, guildId);
     if (!link)
         return truncateField(body);

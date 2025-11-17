@@ -441,8 +441,9 @@ let Admin = class Admin {
             });
         }
         try {
-            await insertNrGotmRoundInDatabase(nextRound, monthYear, games);
-            const newEntry = NrGotm.addRound(nextRound, monthYear, games);
+            const insertedIds = await insertNrGotmRoundInDatabase(nextRound, monthYear, games);
+            const gamesWithIds = games.map((g, idx) => ({ ...g, id: insertedIds[idx] ?? null }));
+            const newEntry = NrGotm.addRound(nextRound, monthYear, gamesWithIds);
             const embed = await buildNrGotmEntryEmbed(newEntry, interaction.guildId ?? undefined, interaction.client);
             await safeReply(interaction, {
                 content: `Created NR-GOTM round ${nextRound}.`,
@@ -659,7 +660,13 @@ let Admin = class Admin {
             newValue = null;
         }
         try {
-            await updateNrGotmGameFieldInDatabase(roundNumber, gameIndex, field, newValue);
+            await updateNrGotmGameFieldInDatabase({
+                rowId: entry.gameOfTheMonth?.[gameIndex]?.id ?? null,
+                round: roundNumber,
+                gameIndex,
+                field: field,
+                value: newValue,
+            });
             let updatedEntry = null;
             if (field === "title") {
                 updatedEntry = NrGotm.updateTitleByRound(roundNumber, newValue ?? "", gameIndex);

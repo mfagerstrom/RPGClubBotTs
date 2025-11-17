@@ -922,10 +922,22 @@ export class SuperAdmin {
             });
             continue;
           }
-          await updateNrGotmGameFieldInDatabase(entry.round, i, "threadId", res.result.value);
+          await updateNrGotmGameFieldInDatabase({
+              rowId: (game as any).id ?? null,
+              round: entry.round,
+              gameIndex: i,
+              field: "threadId",
+              value: res.result.value,
+            });
           NrGotm.updateThreadIdByRound(entry.round, res.result.value, i);
         } else if (res.result && res.result.action === "no-value") {
-          await updateNrGotmGameFieldInDatabase(entry.round, i, "threadId", AUDIT_NO_VALUE_SENTINEL);
+          await updateNrGotmGameFieldInDatabase({
+              rowId: (game as any).id ?? null,
+              round: entry.round,
+              gameIndex: i,
+              field: "threadId",
+              value: AUDIT_NO_VALUE_SENTINEL,
+            });
           NrGotm.updateThreadIdByRound(entry.round, AUDIT_NO_VALUE_SENTINEL, i);
         }
         }
@@ -951,10 +963,22 @@ export class SuperAdmin {
             break;
           }
           if (res.result && res.result.action === "value") {
-            await updateNrGotmGameFieldInDatabase(entry.round, i, "redditUrl", res.result.value);
+            await updateNrGotmGameFieldInDatabase({
+              rowId: (game as any).id ?? null,
+              round: entry.round,
+              gameIndex: i,
+              field: "redditUrl",
+              value: res.result.value,
+            });
             NrGotm.updateRedditUrlByRound(entry.round, res.result.value, i);
           } else if (res.result && res.result.action === "no-value") {
-            await updateNrGotmGameFieldInDatabase(entry.round, i, "redditUrl", AUDIT_NO_VALUE_SENTINEL);
+            await updateNrGotmGameFieldInDatabase({
+              rowId: (game as any).id ?? null,
+              round: entry.round,
+              gameIndex: i,
+              field: "redditUrl",
+              value: AUDIT_NO_VALUE_SENTINEL,
+            });
             NrGotm.updateRedditUrlByRound(entry.round, AUDIT_NO_VALUE_SENTINEL, i);
           }
         }
@@ -1306,8 +1330,9 @@ export class SuperAdmin {
     }
 
     try {
-      await insertNrGotmRoundInDatabase(nextRound, monthYear, games);
-      const newEntry = NrGotm.addRound(nextRound, monthYear, games);
+      const insertedIds = await insertNrGotmRoundInDatabase(nextRound, monthYear, games);
+      const gamesWithIds = games.map((g, idx) => ({ ...g, id: insertedIds[idx] ?? null }));
+      const newEntry = NrGotm.addRound(nextRound, monthYear, gamesWithIds);
       const embed = await buildNrGotmEntryEmbed(
         newEntry,
         interaction.guildId ?? undefined,
@@ -1603,7 +1628,13 @@ export class SuperAdmin {
     }
 
     try {
-      await updateNrGotmGameFieldInDatabase(roundNumber, gameIndex, field!, newValue);
+      await updateNrGotmGameFieldInDatabase({
+        rowId: entry.gameOfTheMonth?.[gameIndex]?.id ?? null,
+        round: roundNumber,
+        gameIndex,
+        field: field!,
+        value: newValue,
+      });
 
       let updatedEntry: NrGotmEntry | null = null;
       if (field === "title") {
