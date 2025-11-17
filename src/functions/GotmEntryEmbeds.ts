@@ -157,6 +157,20 @@ export async function buildNrGotmEntryEmbed(
   const jumpLink = buildResultsJumpLink(entry, guildId);
   if (jumpLink) embed.setURL(jumpLink);
 
+  const winners = Array.isArray(entry.gameOfTheMonth)
+    ? entry.gameOfTheMonth.filter((g) => !!g.threadId)
+    : [];
+
+  if (winners.length) {
+    for (const w of winners) {
+      const threadId = displayAuditValue((w as any).threadId);
+      if (threadId) {
+        embed.addFields({ name: "Winner", value: `<#${threadId}> — ${w.title}`, inline: false });
+      }
+    }
+  }
+
+  // Fallback thumbnail from winners with images
   const imgUrl = await findFirstGameImage(client, entry.gameOfTheMonth);
   if (imgUrl) {
     embed.setThumbnail(imgUrl);

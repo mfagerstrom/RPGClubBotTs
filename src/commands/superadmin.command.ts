@@ -397,7 +397,7 @@ async function promptForAuditValue(
     try {
       return await msg.edit(data);
     } catch (err: any) {
-      if (err?.code === 10008) {
+      if (err?.code === 10008 || err?.code === 50027) {
         return null;
       }
       throw err;
@@ -409,7 +409,7 @@ async function promptForAuditValue(
       const edited = await (interaction as any).editReply(payload);
       return edited as Message;
     } catch (err: any) {
-      if (err?.code === 10008) return null;
+      if (err?.code === 10008 || err?.code === 50027) return null;
       throw err;
     }
   };
@@ -785,7 +785,7 @@ export class SuperAdmin {
           await promptMessage.edit({ content: finalContent, embeds: [], components: [] });
         }
       } catch (err: any) {
-        if (err?.code !== 10008) throw err;
+        if (err?.code !== 10008 && err?.code !== 50027) throw err;
         await safeReply(interaction, { content: finalContent });
       }
     } else {
@@ -830,9 +830,17 @@ export class SuperAdmin {
       type: ApplicationCommandOptionType.String,
     })
     order: string | undefined,
+    @SlashOption({
+      description: "If true, show prompts in-channel (not ephemeral)",
+      name: "showinchat",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    showInChat: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction);
+    const ephemeral = !showInChat;
+    await safeDeferReply(interaction, { ephemeral });
 
     const okToUseCommand: boolean = await isSuperAdmin(interaction);
     if (!okToUseCommand) return;
@@ -856,6 +864,7 @@ export class SuperAdmin {
     if (!entries.length) {
       await safeReply(interaction, {
         content: "No NR-GOTM data available to audit.",
+        ephemeral,
       });
       return;
     }
@@ -863,6 +872,7 @@ export class SuperAdmin {
     await safeReply(interaction, {
       content:
         "Starting NR-GOTM data audit. Click Stop Audit at any prompt to end early. Click Skip or type none/null to leave a field empty.",
+      ephemeral,
     });
 
     let stopped = false;
@@ -990,7 +1000,7 @@ export class SuperAdmin {
           await promptMessage.edit({ content: finalContent, embeds: [], components: [] });
         }
       } catch (err: any) {
-        if (err?.code !== 10008) throw err;
+        if (err?.code !== 10008 && err?.code !== 50027) throw err;
         await safeReply(interaction, { content: finalContent });
       }
     } else {

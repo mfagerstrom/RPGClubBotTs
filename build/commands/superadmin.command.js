@@ -267,7 +267,7 @@ async function promptForAuditValue(interaction, opts) {
             return await msg.edit(data);
         }
         catch (err) {
-            if (err?.code === 10008) {
+            if (err?.code === 10008 || err?.code === 50027) {
                 return null;
             }
             throw err;
@@ -279,7 +279,7 @@ async function promptForAuditValue(interaction, opts) {
             return edited;
         }
         catch (err) {
-            if (err?.code === 10008)
+            if (err?.code === 10008 || err?.code === 50027)
                 return null;
             throw err;
         }
@@ -588,7 +588,7 @@ let SuperAdmin = class SuperAdmin {
                 }
             }
             catch (err) {
-                if (err?.code !== 10008)
+                if (err?.code !== 10008 && err?.code !== 50027)
                     throw err;
                 await safeReply(interaction, { content: finalContent });
             }
@@ -602,8 +602,9 @@ let SuperAdmin = class SuperAdmin {
             }
         }
     }
-    async nrGotmDataAudit(threadIdFlag, redditUrlFlag, votingResultsFlag, order, interaction) {
-        await safeDeferReply(interaction);
+    async nrGotmDataAudit(threadIdFlag, redditUrlFlag, votingResultsFlag, order, showInChat, interaction) {
+        const ephemeral = !showInChat;
+        await safeDeferReply(interaction, { ephemeral });
         const okToUseCommand = await isSuperAdmin(interaction);
         if (!okToUseCommand)
             return;
@@ -624,11 +625,13 @@ let SuperAdmin = class SuperAdmin {
         if (!entries.length) {
             await safeReply(interaction, {
                 content: "No NR-GOTM data available to audit.",
+                ephemeral,
             });
             return;
         }
         await safeReply(interaction, {
             content: "Starting NR-GOTM data audit. Click Stop Audit at any prompt to end early. Click Skip or type none/null to leave a field empty.",
+            ephemeral,
         });
         let stopped = false;
         let promptMessage = null;
@@ -756,7 +759,7 @@ let SuperAdmin = class SuperAdmin {
                 }
             }
             catch (err) {
-                if (err?.code !== 10008)
+                if (err?.code !== 10008 && err?.code !== 50027)
                     throw err;
                 await safeReply(interaction, { content: finalContent });
             }
@@ -1490,6 +1493,12 @@ __decorate([
         name: "order",
         required: false,
         type: ApplicationCommandOptionType.String,
+    })),
+    __param(4, SlashOption({
+        description: "If true, show prompts in-channel (not ephemeral)",
+        name: "showinchat",
+        required: false,
+        type: ApplicationCommandOptionType.Boolean,
     }))
 ], SuperAdmin.prototype, "nrGotmDataAudit", null);
 __decorate([
