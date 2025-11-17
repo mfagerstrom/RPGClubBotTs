@@ -462,7 +462,7 @@ export class Admin {
     reason: string,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction);
 
     const okToUseCommand: boolean = await isAdmin(interaction);
     if (!okToUseCommand) {
@@ -489,6 +489,8 @@ export class Admin {
       const embed = buildNominationDeleteViewEmbed("GOTM", "/gotm nominate", targetRound, window, nominations);
       const adminName = interaction.user.tag ?? interaction.user.username ?? interaction.user.id;
       const content = `${adminName} deleted <@${user.id}>'s nomination "${nomination.gameTitle}" for GOTM Round ${targetRound}. Reason: ${reason}`;
+
+      await interaction.deleteReply().catch(() => {});
 
       await announceNominationChange("gotm", interaction as any, content, embed);
     } catch (err: any) {
@@ -549,6 +551,8 @@ export class Admin {
       const embed = buildNominationDeleteViewEmbed("NR-GOTM", "/nr-gotm nominate", targetRound, window, nominations);
       const adminName = interaction.user.tag ?? interaction.user.username ?? interaction.user.id;
       const content = `${adminName} deleted <@${user.id}>'s nomination "${nomination.gameTitle}" for NR-GOTM Round ${targetRound}. Reason: ${reason}`;
+
+      await interaction.deleteReply().catch(() => {});
 
       await announceNominationChange("nr-gotm", interaction as any, content, embed);
     } catch (err: any) {

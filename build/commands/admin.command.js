@@ -293,7 +293,7 @@ let Admin = class Admin {
         }
     }
     async deleteGotmNomination(user, reason, interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction);
         const okToUseCommand = await isAdmin(interaction);
         if (!okToUseCommand) {
             return;
@@ -316,6 +316,7 @@ let Admin = class Admin {
             const embed = buildNominationDeleteViewEmbed("GOTM", "/gotm nominate", targetRound, window, nominations);
             const adminName = interaction.user.tag ?? interaction.user.username ?? interaction.user.id;
             const content = `${adminName} deleted <@${user.id}>'s nomination "${nomination.gameTitle}" for GOTM Round ${targetRound}. Reason: ${reason}`;
+            await interaction.deleteReply().catch(() => { });
             await announceNominationChange("gotm", interaction, content, embed);
         }
         catch (err) {
@@ -351,6 +352,7 @@ let Admin = class Admin {
             const embed = buildNominationDeleteViewEmbed("NR-GOTM", "/nr-gotm nominate", targetRound, window, nominations);
             const adminName = interaction.user.tag ?? interaction.user.username ?? interaction.user.id;
             const content = `${adminName} deleted <@${user.id}>'s nomination "${nomination.gameTitle}" for NR-GOTM Round ${targetRound}. Reason: ${reason}`;
+            await interaction.deleteReply().catch(() => { });
             await announceNominationChange("nr-gotm", interaction, content, embed);
         }
         catch (err) {

@@ -1960,6 +1960,8 @@ export class SuperAdmin {
       const adminName = interaction.user.tag ?? interaction.user.username ?? interaction.user.id;
       const content = `${adminName} deleted <@${user.id}>'s nomination "${nomination.gameTitle}" for GOTM Round ${targetRound}. Reason: ${reason}`;
 
+      await interaction.deleteReply().catch(() => {});
+
       await announceNominationChange("gotm", interaction as any, content, embed);
     } catch (err: any) {
       const msg = err?.message ?? String(err);
@@ -2019,6 +2021,8 @@ export class SuperAdmin {
       const embed = buildNominationDeleteViewEmbed("NR-GOTM", "/nr-gotm nominate", targetRound, window, nominations);
       const adminName = interaction.user.tag ?? interaction.user.username ?? interaction.user.id;
       const content = `${adminName} deleted <@${user.id}>'s nomination "${nomination.gameTitle}" for NR-GOTM Round ${targetRound}. Reason: ${reason}`;
+
+      await interaction.deleteReply().catch(() => {});
 
       await announceNominationChange("nr-gotm", interaction as any, content, embed);
     } catch (err: any) {

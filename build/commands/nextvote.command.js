@@ -11,7 +11,6 @@ import { EmbedBuilder, ApplicationCommandOptionType } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
-import { NOMINATION_DISCUSSION_CHANNEL_IDS } from "../config/nominationChannels.js";
 let NextVoteCommand = class NextVoteCommand {
     async nextvote(showInChat, interaction) {
         const ephemeral = !showInChat;
@@ -38,10 +37,8 @@ let NextVoteCommand = class NextVoteCommand {
             const descriptionLines = [];
             descriptionLines.push(dateText);
             descriptionLines.push("");
-            descriptionLines.push("For nominations and discussion about the upcoming vote:");
-            for (const channelId of NOMINATION_DISCUSSION_CHANNEL_IDS) {
-                descriptionLines.push(`- <#${channelId}>`);
-            }
+            descriptionLines.push("See current nominations: /noms");
+            descriptionLines.push("Nominate a game: /gotm nominate or /nr-gotm nominate");
             const embed = new EmbedBuilder()
                 .setColor(0x0099ff)
                 .setTitle("Next Vote:")
