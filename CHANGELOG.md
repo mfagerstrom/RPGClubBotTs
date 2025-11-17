@@ -1,0 +1,115 @@
+# Changelog (Full Git History)
+
+Most recent first; derived from `git log --oneline`.
+
+- 706fca0 fix: nomination logic tweaks
+- e875050 feat: Implemented nomination functionality for both GOTM and NR-GOTM
+- 2ea20df chore: improved automatic node installation for chatgpt agent
+- f31efed refactor: updated nr-gotm functionality/db table to support multiple games.  Improved the feedback for months with no winners
+- a534516 feat: implemented non-rpg-data-audit and audited data fully
+- 2149f6f feat: greatly improved the audit for gotm, allowing permanent skips using __NO_VALUE__
+- 4a8adc4 feat: added /superadmin gotm-data-audit command and used it to fill out all existing voting result message IDs back to the creation of the discord server
+- f45fa76 feat: combined presence and presence-history into one command.  admin/superadmin can now restore previous presence values
+- 7f5a8b2 fix: /round and /nextvote are now ephemeral by default with optional showinchat flag
+- 060cf60 fix: /gotm and /nr-gotm are now ephemeral by default, able to post in chat via ShowInChat boolean parameter
+- 776ce24 fix: /mod /admin /superadmin permission denied messages are now ephemeral
+- 3669b53 fix: Coverart messages are now ephemeral with optional ShowInChat parameter
+- 09adf85 fix: HLTB messages are now ephemeral with optional ShowInChat parameter
+- 85fc611 feat: transformed /help into an interactive menu in an ephemeral message
+- 3ffc660 feat: added nomination reminder messages
+- 985f47c feat: implemented set-nextvote subcommand for /admin and /superadmin
+- 45f2d42 feat: implemented /round and /nextvote commands
+- 6eb0e27 feat: added a table for round / voting info and associated class wrapping it
+- 257c640 fix: cleanup and embed ui improvements
+- 548fcae feat: implemented /nr-gotm and associated /mod, /admin and /superadmin commands for management
+- dce4168 feat: added /superadmin commands.  /superadmin gotm-delete will delete the most recent GOTM in case one was added by mistake
+- 21d96f9 feat: implemented /admin edit-gotm and /admin add-gotm
+- 6b218ee feat: implemented presence history and admin/mod help
+- 3d1861a feat: added logging for commands used
+- 82a891f feat: implemented logging to discord #rpgclubbot_logs (admin only channel)
+- 884b68f feat: converted /gotm command to use sql database
+- b9d3c2b feat: implemented db connectivity to local oracle db in docker
+- aaaf978 feat: implemented deferReply() across all commands (bot is thinking...) to avoid timeouts
+- dc0aea8 feat: added link for voting results to /gotm, added data for results links from July 2024 on
+- 7421fe5 fix: typo
+- bef9760 feat: added images to /gotm results
+- 1d99090 fix: tweaks
+- c3b5ef3 chore: added the remainder of the thread ids
+- 4dc17e8 feat: added links to threads for games with a defined thread id
+- 4805785 chore: added some thread ids
+- 9d800cd feat: added setpresence and gotm commands
+- 8d4c503 fix: restored /coverart command
+- 1de2427 fix: corrected build folder being ignored
+- fffb19b fix: image embed cleanup
+- 85c42af feat: Implemented messaging to whatcha playing channel for new Now playing threads
+- 9745454 refactor: cleanup
+- 6a4fd68 fix: dusting this off, replaced custom google search api key
+- 72c8283 fix: remove presence
+- 234d5f7 fix: removed status for old NRGOTM
+- 8fbc416 chore: including build in repo
+- bfab793 chore: unignored build directory, since gcloud instance sucks at compiling code
+- 5165343 chore: removed logging from google search
+- f094c8e fix: fixed broken HLTB search by implementing google custom search api method
+- c75bb4c chore: updated nr-gotm
+- f0819b7 fix: updated featured game
+- 24cdeeb fix: hardocing presence
+- 3e61211 feat: added mongodb schemas for voting
+- c0a8ef0 chore: cleanup
+- 3827c1f fix: corrected mongodb connection
+- 759c69c refactor: converted presence function to use mongoDB for storage
+- 7519063 refactor: started using mongoDB for storage, set up Member and Role schemas, converted ScanGuild to its own function and stored the data in mongoDB
+- 8fa9469 fix: corrected nr gotm
+- 355c8c6 feat: implemented several commands for gotm nominations
+- 0e015a4 feat: implemented /coverart command
+- ae4c7fa fix: now  when member role is given, newcomers role will be removed
+- b95d494 refactor: moved HLTB Search functionality to its own function outside of the slash command
+- e2fcb31 chore: just some cleanup
+- 42042e3 feat: implemented slash commands for bot presence
+- a3c7420 feat: stubbed out a slash command group for /admin
+- 8bbf8b7 fix: and this time I actually added the files...
+- bd4f314 feat: stubbed out admin-only and mod-only slash commands
+- d30cd57 fix: corrected regression where members.json was not being populated
+- 891696e fix: typo
+- ece278a feat: added role data for each member to the guildScan function output
+- 99a4e84 feat: implemented guild scan, captured all guild members to a json file, started work on member role lookup / recording
+- 58178bd chore: empty commit to test webhook in Discord
+- 0cb772f chore: empty commit to test webhook in Discord
+- 76ac2aa chore: bumped version to 1.4.0
+- 9613cc3 feat: implemented mongoDB connection, converted changelog to JSON format and modified /changelog to utilize the new file.  Also added optional parameters to control output.
+- 9821818 feat: implemented pagination / multiple embeds for /todo and /changelog
+- 96b1378 chore: tiny change to embed
+- d9406cf fix: corrected embeds for informational commands
+- 9f1876c chore: renamed main
+- a64f607 chore: updated todo
+- 8dffb36 fix: corrected duplicate command name
+- 04a10f7 feat: implemented /changelog command
+- cff09f2 feat: implemented /todo command
+- 0b24453 fix: turned off /todo for now, it's not working yet and I'm out of time.
+- 2b28503 feat: implemented /todo command
+- f4109a6 feat: half-implemented a /todo command
+- 243c43c chore: set version
+- efd9ce7 chore: updated changelog
+- 5f9ffbe feat: implemented /todo command
+- 2831418 chore: spun off changelog.md from todo.md
+- 73a31b4 feat: added hardcoded presence state
+- 4626b87 added events command file for guildmemberremove, stubbed out plans
+- 60074b0 chore: updated todo
+- f478f5e feat: stubbed out member nickname functionality, updated todo list
+- 4639361 chore: updated todo
+- 23128af chore: added todo list
+- 1d6576d chore: set up dotenv
+- 8ae844a chore added mssql types
+- 2b9868d chore: added dotenv and mssql
+- 2b8aa50 chore: removing wrong tsc
+- d7d25db chore: installed tsc
+- c38f58d chore: remove command file
+- 0d074eb feat: implemented auto roles for newcomers and members
+- ec0b629 fix: added a better description for the title query
+- e4a35e9 fix: corrected issue with oddball edge case
+- 0ba03ec refactor: cleanup and commenting
+- c582316 feat: added cmd script for scheduled task on pc
+- 403afcf fix: found a better way to parse urls from google
+- 93ab2fe fix: found a better way to parse urls from google
+- b4b89e0 feat: re-implemented HLTB functionality
+- 836aabc very much a WIP
+- ee96c57 feat: initial commit
