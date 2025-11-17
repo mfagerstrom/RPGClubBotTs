@@ -750,7 +750,7 @@ export class Admin {
     try {
       await insertGotmRoundInDatabase(nextRound, monthYear, games);
       const newEntry = Gotm.addRound(nextRound, monthYear, games);
-      const embed = await buildGotmEntryEmbed(
+      const embedAssets = await buildGotmEntryEmbed(
         newEntry,
         interaction.guildId ?? undefined,
         interaction.client as any,
@@ -758,7 +758,8 @@ export class Admin {
 
       await safeReply(interaction, {
         content: `Created GOTM round ${nextRound}.`,
-        embeds: [embed],
+        embeds: [embedAssets.embed],
+        files: embedAssets.files?.length ? embedAssets.files : undefined,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
@@ -879,7 +880,7 @@ export class Admin {
       const insertedIds = await insertNrGotmRoundInDatabase(nextRound, monthYear, games);
       const gamesWithIds = games.map((g, idx) => ({ ...g, id: insertedIds[idx] ?? null }));
       const newEntry = NrGotm.addRound(nextRound, monthYear, gamesWithIds);
-      const embed = await buildNrGotmEntryEmbed(
+      const embedAssets = await buildNrGotmEntryEmbed(
         newEntry,
         interaction.guildId ?? undefined,
         interaction.client as any,
@@ -887,7 +888,8 @@ export class Admin {
 
       await safeReply(interaction, {
         content: `Created NR-GOTM round ${nextRound}.`,
-        embeds: [embed],
+        embeds: [embedAssets.embed],
+        files: embedAssets.files?.length ? embedAssets.files : undefined,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
@@ -943,7 +945,7 @@ export class Admin {
 
     const entry = entries[0];
 
-    const embed = await buildGotmEntryEmbed(
+    const embedAssets = await buildGotmEntryEmbed(
       entry,
       interaction.guildId ?? undefined,
       interaction.client as any,
@@ -951,7 +953,8 @@ export class Admin {
 
     await safeReply(interaction, {
       content: `Editing GOTM round ${roundNumber}.`,
-      embeds: [embed],
+      embeds: [embedAssets.embed],
+      files: embedAssets.files?.length ? embedAssets.files : undefined,
     });
 
     const totalGames = entry.gameOfTheMonth.length;
@@ -1032,7 +1035,7 @@ export class Admin {
       }
 
       const entryToShow = updatedEntry ?? entry;
-      const updatedEmbed = await buildGotmEntryEmbed(
+      const updatedAssets = await buildGotmEntryEmbed(
         entryToShow,
         interaction.guildId ?? undefined,
         interaction.client as any,
@@ -1040,7 +1043,8 @@ export class Admin {
 
       await safeReply(interaction, {
         content: `GOTM round ${roundNumber} updated successfully.`,
-        embeds: [updatedEmbed],
+        embeds: [updatedAssets.embed],
+        files: updatedAssets.files?.length ? updatedAssets.files : undefined,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
@@ -1096,7 +1100,7 @@ export class Admin {
 
     const entry = entries[0];
 
-    const embed = await buildNrGotmEntryEmbed(
+    const embedAssets = await buildNrGotmEntryEmbed(
       entry,
       interaction.guildId ?? undefined,
       interaction.client as any,
@@ -1104,7 +1108,8 @@ export class Admin {
 
     await safeReply(interaction, {
       content: `Editing NR-GOTM round ${roundNumber}.`,
-      embeds: [embed],
+      embeds: [embedAssets.embed],
+      files: embedAssets.files?.length ? embedAssets.files : undefined,
     });
 
     const totalGames = entry.gameOfTheMonth.length;
@@ -1191,7 +1196,7 @@ export class Admin {
       }
 
       const entryToShow = updatedEntry ?? entry;
-      const updatedEmbed = await buildNrGotmEntryEmbed(
+      const updatedAssets = await buildNrGotmEntryEmbed(
         entryToShow,
         interaction.guildId ?? undefined,
         interaction.client as any,
@@ -1199,7 +1204,8 @@ export class Admin {
 
       await safeReply(interaction, {
         content: `NR-GOTM round ${roundNumber} updated successfully.`,
-        embeds: [updatedEmbed],
+        embeds: [updatedAssets.embed],
+        files: updatedAssets.files?.length ? updatedAssets.files : undefined,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);

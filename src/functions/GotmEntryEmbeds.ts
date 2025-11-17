@@ -1,10 +1,15 @@
-import { EmbedBuilder, type Client } from "discord.js";
+import { AttachmentBuilder, EmbedBuilder, type Client } from "discord.js";
 import type { GotmEntry, GotmGame } from "../classes/Gotm.js";
 import type { NrGotmEntry, NrGotmGame } from "../classes/NrGotm.js";
 
 const ANNOUNCEMENTS_CHANNEL_ID: string | undefined = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 
 const AUDIT_NO_VALUE_SENTINEL = "__NO_VALUE__";
+
+export interface EmbedWithAttachments {
+  embed: EmbedBuilder;
+  files: AttachmentBuilder[];
+}
 
 type AnyGame = GotmGame | NrGotmGame;
 type AnyEntry = GotmEntry | NrGotmEntry;
@@ -65,6 +70,25 @@ function formatGamesWithJump(entry: AnyEntry, guildId?: string): string {
   return appendWithTailTruncate(body, tail);
 }
 
+function normalizeBuffer(value: unknown): Buffer | null {
+  if (!value) return null;
+  if (Buffer.isBuffer(value)) return value;
+  return null;
+}
+
+function guessImageExtension(mimeType: string | null | undefined): string {
+  const map: Record<string, string> = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/gif": "gif",
+    "image/webp": "webp",
+    "image/bmp": "bmp",
+    "image/tiff": "tiff",
+  };
+  if (!mimeType) return "png";
+  return map[mimeType.toLowerCase()] ?? "png";
+}
+
 async function resolveThreadImageUrl(
   client: Client,
   threadId: string,
@@ -108,24 +132,53 @@ async function resolveThreadImageUrl(
   return undefined;
 }
 
-async function findFirstGameImage(
-  client: Client,
+function buildStoredImageAttachment(
+  kind: "gotm" | "nr",
+  entry: AnyEntry,
+  game: AnyGame,
+  gameIndex: number,
+): AttachmentBuilder | null {
+  const buf = normalizeBuffer((game as any).imageBlob ?? null);
+  if (!buf) return null;
+  const mime = (game as any).imageMimeType ?? "image/png";
+  const ext = guessImageExtension(mime);
+  const name = `${kind}-${(entry as any).round ?? "unknown"}-${gameIndex}.${ext}`;
+  return new AttachmentBuilder(buf, {
+    name,
+    description: `${kind.toUpperCase()} image for round ${(entry as any).round ?? "?"}, game ${
+      gameIndex + 1
+    }`,
+    contentType: mime ?? undefined,
+  });
+}
+
+async function resolveEntryImage(
+  kind: "gotm" | "nr",
+  entry: AnyEntry,
   games: AnyGame[],
-): Promise<string | undefined> {
-  for (const g of games) {
+  client: Client,
+): Promise<{ thumbnailUrl: string | undefined; files: AttachmentBuilder[] }> {
+  for (let i = 0; i < games.length; i++) {
+    const g = games[i];
+    const stored = buildStoredImageAttachment(kind, entry, g, i);
+    if (stored) {
+      return { thumbnailUrl: `attachment://${stored.name}`, files: [stored] };
+    }
+
     const threadId = displayAuditValue((g as any).threadId);
     if (!threadId) continue;
     const imgUrl = await resolveThreadImageUrl(client, threadId).catch(() => undefined);
-    if (imgUrl) return imgUrl;
+    if (imgUrl) return { thumbnailUrl: imgUrl, files: [] };
   }
-  return undefined;
+
+  return { thumbnailUrl: undefined, files: [] };
 }
 
 export async function buildGotmEntryEmbed(
   entry: GotmEntry,
   guildId: string | undefined,
   client: Client,
-): Promise<EmbedBuilder> {
+): Promise<EmbedWithAttachments> {
   const desc = formatGamesWithJump(entry as AnyEntry, guildId);
   const embed = new EmbedBuilder()
     .setColor(0x0099ff)
@@ -135,19 +188,19 @@ export async function buildGotmEntryEmbed(
   const jumpLink = buildResultsJumpLink(entry, guildId);
   if (jumpLink) embed.setURL(jumpLink);
 
-  const imgUrl = await findFirstGameImage(client, entry.gameOfTheMonth);
-  if (imgUrl) {
-    embed.setThumbnail(imgUrl);
+  const { thumbnailUrl, files } = await resolveEntryImage("gotm", entry, entry.gameOfTheMonth, client);
+  if (thumbnailUrl) {
+    embed.setThumbnail(thumbnailUrl);
   }
 
-  return embed;
+  return { embed, files };
 }
 
 export async function buildNrGotmEntryEmbed(
   entry: NrGotmEntry,
   guildId: string | undefined,
   client: Client,
-): Promise<EmbedBuilder> {
+): Promise<EmbedWithAttachments> {
   const desc = formatGamesWithJump(entry as AnyEntry, guildId);
   const embed = new EmbedBuilder()
     .setColor(0x0099ff)
@@ -170,11 +223,11 @@ export async function buildNrGotmEntryEmbed(
     }
   }
 
-  // Fallback thumbnail from winners with images
-  const imgUrl = await findFirstGameImage(client, entry.gameOfTheMonth);
-  if (imgUrl) {
-    embed.setThumbnail(imgUrl);
+  // Prefer stored images first; fall back to thread images
+  const { thumbnailUrl, files } = await resolveEntryImage("nr", entry, entry.gameOfTheMonth, client);
+  if (thumbnailUrl) {
+    embed.setThumbnail(thumbnailUrl);
   }
 
-  return embed;
+  return { embed, files };
 }

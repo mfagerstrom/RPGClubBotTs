@@ -1,0 +1,15 @@
+-- Add image blob storage to GOTM and NR-GOTM entries.
+
+ALTER TABLE GOTM_ENTRIES
+  ADD (
+    IMAGE_BLOB BLOB,
+    IMAGE_MIME_TYPE VARCHAR2(128)
+  );
+
+ALTER TABLE NR_GOTM_ENTRIES
+  ADD (
+    IMAGE_BLOB BLOB,
+    IMAGE_MIME_TYPE VARCHAR2(128)
+  );
+
+-- Note: IMAGE_BLOB + IMAGE_MIME_TYPE are optional and may be null.

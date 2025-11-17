@@ -6,6 +6,8 @@ export interface NrGotmGame {
   title: string;
   threadId: string | null;
   redditUrl: string | null;
+  imageBlob?: Buffer | null;
+  imageMimeType?: string | null;
 }
 
 export interface NrGotmEntry {
@@ -48,6 +50,8 @@ async function loadFromDatabaseInternal(): Promise<NrGotmEntry[]> {
       THREAD_ID: string | null;
       REDDIT_URL: string | null;
       VOTING_RESULTS_MESSAGE_ID: string | null;
+      IMAGE_BLOB: Buffer | null;
+      IMAGE_MIME_TYPE: string | null;
     }>(
       `SELECT ROUND_NUMBER,
               MONTH_YEAR,
@@ -55,11 +59,18 @@ async function loadFromDatabaseInternal(): Promise<NrGotmEntry[]> {
               GAME_TITLE,
               THREAD_ID,
               REDDIT_URL,
-              VOTING_RESULTS_MESSAGE_ID
+              VOTING_RESULTS_MESSAGE_ID,
+              IMAGE_BLOB,
+              IMAGE_MIME_TYPE
          FROM NR_GOTM_ENTRIES
         ORDER BY ROUND_NUMBER, GAME_INDEX`,
       [],
-      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      {
+        outFormat: oracledb.OUT_FORMAT_OBJECT,
+        fetchInfo: {
+          IMAGE_BLOB: { type: oracledb.BUFFER },
+        },
+      },
     );
 
     const rows = result.rows ?? [];
@@ -75,6 +86,8 @@ async function loadFromDatabaseInternal(): Promise<NrGotmEntry[]> {
         THREAD_ID: string | null;
         REDDIT_URL: string | null;
         VOTING_RESULTS_MESSAGE_ID: string | null;
+        IMAGE_BLOB: Buffer | null;
+        IMAGE_MIME_TYPE: string | null;
       };
 
       const round = Number(row.ROUND_NUMBER);
@@ -103,6 +116,8 @@ async function loadFromDatabaseInternal(): Promise<NrGotmEntry[]> {
         title: row.GAME_TITLE,
         threadId: row.THREAD_ID ?? null,
         redditUrl: row.REDDIT_URL ?? null,
+        imageBlob: row.IMAGE_BLOB ?? null,
+        imageMimeType: row.IMAGE_MIME_TYPE ?? null,
       };
 
       entry.gameOfTheMonth.push(game);
@@ -212,6 +227,8 @@ export default class NrGotm {
         title: g.title,
         threadId: g.threadId ?? null,
         redditUrl: g.redditUrl ?? null,
+        imageBlob: g.imageBlob ?? null,
+        imageMimeType: g.imageMimeType ?? null,
       })),
     };
     nrGotmData.push(entry);
@@ -278,6 +295,20 @@ export default class NrGotm {
     return entry;
   }
 
+  static updateImageByRound(
+    round: number,
+    imageBlob: Buffer | null,
+    imageMimeType: string | null,
+    index?: number,
+  ): NrGotmEntry | null {
+    const entry = this.getRoundEntry(round);
+    if (!entry) return null;
+    const i = this.resolveIndex(entry, index);
+    entry.gameOfTheMonth[i].imageBlob = imageBlob;
+    entry.gameOfTheMonth[i].imageMimeType = imageMimeType;
+    return entry;
+  }
+
   static updateVotingResultsByRound(
     round: number,
     messageId: string | null,
@@ -300,6 +331,91 @@ export default class NrGotm {
 }
 
 export type NrGotmEditableField = "title" | "threadId" | "redditUrl";
+
+export async function updateNrGotmGameImageInDatabase(
+  opts: {
+    rowId?: number | null;
+    round?: number;
+    gameIndex?: number;
+    imageBlob: Buffer | null;
+    imageMimeType: string | null;
+  },
+): Promise<void> {
+  const pool = getOraclePool();
+  const connection = await pool.getConnection();
+
+  try {
+    if (opts.rowId) {
+      await connection.execute(
+        `UPDATE NR_GOTM_ENTRIES
+            SET IMAGE_BLOB = :imageBlob,
+                IMAGE_MIME_TYPE = :imageMimeType
+          WHERE NR_GOTM_ID = :rowId`,
+        { rowId: opts.rowId, imageBlob: opts.imageBlob, imageMimeType: opts.imageMimeType },
+        { autoCommit: true },
+      );
+      return;
+    }
+
+    const round = opts.round;
+    const gameIndex = opts.gameIndex;
+
+    if (!Number.isInteger(round)) {
+      throw new Error("round is required when rowId is not provided.");
+    }
+    if (!Number.isInteger(gameIndex)) {
+      throw new Error("gameIndex is required when rowId is not provided.");
+    }
+
+    const result = await connection.execute<{
+      NR_GOTM_ID: number;
+      ROUND_NUMBER: number;
+      GAME_INDEX: number;
+    }>(
+      `SELECT NR_GOTM_ID,
+              ROUND_NUMBER,
+              GAME_INDEX
+         FROM NR_GOTM_ENTRIES
+        WHERE ROUND_NUMBER = :round
+        ORDER BY GAME_INDEX`,
+      { round },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+    );
+
+    const rows = (result.rows ?? []) as any[];
+    if (!rows.length) {
+      throw new Error(`No NR-GOTM database rows found for round ${round}.`);
+    }
+
+    const gi = Number(gameIndex);
+    if (!Number.isInteger(gi) || gi < 0 || gi >= rows.length) {
+      throw new Error(
+        `Game index ${gameIndex} is out of range for NR-GOTM round ${round} (have ${rows.length} games).`,
+      );
+    }
+
+    const targetRow = rows[gi] as {
+      NR_GOTM_ID: number;
+      ROUND_NUMBER: number;
+      GAME_INDEX: number;
+    };
+
+    await connection.execute(
+      `UPDATE NR_GOTM_ENTRIES
+          SET IMAGE_BLOB = :imageBlob,
+              IMAGE_MIME_TYPE = :imageMimeType
+        WHERE NR_GOTM_ID = :rowId`,
+      {
+        rowId: targetRow.NR_GOTM_ID,
+        imageBlob: opts.imageBlob,
+        imageMimeType: opts.imageMimeType,
+      },
+      { autoCommit: true },
+    );
+  } finally {
+    await connection.close();
+  }
+}
 
 export async function updateNrGotmGameFieldInDatabase(
   opts: {
@@ -459,7 +575,9 @@ export async function insertNrGotmRoundInDatabase(
            GAME_TITLE,
            THREAD_ID,
            REDDIT_URL,
-           VOTING_RESULTS_MESSAGE_ID
+           VOTING_RESULTS_MESSAGE_ID,
+           IMAGE_BLOB,
+           IMAGE_MIME_TYPE
          ) VALUES (
            :round,
            :monthYear,
@@ -467,7 +585,9 @@ export async function insertNrGotmRoundInDatabase(
            :title,
            :threadId,
            :redditUrl,
-           NULL
+           NULL,
+           :imageBlob,
+           :imageMimeType
          )
          RETURNING NR_GOTM_ID INTO :outId`,
         {
@@ -477,6 +597,8 @@ export async function insertNrGotmRoundInDatabase(
           title: g.title,
           threadId: g.threadId ?? null,
           redditUrl: g.redditUrl ?? null,
+          imageBlob: g.imageBlob ?? null,
+          imageMimeType: g.imageMimeType ?? null,
           outId: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
         },
         { autoCommit: true },

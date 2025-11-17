@@ -17,6 +17,7 @@ import {
 } from "../classes/Nomination.js";
 import { NR_GOTM_NOMINATION_CHANNEL_ID } from "../config/nominationChannels.js";
 import { buildNrGotmHelpResponse } from "./help.command.js";
+import { buildNrGotmEntryEmbed, type EmbedWithAttachments } from "../functions/GotmEntryEmbeds.js";
 
 const ANNOUNCEMENTS_CHANNEL_ID: string | undefined = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 
@@ -186,20 +187,37 @@ export class NrGotmSearch {
         }
       }
 
-      const embeds = await buildNrGotmEmbeds(
+      const embedAssets = await buildNrGotmEmbeds(
         embedsResults,
         criteriaLabel,
         interaction.guildId ?? undefined,
         interaction.client,
       );
       const content = criteriaLabel ? `Query: "${criteriaLabel}"` : undefined;
-      if (embeds.length <= 10) {
-        await safeReply(interaction, { content, embeds, ephemeral });
+
+      const sendGroup = async (group: EmbedWithAttachments[], first: boolean) => {
+        const embeds = group.map((g) => g.embed);
+        const files = group.flatMap((g) => g.files ?? []);
+        const payload: any = {
+          content: first ? content : undefined,
+          embeds,
+          files: files.length ? files : undefined,
+          ephemeral,
+        };
+        if (first) {
+          await safeReply(interaction, payload);
+        } else {
+          await interaction.followUp(payload);
+        }
+      };
+
+      if (embedAssets.length <= 10) {
+        await sendGroup(embedAssets, true);
       } else {
-        const chunks = chunkEmbeds(embeds, 10);
-        await safeReply(interaction, { content, embeds: chunks[0], ephemeral });
+        const chunks = chunkAssets(embedAssets, 10);
+        await sendGroup(chunks[0], true);
         for (let i = 1; i < chunks.length; i++) {
-          await interaction.followUp({ embeds: chunks[i], ephemeral });
+          await sendGroup(chunks[i], false);
         }
       }
     } catch (err: any) {
@@ -450,9 +468,7 @@ async function buildNrGotmEmbeds(
   criteriaLabel: string | undefined,
   guildId: string | undefined,
   client: Client,
-): Promise<EmbedBuilder[]> {
-  const embeds: EmbedBuilder[] = [];
-
+): Promise<EmbedWithAttachments[]> {
   const buildNoEmbed = (entry: NrGotmEntry): EmbedBuilder => {
     return new EmbedBuilder()
       .setColor(0x0099ff)
@@ -460,42 +476,26 @@ async function buildNrGotmEmbeds(
       .setDescription("No Non-RPG nominations for this round.");
   };
 
+  if (results.length > 12) {
+    return buildCompactEmbeds(results, criteriaLabel, guildId).map((embed) => ({
+      embed,
+      files: [],
+    }));
+  }
+
+  const assets: EmbedWithAttachments[] = [];
+
   for (const entry of results) {
     if (isNoNrGotm(entry)) {
-      embeds.push(buildNoEmbed(entry));
+      assets.push({ embed: buildNoEmbed(entry), files: [] });
       continue;
     }
 
-    const { body } = formatGames(entry, guildId);
-    const desc = formatGamesWithJump(entry, guildId);
-    const embed = new EmbedBuilder()
-      .setColor(0x0099ff)
-      .setTitle(`NR-GOTM Round ${entry.round} - ${entry.monthYear}`)
-      .setDescription(desc || body);
-
-    const jumpLink = buildResultsJumpLink(entry, guildId);
-    if (jumpLink) embed.setURL(jumpLink);
-
-    for (const g of entry.gameOfTheMonth) {
-      const threadId = displayAuditValue(g.threadId);
-      if (!threadId) continue;
-      const imgUrl = await resolveThreadImageUrl(client, threadId).catch(
-        () => undefined,
-      );
-      if (imgUrl) {
-        embed.setThumbnail(imgUrl);
-        break;
-      }
-    }
-
-    embeds.push(embed);
+    const embedAssets = await buildNrGotmEntryEmbed(entry, guildId, client);
+    assets.push(embedAssets);
   }
 
-  if (embeds.length === 0 && results.length > 12) {
-    return buildCompactEmbeds(results, criteriaLabel, guildId);
-  }
-
-  return embeds;
+  return assets;
 }
 
 function buildCompactEmbeds(
@@ -529,49 +529,8 @@ function buildCompactEmbeds(
   return embeds;
 }
 
-async function resolveThreadImageUrl(
-  client: Client,
-  threadId: string,
-): Promise<string | undefined> {
-  try {
-    const channel = await client.channels.fetch(threadId);
-    const anyThread = channel as any;
-    if (!anyThread || typeof anyThread.fetchStarterMessage !== "function")
-      return undefined;
-    const starter = await anyThread.fetchStarterMessage().catch(() => null);
-    if (!starter) return undefined;
-
-    for (const att of starter.attachments?.values?.() ?? []) {
-      const anyAtt: any = att as any;
-      const nameLc = (anyAtt.name ?? "").toLowerCase();
-      const ctype = (anyAtt.contentType ?? "").toLowerCase();
-      if (
-        ctype.startsWith("image/") ||
-        /\.(png|jpg|jpeg|gif|webp|bmp|tiff)$/.test(nameLc) ||
-        anyAtt.width
-      ) {
-        return anyAtt.url ?? anyAtt.proxyURL;
-      }
-    }
-    for (const emb of starter.embeds ?? []) {
-      const anyEmb: any = emb as any;
-      const imgUrl: string | undefined =
-        emb.image?.url || anyEmb?.image?.proxyURL || anyEmb?.image?.proxy_url;
-      const thumbUrl: string | undefined =
-        emb.thumbnail?.url ||
-        anyEmb?.thumbnail?.proxyURL ||
-        anyEmb?.thumbnail?.proxy_url;
-      if (imgUrl) return imgUrl;
-      if (thumbUrl) return thumbUrl;
-    }
-  } catch {
-    // ignore
-  }
-  return undefined;
-}
-
-function chunkEmbeds(list: EmbedBuilder[], size: number): EmbedBuilder[][] {
-  const out: EmbedBuilder[][] = [];
+function chunkAssets(list: EmbedWithAttachments[], size: number): EmbedWithAttachments[][] {
+  const out: EmbedWithAttachments[][] = [];
   for (let i = 0; i < list.length; i += size) {
     out.push(list.slice(i, i + size));
   }

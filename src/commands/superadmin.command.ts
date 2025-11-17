@@ -1,6 +1,7 @@
 import {
   ActionRowBuilder,
   ApplicationCommandOptionType,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
@@ -12,7 +13,9 @@ import type {
   RepliableInteraction,
   Message,
 } from "discord.js";
+import axios from "axios";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
+import { searchHltb } from "../functions/SearchHltb.js";
 import {
   getPresenceHistory,
   setPresence,
@@ -25,6 +28,7 @@ import Gotm, {
   type GotmEntry,
   type GotmGame,
   updateGotmGameFieldInDatabase,
+  updateGotmGameImageInDatabase,
   type GotmEditableField,
   insertGotmRoundInDatabase,
   deleteGotmRoundFromDatabase,
@@ -34,6 +38,7 @@ import NrGotm, {
   type NrGotmEntry,
   type NrGotmGame,
   updateNrGotmGameFieldInDatabase,
+  updateNrGotmGameImageInDatabase,
   type NrGotmEditableField,
   insertNrGotmRoundInDatabase,
   deleteNrGotmRoundFromDatabase,
@@ -265,10 +270,15 @@ async function showSuperAdminPresenceHistory(interaction: CommandInteraction): P
   }
 }
 
-type AuditField = "threadId" | "redditUrl" | "votingResults";
+type AuditField = "threadId" | "redditUrl" | "votingResults" | "image";
 
 type AuditPromptResult =
   | { action: "value"; value: string | null }
+  | { action: "skip" }
+  | { action: "no-value" }
+  | "stop";
+type AuditImageResult =
+  | { action: "store"; buffer: Buffer; mimeType: string | null }
   | { action: "skip" }
   | { action: "no-value" }
   | "stop";
@@ -287,6 +297,10 @@ function isAuditNoValue(value: string | null | undefined): boolean {
 
 function isAuditFieldMissing(value: string | null | undefined): boolean {
   return !value && !isAuditNoValue(value);
+}
+
+function isAuditImageMissing(imageBlob: Buffer | null | undefined, imageMimeType: string | null | undefined): boolean {
+  return !imageBlob && !isAuditNoValue(imageMimeType);
 }
 
 function displayAuditValue(value: string | null | undefined): string | null {
@@ -364,6 +378,91 @@ function buildAuditPromptEmbed(info: {
   return new EmbedBuilder()
     .setTitle(`${info.auditLabel} Data Audit`)
     .setDescription(lines.join("\n"));
+}
+
+async function downloadImageBuffer(url: string): Promise<{ buffer: Buffer; mimeType: string | null }> {
+  const resp = await axios.get<ArrayBuffer>(url, { responseType: "arraybuffer" });
+  const mime = resp.headers?.["content-type"] ?? null;
+  return { buffer: Buffer.from(resp.data), mimeType: mime ? String(mime) : null };
+}
+
+async function resolveThreadImageBuffer(client: any, threadId: string): Promise<{ buffer: Buffer; mimeType: string | null; url: string } | null> {
+  try {
+    const channel = await client.channels.fetch(threadId);
+    const anyThread = channel as any;
+    if (!anyThread || typeof anyThread.fetchStarterMessage !== "function") return null;
+    const starter = await anyThread.fetchStarterMessage().catch(() => null);
+    if (!starter) return null;
+
+    for (const att of starter.attachments?.values?.() ?? []) {
+      const anyAtt: any = att as any;
+      const nameLc = (anyAtt.name ?? "").toLowerCase();
+      const ctype = (anyAtt.contentType ?? "").toLowerCase();
+      if (
+        ctype.startsWith("image/") ||
+        /\.(png|jpg|jpeg|gif|webp|bmp|tiff)$/.test(nameLc) ||
+        anyAtt.width
+      ) {
+        const url = anyAtt.url ?? anyAtt.proxyURL;
+        if (!url) continue;
+        const { buffer, mimeType } = await downloadImageBuffer(url);
+        return { buffer, mimeType, url };
+      }
+    }
+
+    for (const emb of starter.embeds ?? []) {
+      const anyEmb: any = emb as any;
+      const imgUrl: string | undefined =
+        emb.image?.url || anyEmb?.image?.proxyURL || anyEmb?.image?.proxy_url;
+      const thumbUrl: string | undefined =
+        emb.thumbnail?.url ||
+        anyEmb?.thumbnail?.proxyURL ||
+        anyEmb?.thumbnail?.proxy_url;
+      const chosen = imgUrl || thumbUrl;
+      if (chosen) {
+        const { buffer, mimeType } = await downloadImageBuffer(chosen);
+        return { buffer, mimeType, url: chosen };
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+async function resolveHltbImageBuffer(gameTitle: string): Promise<{ buffer: Buffer; mimeType: string | null; url: string } | null> {
+  try {
+    const result = await searchHltb(gameTitle);
+    const url = result?.imageUrl;
+    if (!url) return null;
+    const { buffer, mimeType } = await downloadImageBuffer(url);
+    return { buffer, mimeType, url };
+  } catch {
+    return null;
+  }
+}
+
+function buildImageAttachment(
+  buffer: Buffer,
+  mimeType: string | null,
+  label: string,
+): AttachmentBuilder {
+  const ext = (() => {
+    const map: Record<string, string> = {
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/gif": "gif",
+      "image/webp": "webp",
+      "image/bmp": "bmp",
+      "image/tiff": "tiff",
+    };
+    if (!mimeType) return "png";
+    return map[mimeType.toLowerCase()] ?? "png";
+  })();
+  return new AttachmentBuilder(buffer, {
+    name: `${label}.${ext}`,
+    contentType: mimeType ?? undefined,
+  });
 }
 
 async function promptForAuditValue(
@@ -517,6 +616,204 @@ async function promptForAuditValue(
   };
 }
 
+async function promptForAuditImage(
+  interaction: CommandInteraction,
+  opts: {
+    auditLabel: string;
+    tokenPrefix: string;
+    round: number;
+    roundLabel: string;
+    gameIndex: number;
+    gameTitle: string;
+    threadId: string | null;
+    promptMessage?: Message | null;
+    useEditReply?: boolean;
+  },
+): Promise<{ result: AuditImageResult; promptMessage: Message | null }> {
+  const token = `${opts.tokenPrefix}-auditimg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const stopPrefix = `${opts.tokenPrefix}-auditimg-stop`;
+  const skipPrefix = `${opts.tokenPrefix}-auditimg-skip`;
+  const noValuePrefix = `${opts.tokenPrefix}-auditimg-novalue`;
+  const useThreadPrefix = `${opts.tokenPrefix}-auditimg-thread`;
+  const useHltbPrefix = `${opts.tokenPrefix}-auditimg-hltb`;
+
+  const threadCandidate = opts.threadId
+    ? await resolveThreadImageBuffer(interaction.client, opts.threadId).catch(() => null)
+    : null;
+  const hltbCandidate = await resolveHltbImageBuffer(opts.gameTitle).catch(() => null);
+
+  const files: AttachmentBuilder[] = [];
+  const embed = new EmbedBuilder()
+    .setTitle(`${opts.auditLabel} Image Audit`)
+    .setDescription(
+      [
+        opts.roundLabel,
+        `Game: ${opts.gameTitle}`,
+        "",
+        "Choose an image source below, or paste/upload an image in chat.",
+        "Buttons:",
+        "- Use Thread Image: first image from the discussion thread (if available).",
+        "- Use HLTB Image: cover art from /coverart search (if available).",
+        "- Skip: leave image empty for now.",
+        "- No Value: mark as intentionally missing (won't be asked again).",
+        "- Stop Audit: end the audit.",
+      ].join("\n"),
+    );
+
+  if (threadCandidate) {
+    const att = buildImageAttachment(threadCandidate.buffer, threadCandidate.mimeType, "thread-image");
+    files.push(att);
+    embed.addFields({ name: "Thread Image", value: `attachment://${att.name}` });
+  }
+
+  if (hltbCandidate) {
+    const att = buildImageAttachment(hltbCandidate.buffer, hltbCandidate.mimeType, "hltb-image");
+    files.push(att);
+    embed.addFields({ name: "HLTB Image", value: `attachment://${att.name}` });
+  }
+
+  const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${stopPrefix}-${token}`)
+      .setLabel("Stop Audit")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`${noValuePrefix}-${token}`)
+      .setLabel("No Value")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`${skipPrefix}-${token}`)
+      .setLabel("Skip")
+      .setStyle(ButtonStyle.Danger),
+  );
+
+  const chooseRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${useThreadPrefix}-${token}`)
+      .setLabel("Use Thread Image")
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(!threadCandidate),
+    new ButtonBuilder()
+      .setCustomId(`${useHltbPrefix}-${token}`)
+      .setLabel("Use HLTB Image")
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(!hltbCandidate),
+  );
+
+  let promptMessage = opts.promptMessage ?? null;
+  const payload = {
+    embeds: [embed],
+    components: [buttonRow, chooseRow],
+    files: files.length ? files : undefined,
+    content: undefined as string | undefined,
+  };
+
+  const editPrompt = async (msg: Message, data: any): Promise<Message | null> => {
+    try {
+      return await msg.edit(data);
+    } catch (err: any) {
+      if (err?.code === 10008 || err?.code === 50027) {
+        return null;
+      }
+      throw err;
+    }
+  };
+
+  const tryEditReply = async (): Promise<Message | null> => {
+    try {
+      const edited = await (interaction as any).editReply(payload);
+      return edited as Message;
+    } catch (err: any) {
+      if (err?.code === 10008 || err?.code === 50027) return null;
+      throw err;
+    }
+  };
+
+  if (opts.useEditReply) {
+    promptMessage = await tryEditReply();
+  } else if (promptMessage) {
+    const edited = await editPrompt(promptMessage, payload);
+    promptMessage = edited ?? null;
+  }
+
+  if (!promptMessage) {
+    promptMessage = await interaction.followUp({
+      ...payload,
+      ephemeral: true,
+    });
+  }
+
+  const buttonPromise = promptMessage
+    .awaitMessageComponent({
+      filter: (i) => {
+        const cid = i.customId ?? "";
+        return i.user?.id === interaction.user.id && cid.endsWith(token);
+      },
+      time: 120_000,
+    })
+    .then(async (i) => {
+      const cid = i.customId ?? "";
+      if (!i.deferred && !i.replied) {
+        await i.deferUpdate().catch(() => {});
+      }
+      if (cid.startsWith(stopPrefix)) return "stop" as const;
+      if (cid.startsWith(noValuePrefix)) return { action: "no-value" } as AuditImageResult;
+      if (cid.startsWith(skipPrefix)) return { action: "skip" } as AuditImageResult;
+      if (cid.startsWith(useThreadPrefix) && threadCandidate) {
+        return { action: "store", buffer: threadCandidate.buffer, mimeType: threadCandidate.mimeType } as AuditImageResult;
+      }
+      if (cid.startsWith(useHltbPrefix) && hltbCandidate) {
+        return { action: "store", buffer: hltbCandidate.buffer, mimeType: hltbCandidate.mimeType } as AuditImageResult;
+      }
+      return { action: "skip" } as AuditImageResult;
+    })
+    .catch(() => null);
+
+  const channel: any = interaction.channel;
+  const textPromise = channel?.awaitMessages
+    ? channel
+        .awaitMessages({
+          filter: (m: any) => m.author?.id === interaction.user.id,
+          max: 1,
+          time: 120_000,
+        })
+        .then(async (collected: any) => {
+          const first = collected?.first?.();
+          if (!first) return null;
+          const attachment =
+            first.attachments?.find?.(
+              (a: any) =>
+                (a.contentType ?? "").startsWith("image/") ||
+                /\.(png|jpg|jpeg|gif|webp|bmp|tiff)$/i.test((a.name ?? "").toLowerCase()),
+            ) ?? null;
+          if (!attachment) return null;
+          const url = (attachment as any).url ?? (attachment as any).proxyURL;
+          if (!url) return null;
+          const { buffer, mimeType } = await downloadImageBuffer(url);
+          try {
+            await first.delete().catch(() => {});
+          } catch {
+            // ignore
+          }
+          return { action: "store", buffer, mimeType } as AuditImageResult;
+        })
+        .catch(() => null)
+    : Promise.resolve(null);
+
+  const result = await Promise.race([buttonPromise, textPromise]);
+
+  if (opts.useEditReply && promptMessage) {
+    await (interaction as any).editReply({ components: [] });
+  } else {
+    await editPrompt(promptMessage, { components: [] });
+  }
+
+  return {
+    result: result ?? { action: "skip" },
+    promptMessage,
+  };
+}
+
 @Discord()
 @SlashGroup({ description: "Server Owner Commands", name: "superadmin" })
 @SlashGroup("superadmin")
@@ -601,7 +898,7 @@ export class SuperAdmin {
     });
   }
 
-  @ButtonComponent({ id: /^(gotm|nr-gotm)-audit-(stop|skip|novalue)-.+/ })
+  @ButtonComponent({ id: /^(gotm|nr-gotm)-audit(img)?-(stop|skip|novalue).*-/ })
   async handleAuditButtons(interaction: ButtonInteraction): Promise<void> {
     if (!interaction.deferred && !interaction.replied) {
       await interaction.deferUpdate().catch(() => {});
@@ -635,6 +932,13 @@ export class SuperAdmin {
     })
     votingResultsFlag: boolean | undefined,
     @SlashOption({
+      description: "Ask only about missing images",
+      name: "image",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    imageFlag: boolean | undefined,
+    @SlashOption({
       description: "Order to audit rounds (asc or desc, default desc)",
       name: "order",
       required: false,
@@ -660,12 +964,14 @@ export class SuperAdmin {
       threadId: Boolean(threadIdFlag),
       redditUrl: Boolean(redditUrlFlag),
       votingResults: Boolean(votingResultsFlag),
+      image: Boolean(imageFlag),
     };
 
-    if (!checks.threadId && !checks.redditUrl && !checks.votingResults) {
+    if (!checks.threadId && !checks.redditUrl && !checks.votingResults && !checks.image) {
       checks.threadId = true;
       checks.redditUrl = true;
       checks.votingResults = true;
+      checks.image = true;
     }
 
     const dir = (order ?? "desc").toLowerCase() === "asc" ? "asc" : "desc";
@@ -705,7 +1011,6 @@ export class SuperAdmin {
       for (let i = 0; i < entry.gameOfTheMonth.length; i++) {
         const game = entry.gameOfTheMonth[i];
         const winners = entry.gameOfTheMonth.map((g) => g.title);
-
         if (checks.threadId && isAuditFieldMissing(game.threadId)) {
           const res = await promptForAuditValue(interaction, {
             auditLabel: "GOTM",
@@ -767,6 +1072,39 @@ export class SuperAdmin {
           } else if (res.result && res.result.action === "no-value") {
             await updateGotmGameFieldInDatabase(entry.round, i, "redditUrl", AUDIT_NO_VALUE_SENTINEL);
             Gotm.updateRedditUrlByRound(entry.round, AUDIT_NO_VALUE_SENTINEL, i);
+          }
+        }
+
+        if (stopped) break;
+
+        if (checks.image && isAuditImageMissing(game.imageBlob as any, (game as any).imageMimeType)) {
+          const resImg = await promptForAuditImage(interaction, {
+            auditLabel: "GOTM",
+            tokenPrefix: "gotm",
+            round: entry.round,
+            roundLabel,
+            gameIndex: i,
+            gameTitle: game.title,
+            threadId: displayAuditValue(game.threadId),
+            promptMessage,
+            useEditReply,
+          });
+          promptMessage = resImg.promptMessage;
+          if (resImg.result === "stop") {
+            stopped = true;
+            break;
+          }
+          if (resImg.result && resImg.result.action === "store") {
+            await updateGotmGameImageInDatabase(
+              entry.round,
+              i,
+              resImg.result.buffer,
+              resImg.result.mimeType,
+            );
+            Gotm.updateImageByRound(entry.round, resImg.result.buffer, resImg.result.mimeType, i);
+          } else if (resImg.result && resImg.result.action === "no-value") {
+            await updateGotmGameImageInDatabase(entry.round, i, null, AUDIT_NO_VALUE_SENTINEL);
+            Gotm.updateImageByRound(entry.round, null, AUDIT_NO_VALUE_SENTINEL, i);
           }
         }
       }
@@ -850,6 +1188,13 @@ export class SuperAdmin {
     })
     votingResultsFlag: boolean | undefined,
     @SlashOption({
+      description: "Ask only about missing images",
+      name: "image",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    imageFlag: boolean | undefined,
+    @SlashOption({
       description: "Order to audit rounds (asc or desc, default desc)",
       name: "order",
       required: false,
@@ -875,12 +1220,14 @@ export class SuperAdmin {
       threadId: Boolean(threadIdFlag),
       redditUrl: Boolean(redditUrlFlag),
       votingResults: Boolean(votingResultsFlag),
+      image: Boolean(imageFlag),
     };
 
-    if (!checks.threadId && !checks.redditUrl && !checks.votingResults) {
+    if (!checks.threadId && !checks.redditUrl && !checks.votingResults && !checks.image) {
       checks.threadId = true;
       checks.redditUrl = true;
       checks.votingResults = true;
+      checks.image = true;
     }
 
     const dir = (order ?? "desc").toLowerCase() === "asc" ? "asc" : "desc";
@@ -1006,6 +1353,46 @@ export class SuperAdmin {
               value: AUDIT_NO_VALUE_SENTINEL,
             });
             NrGotm.updateRedditUrlByRound(entry.round, AUDIT_NO_VALUE_SENTINEL, i);
+          }
+        }
+
+        if (stopped) break;
+
+        if (checks.image && isAuditImageMissing(game.imageBlob as any, (game as any).imageMimeType)) {
+          const resImg = await promptForAuditImage(interaction, {
+            auditLabel: "NR-GOTM",
+            tokenPrefix: "nr-gotm",
+            round: entry.round,
+            roundLabel,
+            gameIndex: i,
+            gameTitle: game.title,
+            threadId: displayAuditValue(game.threadId),
+            promptMessage,
+            useEditReply,
+          });
+          promptMessage = resImg.promptMessage;
+          if (resImg.result === "stop") {
+            stopped = true;
+            break;
+          }
+          if (resImg.result && resImg.result.action === "store") {
+            await updateNrGotmGameImageInDatabase({
+              rowId: (game as any).id ?? null,
+              round: entry.round,
+              gameIndex: i,
+              imageBlob: resImg.result.buffer,
+              imageMimeType: resImg.result.mimeType,
+            });
+            NrGotm.updateImageByRound(entry.round, resImg.result.buffer, resImg.result.mimeType, i);
+          } else if (resImg.result && resImg.result.action === "no-value") {
+            await updateNrGotmGameImageInDatabase({
+              rowId: (game as any).id ?? null,
+              round: entry.round,
+              gameIndex: i,
+              imageBlob: null,
+              imageMimeType: AUDIT_NO_VALUE_SENTINEL,
+            });
+            NrGotm.updateImageByRound(entry.round, null, AUDIT_NO_VALUE_SENTINEL, i);
           }
         }
       }
@@ -1230,7 +1617,7 @@ export class SuperAdmin {
     try {
       await insertGotmRoundInDatabase(nextRound, monthYear, games);
       const newEntry = Gotm.addRound(nextRound, monthYear, games);
-      const embed = await buildGotmEntryEmbed(
+      const embedAssets = await buildGotmEntryEmbed(
         newEntry,
         interaction.guildId ?? undefined,
         interaction.client as any,
@@ -1238,7 +1625,8 @@ export class SuperAdmin {
 
       await safeReply(interaction, {
         content: `Created GOTM round ${nextRound}.`,
-        embeds: [embed],
+        embeds: [embedAssets.embed],
+        files: embedAssets.files?.length ? embedAssets.files : undefined,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
@@ -1359,7 +1747,7 @@ export class SuperAdmin {
       const insertedIds = await insertNrGotmRoundInDatabase(nextRound, monthYear, games);
       const gamesWithIds = games.map((g, idx) => ({ ...g, id: insertedIds[idx] ?? null }));
       const newEntry = NrGotm.addRound(nextRound, monthYear, gamesWithIds);
-      const embed = await buildNrGotmEntryEmbed(
+      const embedAssets = await buildNrGotmEntryEmbed(
         newEntry,
         interaction.guildId ?? undefined,
         interaction.client as any,
@@ -1367,7 +1755,8 @@ export class SuperAdmin {
 
       await safeReply(interaction, {
         content: `Created NR-GOTM round ${nextRound}.`,
-        embeds: [embed],
+        embeds: [embedAssets.embed],
+        files: embedAssets.files?.length ? embedAssets.files : undefined,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
@@ -1423,7 +1812,7 @@ export class SuperAdmin {
 
     const entry = entries[0];
 
-    const embed = await buildGotmEntryEmbed(
+    const embedAssets = await buildGotmEntryEmbed(
       entry,
       interaction.guildId ?? undefined,
       interaction.client as any,
@@ -1431,7 +1820,8 @@ export class SuperAdmin {
 
     await safeReply(interaction, {
       content: `Editing GOTM round ${roundNumber}.`,
-      embeds: [embed],
+      embeds: [embedAssets.embed],
+      files: embedAssets.files?.length ? embedAssets.files : undefined,
     });
 
     const totalGames = entry.gameOfTheMonth.length;
@@ -1513,7 +1903,7 @@ export class SuperAdmin {
       }
 
       const entryToShow = updatedEntry ?? entry;
-      const updatedEmbed = await buildGotmEntryEmbed(
+      const updatedAssets = await buildGotmEntryEmbed(
         entryToShow,
         interaction.guildId ?? undefined,
         interaction.client as any,
@@ -1521,7 +1911,8 @@ export class SuperAdmin {
 
       await safeReply(interaction, {
         content: `GOTM round ${roundNumber} updated successfully.`,
-        embeds: [updatedEmbed],
+        embeds: [updatedAssets.embed],
+        files: updatedAssets.files?.length ? updatedAssets.files : undefined,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
@@ -1577,7 +1968,7 @@ export class SuperAdmin {
 
     const entry = entries[0];
 
-    const embed = await buildNrGotmEntryEmbed(
+    const embedAssets = await buildNrGotmEntryEmbed(
       entry,
       interaction.guildId ?? undefined,
       interaction.client as any,
@@ -1585,7 +1976,8 @@ export class SuperAdmin {
 
     await safeReply(interaction, {
       content: `Editing NR-GOTM round ${roundNumber}.`,
-      embeds: [embed],
+      embeds: [embedAssets.embed],
+      files: embedAssets.files?.length ? embedAssets.files : undefined,
     });
 
     const totalGames = entry.gameOfTheMonth.length;
@@ -1672,7 +2064,7 @@ export class SuperAdmin {
       }
 
       const entryToShow = updatedEntry ?? entry;
-      const updatedEmbed = await buildNrGotmEntryEmbed(
+      const updatedAssets = await buildNrGotmEntryEmbed(
         entryToShow,
         interaction.guildId ?? undefined,
         interaction.client as any,
@@ -1680,7 +2072,8 @@ export class SuperAdmin {
 
       await safeReply(interaction, {
         content: `NR-GOTM round ${roundNumber} updated successfully.`,
-        embeds: [updatedEmbed],
+        embeds: [updatedAssets.embed],
+        files: updatedAssets.files?.length ? updatedAssets.files : undefined,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
