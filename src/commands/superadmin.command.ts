@@ -37,6 +37,7 @@ import NrGotm, {
   type NrGotmEditableField,
   insertNrGotmRoundInDatabase,
   deleteNrGotmRoundFromDatabase,
+  updateNrGotmVotingResultsInDatabase,
 } from "../classes/NrGotm.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
 
@@ -49,7 +50,8 @@ type SuperAdminHelpTopicId =
   | "edit-nr-gotm"
   | "delete-nr-gotm"
   | "set-nextvote"
-  | "gotm-data-audit";
+  | "gotm-data-audit"
+  | "nr-gotm-data-audit";
 
 type SuperAdminHelpTopic = {
   id: SuperAdminHelpTopicId;
@@ -131,6 +133,16 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
     summary: "Audit GOTM data for missing thread IDs, Reddit URLs, and voting result IDs.",
     syntax:
       "Syntax: /superadmin gotm-data-audit [threadid:<boolean>] [redditurl:<boolean>] [votingresults:<boolean>]",
+    notes:
+      "By default all checks run. Provide specific flags to limit prompts. You can stop or skip prompts during the audit.",
+  },
+  {
+    id: "nr-gotm-data-audit",
+    label: "/superadmin nr-gotm-data-audit",
+    summary:
+      "Audit NR-GOTM data for missing thread IDs, Reddit URLs, and voting result IDs.",
+    syntax:
+      "Syntax: /superadmin nr-gotm-data-audit [threadid:<boolean>] [redditurl:<boolean>] [votingresults:<boolean>]",
     notes:
       "By default all checks run. Provide specific flags to limit prompts. You can stop or skip prompts during the audit.",
   },
@@ -227,80 +239,195 @@ async function showSuperAdminPresenceHistory(interaction: CommandInteraction): P
   }
 }
 
-type GotmAuditField = "threadId" | "redditUrl" | "votingResults";
+type AuditField = "threadId" | "redditUrl" | "votingResults";
 
-type GotmAuditPromptResult =
+type AuditPromptResult =
   | { action: "value"; value: string | null }
   | { action: "skip" }
+  | { action: "no-value" }
   | "stop";
 
+type AuditPromptResponse = {
+  result: AuditPromptResult;
+  promptMessage: Message | null;
+};
+
+export const AUDIT_NO_VALUE_SENTINEL = "__NO_VALUE__";
+const THREAD_ID_MAX_LENGTH = 50;
+
+function isAuditNoValue(value: string | null | undefined): boolean {
+  return value === AUDIT_NO_VALUE_SENTINEL;
+}
+
+function isAuditFieldMissing(value: string | null | undefined): boolean {
+  return !value && !isAuditNoValue(value);
+}
+
+function displayAuditValue(value: string | null | undefined): string | null {
+  if (isAuditNoValue(value)) return null;
+  return value ?? null;
+}
+
+const MONTHS_LOWER = [
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
+] as const;
+
+function isAfterRedditCutoff(monthYear: string): boolean {
+  const match = monthYear?.match(/([A-Za-z]+)\s+(\d{4})/);
+  if (!match) return false;
+
+  const monthName = match[1]?.toLowerCase() ?? "";
+  const year = Number(match[2]);
+  const monthIndex = MONTHS_LOWER.indexOf(monthName as any);
+
+  if (!Number.isFinite(year) || monthIndex === -1) return false;
+  if (year > 2021) return true;
+  if (year < 2021) return false;
+  return monthIndex > 4; // after May 2021
+}
+
 function buildAuditPromptEmbed(info: {
+  auditLabel: string;
   roundLabel: string;
   gameTitle?: string | null;
-  field: GotmAuditField;
+  field: AuditField;
   winners: string[];
+  rawEntry: any;
+  gameIndex: number | null;
 }): EmbedBuilder {
   const lines: string[] = [];
   lines.push(info.roundLabel);
-  if (info.gameTitle) lines.push(`Game: ${info.gameTitle}`);
-  if (info.winners.length) {
-    lines.push("");
-    lines.push("Winning Game(s):");
-    lines.push(...info.winners.map((w, i) => `${i + 1}. ${w}`));
-  }
   lines.push("");
-
+  lines.push("Current round data:");
+  lines.push("```json");
+  try {
+    if (info.gameIndex !== null && Array.isArray(info.rawEntry?.gameOfTheMonth)) {
+      const game = info.rawEntry.gameOfTheMonth[info.gameIndex];
+      lines.push(JSON.stringify(game ?? info.rawEntry, null, 2));
+    } else {
+      lines.push(JSON.stringify(info.rawEntry, null, 2));
+    }
+  } catch {
+    lines.push("(unable to render data)");
+  }
+  lines.push("```");
+  lines.push("");
   if (info.field === "threadId") {
-    lines.push("Missing thread ID. Provide a webhook/thread/channel ID for this game's discussion.");
+    lines.push("**Missing thread ID**. Provide a webhook/thread/channel ID for this game's discussion.");
   } else if (info.field === "redditUrl") {
-    lines.push("Missing Reddit URL. Provide a link to the Reddit thread for this game.");
+    lines.push("**Missing Reddit URL**. Provide a link to the Reddit thread for this game.");
   } else {
-    lines.push("Missing voting results message ID. Provide the message ID that contains voting results.");
+    lines.push("**Missing voting results message ID**. Provide the message ID that contains voting results.");
   }
-
   lines.push("");
-  lines.push("Click Skip to leave it empty, Stop Audit to end, or type a value (none/null to clear).");
+  lines.push("Click Skip to leave it empty, Stop Audit to end, No Value to skip forever, or type a value (none/null to clear).");
   lines.push("");
   lines.push("Provide the new value below:");
 
-  return new EmbedBuilder().setTitle("GOTM Data Audit").setDescription(lines.join("\n"));
+  return new EmbedBuilder()
+    .setTitle(`${info.auditLabel} Data Audit`)
+    .setDescription(lines.join("\n"));
 }
 
-async function promptForGotmValue(
+async function promptForAuditValue(
   interaction: CommandInteraction,
   opts: {
+    auditLabel: string;
+    tokenPrefix: string;
     round: number;
     roundLabel: string;
     gameIndex: number | null;
     gameTitle: string | null;
-    field: GotmAuditField;
+    field: AuditField;
     winners: string[];
+    rawEntry: any;
+    promptMessage?: Message | null;
+    useEditReply?: boolean;
   },
-): Promise<GotmAuditPromptResult> {
+): Promise<AuditPromptResponse> {
   const promptEmbed = buildAuditPromptEmbed({
+    auditLabel: opts.auditLabel,
     roundLabel: opts.roundLabel,
     gameTitle: opts.gameTitle,
     field: opts.field,
     winners: opts.winners,
+    rawEntry: opts.rawEntry,
+    gameIndex: opts.gameIndex,
   });
 
-  const token = `gotm-audit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const token = `${opts.tokenPrefix}-audit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const stopPrefix = `${opts.tokenPrefix}-audit-stop`;
+  const skipPrefix = `${opts.tokenPrefix}-audit-skip`;
+  const noValuePrefix = `${opts.tokenPrefix}-audit-novalue`;
 
   const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(`gotm-audit-stop-${token}`)
+      .setCustomId(`${stopPrefix}-${token}`)
       .setLabel("Stop Audit")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId(`gotm-audit-skip-${token}`)
+      .setCustomId(`${noValuePrefix}-${token}`)
+      .setLabel("No Value")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`${skipPrefix}-${token}`)
       .setLabel("Skip")
       .setStyle(ButtonStyle.Danger),
   );
 
-  const promptMessage = await interaction.followUp({
+  let promptMessage = opts.promptMessage ?? null;
+  const payload = {
     embeds: [promptEmbed],
     components: [buttonRow],
-  });
+    content: undefined as string | undefined,
+  };
+
+  const editPrompt = async (msg: Message, data: any): Promise<Message | null> => {
+    try {
+      return await msg.edit(data);
+    } catch (err: any) {
+      if (err?.code === 10008) {
+        return null;
+      }
+      throw err;
+    }
+  };
+
+  const tryEditReply = async (): Promise<Message | null> => {
+    try {
+      const edited = await (interaction as any).editReply(payload);
+      return edited as Message;
+    } catch (err: any) {
+      if (err?.code === 10008) return null;
+      throw err;
+    }
+  };
+
+  if (opts.useEditReply) {
+    promptMessage = await tryEditReply();
+  } else if (promptMessage) {
+    const edited = await editPrompt(promptMessage, payload);
+    promptMessage = edited ?? null;
+  }
+
+  if (!promptMessage) {
+    // Fallback: create a new followup
+    promptMessage = await interaction.followUp({
+      ...payload,
+      ephemeral: true,
+    });
+  }
 
   const buttonPromise = promptMessage
     .awaitMessageComponent({
@@ -312,18 +439,14 @@ async function promptForGotmValue(
     })
     .then(async (i) => {
       const cid = i.customId ?? "";
-      await i.deferUpdate().catch(() => {});
-      if (cid.startsWith("gotm-audit-stop")) return "stop" as const;
-      return { action: "skip" } as GotmAuditPromptResult;
+      if (!i.deferred && !i.replied) {
+        await i.deferUpdate().catch(() => {});
+      }
+      if (cid.startsWith(stopPrefix)) return "stop" as const;
+      if (cid.startsWith(noValuePrefix)) return { action: "no-value" } as AuditPromptResult;
+      return { action: "skip" } as AuditPromptResult;
     })
     .catch(() => null);
-
-  const fieldLabel =
-    opts.field === "threadId"
-      ? "thread ID"
-      : opts.field === "redditUrl"
-        ? "Reddit URL"
-        : "voting results message ID";
 
   const channel: any = interaction.channel;
   const textPromise = channel?.awaitMessages
@@ -333,29 +456,39 @@ async function promptForGotmValue(
           max: 1,
           time: 120_000,
         })
-        .then((collected: any) => {
+        .then(async (collected: any) => {
           const first = collected?.first?.();
           const content: string | undefined = first?.content;
           if (!content) return null;
           const trimmed = String(content).trim();
           const lower = trimmed.toLowerCase();
+          try {
+            await first.delete().catch(() => {});
+          } catch {
+            // ignore delete failures
+          }
           if (lower === "stop") return "stop" as const;
           if (lower === "none" || lower === "null" || lower === "skip") return { action: "skip" } as const;
-          return { action: "value", value: trimmed } as GotmAuditPromptResult;
+          if (lower === "never" || lower === "no value" || lower === "no-value") {
+            return { action: "no-value" } as const;
+          }
+          return { action: "value", value: trimmed } as AuditPromptResult;
         })
         .catch(() => null)
     : Promise.resolve(null);
 
   const result = await Promise.race([buttonPromise, textPromise]);
 
-  try {
-    await promptMessage.edit({ components: [] });
-  } catch {
-    // ignore
+  if (opts.useEditReply && promptMessage) {
+    await (interaction as any).editReply({ components: [] });
+  } else {
+    await editPrompt(promptMessage, { components: [] });
   }
 
-  if (!result) return { action: "skip" };
-  return result;
+  return {
+    result: result ?? { action: "skip" },
+    promptMessage,
+  };
 }
 
 @Discord()
@@ -442,11 +575,233 @@ export class SuperAdmin {
     });
   }
 
+  @ButtonComponent({ id: /^(gotm|nr-gotm)-audit-(stop|skip|novalue)-.+/ })
+  async handleAuditButtons(interaction: ButtonInteraction): Promise<void> {
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.deferUpdate().catch(() => {});
+    }
+  }
+
   @Slash({
     description: "Audit GOTM data for missing fields",
     name: "gotm-data-audit",
   })
   async gotmDataAudit(
+    @SlashOption({
+      description: "Ask only about missing thread IDs",
+      name: "threadid",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    threadIdFlag: boolean | undefined,
+    @SlashOption({
+      description: "Ask only about missing Reddit URLs",
+      name: "redditurl",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    redditUrlFlag: boolean | undefined,
+    @SlashOption({
+      description: "Ask only about missing voting result message IDs",
+      name: "votingresults",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    votingResultsFlag: boolean | undefined,
+    @SlashOption({
+      description: "Order to audit rounds (asc or desc, default desc)",
+      name: "order",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    order: string | undefined,
+    @SlashOption({
+      description: "If true, show prompts in-channel (not ephemeral)",
+      name: "showinchat",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    showInChat: boolean | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    const ephemeral = !showInChat;
+    await safeDeferReply(interaction, { ephemeral });
+
+    const okToUseCommand: boolean = await isSuperAdmin(interaction);
+    if (!okToUseCommand) return;
+
+    const checks: Record<AuditField, boolean> = {
+      threadId: Boolean(threadIdFlag),
+      redditUrl: Boolean(redditUrlFlag),
+      votingResults: Boolean(votingResultsFlag),
+    };
+
+    if (!checks.threadId && !checks.redditUrl && !checks.votingResults) {
+      checks.threadId = true;
+      checks.redditUrl = true;
+      checks.votingResults = true;
+    }
+
+    const dir = (order ?? "desc").toLowerCase() === "asc" ? "asc" : "desc";
+    const entries = Gotm.all()
+      .slice()
+      .sort((a, b) => (dir === "asc" ? a.round - b.round : b.round - a.round));
+    if (!entries.length) {
+      await safeReply(interaction, {
+        content: "No GOTM data available to audit.",
+        ephemeral,
+      });
+      return;
+    }
+
+    await safeReply(interaction, {
+      content:
+        "Starting GOTM data audit. Click Stop Audit at any prompt to end early. Click Skip or type none/null to leave a field empty.",
+      ephemeral,
+    });
+
+    let stopped = false;
+    let promptMessage: Message | null = null;
+    let useEditReply = false;
+    try {
+      promptMessage = (await interaction.fetchReply()) as Message | null;
+      useEditReply = !!promptMessage;
+    } catch {
+      // ignore fetch failures; prompt creation handled below
+    }
+
+    for (const entry of entries) {
+      if (stopped) break;
+
+      const roundLabel = `Round ${entry.round} (${entry.monthYear})`;
+      const skipRedditAudit = isAfterRedditCutoff(entry.monthYear);
+
+      for (let i = 0; i < entry.gameOfTheMonth.length; i++) {
+        const game = entry.gameOfTheMonth[i];
+        const winners = entry.gameOfTheMonth.map((g) => g.title);
+
+        if (checks.threadId && isAuditFieldMissing(game.threadId)) {
+          const res = await promptForAuditValue(interaction, {
+            auditLabel: "GOTM",
+            tokenPrefix: "gotm",
+            round: entry.round,
+            roundLabel,
+            gameIndex: i,
+            gameTitle: game.title,
+            field: "threadId",
+            winners,
+            rawEntry: entry,
+            promptMessage,
+            useEditReply,
+          });
+          promptMessage = res.promptMessage;
+        if (res.result === "stop") {
+          stopped = true;
+          break;
+        }
+        if (res.result && res.result.action === "value") {
+          const val = res.result.value ?? "";
+          if (val.length > THREAD_ID_MAX_LENGTH) {
+            await safeReply(interaction, {
+              content: `Thread ID is too long (${val.length}). Max allowed is ${THREAD_ID_MAX_LENGTH}. Please provide the ID (not a URL).`,
+            });
+            continue;
+          }
+          await updateGotmGameFieldInDatabase(entry.round, i, "threadId", res.result.value);
+          Gotm.updateThreadIdByRound(entry.round, res.result.value, i);
+        } else if (res.result && res.result.action === "no-value") {
+          await updateGotmGameFieldInDatabase(entry.round, i, "threadId", AUDIT_NO_VALUE_SENTINEL);
+          Gotm.updateThreadIdByRound(entry.round, AUDIT_NO_VALUE_SENTINEL, i);
+        }
+      }
+        if (stopped) break;
+
+        if (checks.redditUrl && !skipRedditAudit && isAuditFieldMissing(game.redditUrl)) {
+          const res = await promptForAuditValue(interaction, {
+            auditLabel: "GOTM",
+            tokenPrefix: "gotm",
+            round: entry.round,
+            roundLabel,
+            gameIndex: i,
+            gameTitle: game.title,
+            field: "redditUrl",
+            winners,
+            rawEntry: entry,
+            promptMessage,
+            useEditReply,
+          });
+          promptMessage = res.promptMessage;
+          if (res.result === "stop") {
+            stopped = true;
+            break;
+          }
+          if (res.result && res.result.action === "value") {
+            await updateGotmGameFieldInDatabase(entry.round, i, "redditUrl", res.result.value);
+            Gotm.updateRedditUrlByRound(entry.round, res.result.value, i);
+          } else if (res.result && res.result.action === "no-value") {
+            await updateGotmGameFieldInDatabase(entry.round, i, "redditUrl", AUDIT_NO_VALUE_SENTINEL);
+            Gotm.updateRedditUrlByRound(entry.round, AUDIT_NO_VALUE_SENTINEL, i);
+          }
+        }
+      }
+
+      if (stopped) break;
+
+      if (checks.votingResults && isAuditFieldMissing(entry.votingResultsMessageId)) {
+        const res = await promptForAuditValue(interaction, {
+          auditLabel: "GOTM",
+          tokenPrefix: "gotm",
+          round: entry.round,
+          roundLabel,
+          gameIndex: null,
+          gameTitle: null,
+          field: "votingResults",
+          winners: entry.gameOfTheMonth.map((g) => g.title),
+          rawEntry: entry,
+          promptMessage,
+          useEditReply,
+        });
+        promptMessage = res.promptMessage;
+        if (res.result === "stop") {
+          stopped = true;
+          break;
+        }
+        if (res.result && res.result.action === "value") {
+          await updateGotmVotingResultsInDatabase(entry.round, res.result.value);
+          Gotm.updateVotingResultsByRound(entry.round, res.result.value);
+        } else if (res.result && res.result.action === "no-value") {
+          await updateGotmVotingResultsInDatabase(entry.round, AUDIT_NO_VALUE_SENTINEL);
+          Gotm.updateVotingResultsByRound(entry.round, AUDIT_NO_VALUE_SENTINEL);
+        }
+      }
+    }
+
+    if (promptMessage) {
+      const finalContent = stopped ? "Audit stopped." : "Audit completed.";
+      try {
+        if ((interaction as any).editReply && promptMessage && promptMessage.id === (await interaction.fetchReply().catch(() => null))?.id) {
+          await (interaction as any).editReply({ content: finalContent, embeds: [], components: [] });
+        } else {
+          await promptMessage.edit({ content: finalContent, embeds: [], components: [] });
+        }
+      } catch (err: any) {
+        if (err?.code !== 10008) throw err;
+        await safeReply(interaction, { content: finalContent });
+      }
+    } else {
+      if (stopped) {
+        await safeReply(interaction, { content: "Audit stopped." });
+      } else {
+        await safeReply(interaction, { content: "Audit completed." });
+      }
+    }
+  }
+
+  @Slash({
+    description: "Audit NR-GOTM data for missing fields",
+    name: "nr-gotm-data-audit",
+  })
+  async nrGotmDataAudit(
     @SlashOption({
       description: "Ask only about missing thread IDs",
       name: "threadid",
@@ -482,7 +837,7 @@ export class SuperAdmin {
     const okToUseCommand: boolean = await isSuperAdmin(interaction);
     if (!okToUseCommand) return;
 
-    const checks = {
+    const checks: Record<AuditField, boolean> = {
       threadId: Boolean(threadIdFlag),
       redditUrl: Boolean(redditUrlFlag),
       votingResults: Boolean(votingResultsFlag),
@@ -495,98 +850,155 @@ export class SuperAdmin {
     }
 
     const dir = (order ?? "desc").toLowerCase() === "asc" ? "asc" : "desc";
-    const entries = Gotm.all()
+    const entries = NrGotm.all()
       .slice()
       .sort((a, b) => (dir === "asc" ? a.round - b.round : b.round - a.round));
     if (!entries.length) {
       await safeReply(interaction, {
-        content: "No GOTM data available to audit.",
+        content: "No NR-GOTM data available to audit.",
       });
       return;
     }
 
     await safeReply(interaction, {
       content:
-        "Starting GOTM data audit. Click Stop Audit at any prompt to end early. Click Skip or type none/null to leave a field empty.",
+        "Starting NR-GOTM data audit. Click Stop Audit at any prompt to end early. Click Skip or type none/null to leave a field empty.",
     });
 
     let stopped = false;
+    let promptMessage: Message | null = null;
+    let useEditReply = false;
+    try {
+      promptMessage = (await interaction.fetchReply()) as Message | null;
+      useEditReply = !!promptMessage;
+    } catch {
+      // ignore
+    }
 
     for (const entry of entries) {
       if (stopped) break;
 
       const roundLabel = `Round ${entry.round} (${entry.monthYear})`;
+      const skipRedditAudit = isAfterRedditCutoff(entry.monthYear);
 
       for (let i = 0; i < entry.gameOfTheMonth.length; i++) {
         const game = entry.gameOfTheMonth[i];
         const winners = entry.gameOfTheMonth.map((g) => g.title);
 
-        if (checks.threadId && !game.threadId) {
-          const res = await promptForGotmValue(interaction, {
+        if (checks.threadId && isAuditFieldMissing(game.threadId)) {
+          const res = await promptForAuditValue(interaction, {
+            auditLabel: "NR-GOTM",
+            tokenPrefix: "nr-gotm",
             round: entry.round,
             roundLabel,
             gameIndex: i,
             gameTitle: game.title,
             field: "threadId",
             winners,
+            rawEntry: entry,
+            promptMessage,
+            useEditReply,
           });
-          if (res === "stop") {
-            stopped = true;
-            break;
+          promptMessage = res.promptMessage;
+        if (res.result === "stop") {
+          stopped = true;
+          break;
+        }
+        if (res.result && res.result.action === "value") {
+          const val = res.result.value ?? "";
+          if (val.length > THREAD_ID_MAX_LENGTH) {
+            await safeReply(interaction, {
+              content: `Thread ID is too long (${val.length}). Max allowed is ${THREAD_ID_MAX_LENGTH}. Please provide the ID (not a URL).`,
+            });
+            continue;
           }
-          if (res && res.action === "value") {
-            await updateGotmGameFieldInDatabase(entry.round, i, "threadId", res.value);
-            Gotm.updateThreadIdByRound(entry.round, res.value, i);
-          }
+          await updateNrGotmGameFieldInDatabase(entry.round, i, "threadId", res.result.value);
+          NrGotm.updateThreadIdByRound(entry.round, res.result.value, i);
+        } else if (res.result && res.result.action === "no-value") {
+          await updateNrGotmGameFieldInDatabase(entry.round, i, "threadId", AUDIT_NO_VALUE_SENTINEL);
+          NrGotm.updateThreadIdByRound(entry.round, AUDIT_NO_VALUE_SENTINEL, i);
+        }
         }
         if (stopped) break;
 
-        if (checks.redditUrl && !game.redditUrl) {
-          const res = await promptForGotmValue(interaction, {
+        if (checks.redditUrl && !skipRedditAudit && isAuditFieldMissing(game.redditUrl)) {
+          const res = await promptForAuditValue(interaction, {
+            auditLabel: "NR-GOTM",
+            tokenPrefix: "nr-gotm",
             round: entry.round,
             roundLabel,
             gameIndex: i,
             gameTitle: game.title,
             field: "redditUrl",
             winners,
+            rawEntry: entry,
+            promptMessage,
+            useEditReply,
           });
-          if (res === "stop") {
+          promptMessage = res.promptMessage;
+          if (res.result === "stop") {
             stopped = true;
             break;
           }
-          if (res && res.action === "value") {
-            await updateGotmGameFieldInDatabase(entry.round, i, "redditUrl", res.value);
-            Gotm.updateRedditUrlByRound(entry.round, res.value, i);
+          if (res.result && res.result.action === "value") {
+            await updateNrGotmGameFieldInDatabase(entry.round, i, "redditUrl", res.result.value);
+            NrGotm.updateRedditUrlByRound(entry.round, res.result.value, i);
+          } else if (res.result && res.result.action === "no-value") {
+            await updateNrGotmGameFieldInDatabase(entry.round, i, "redditUrl", AUDIT_NO_VALUE_SENTINEL);
+            NrGotm.updateRedditUrlByRound(entry.round, AUDIT_NO_VALUE_SENTINEL, i);
           }
         }
       }
 
       if (stopped) break;
 
-      if (checks.votingResults && !entry.votingResultsMessageId) {
-        const res = await promptForGotmValue(interaction, {
+      if (checks.votingResults && isAuditFieldMissing(entry.votingResultsMessageId)) {
+        const res = await promptForAuditValue(interaction, {
+          auditLabel: "NR-GOTM",
+          tokenPrefix: "nr-gotm",
           round: entry.round,
           roundLabel,
           gameIndex: null,
           gameTitle: null,
           field: "votingResults",
           winners: entry.gameOfTheMonth.map((g) => g.title),
+          rawEntry: entry,
+          promptMessage,
+          useEditReply,
         });
-        if (res === "stop") {
+        promptMessage = res.promptMessage;
+        if (res.result === "stop") {
           stopped = true;
           break;
         }
-        if (res && res.action === "value") {
-          await updateGotmVotingResultsInDatabase(entry.round, res.value);
-          Gotm.updateVotingResultsByRound(entry.round, res.value);
+        if (res.result && res.result.action === "value") {
+          await updateNrGotmVotingResultsInDatabase(entry.round, res.result.value);
+          NrGotm.updateVotingResultsByRound(entry.round, res.result.value);
+        } else if (res.result && res.result.action === "no-value") {
+          await updateNrGotmVotingResultsInDatabase(entry.round, AUDIT_NO_VALUE_SENTINEL);
+          NrGotm.updateVotingResultsByRound(entry.round, AUDIT_NO_VALUE_SENTINEL);
         }
       }
     }
 
-    if (stopped) {
-      await safeReply(interaction, { content: "Audit stopped." });
+    if (promptMessage) {
+      const finalContent = stopped ? "Audit stopped." : "Audit completed.";
+      try {
+        if ((interaction as any).editReply && promptMessage && promptMessage.id === (await interaction.fetchReply().catch(() => null))?.id) {
+          await (interaction as any).editReply({ content: finalContent, embeds: [], components: [] });
+        } else {
+          await promptMessage.edit({ content: finalContent, embeds: [], components: [] });
+        }
+      } catch (err: any) {
+        if (err?.code !== 10008) throw err;
+        await safeReply(interaction, { content: finalContent });
+      }
     } else {
-      await safeReply(interaction, { content: "Audit completed." });
+      if (stopped) {
+        await safeReply(interaction, { content: "Audit stopped." });
+      } else {
+        await safeReply(interaction, { content: "Audit completed." });
+      }
     }
   }
 
@@ -1526,9 +1938,11 @@ function formatGotmEntryForEdit(entry: GotmEntry): string {
 
   entry.gameOfTheMonth.forEach((game, index) => {
     const num = index + 1;
+    const threadId = displayAuditValue(game.threadId);
+    const redditUrl = displayAuditValue(game.redditUrl);
     lines.push(`${num}) Title: ${game.title}`);
-    lines.push(`   Thread: ${game.threadId ?? "(none)"}`);
-    lines.push(`   Reddit: ${game.redditUrl ?? "(none)"}`);
+    lines.push(`   Thread: ${threadId ?? "(none)"}`);
+    lines.push(`   Reddit: ${redditUrl ?? "(none)"}`);
   });
 
   return lines.join("\n");

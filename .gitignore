@@ -8,3 +8,4 @@ yarn.lock
 # folders
 node_modules
 .qodo
+.node

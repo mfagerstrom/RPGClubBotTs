@@ -1,15 +1,23 @@
 import { EmbedBuilder } from "discord.js";
 const ANNOUNCEMENTS_CHANNEL_ID = process.env.ANNOUNCEMENTS_CHANNEL_ID;
+const AUDIT_NO_VALUE_SENTINEL = "__NO_VALUE__";
+function displayAuditValue(value) {
+    if (value === AUDIT_NO_VALUE_SENTINEL)
+        return null;
+    return value ?? null;
+}
 function formatGames(games) {
     if (!games || games.length === 0)
         return "(no games listed)";
     const lines = [];
     for (const g of games) {
+        const threadId = displayAuditValue(g.threadId);
+        const redditUrl = displayAuditValue(g.redditUrl);
         const parts = [];
-        const titleWithThread = g.threadId ? `${g.title} - <#${g.threadId}>` : g.title;
+        const titleWithThread = threadId ? `${g.title} - <#${threadId}>` : g.title;
         parts.push(titleWithThread);
-        if (g.redditUrl) {
-            parts.push(`[Reddit](${g.redditUrl})`);
+        if (redditUrl) {
+            parts.push(`[Reddit](${redditUrl})`);
         }
         const firstLine = `- ${parts.join(" | ")}`;
         lines.push(firstLine);
@@ -37,7 +45,8 @@ function appendWithTailTruncate(body, tail) {
 function buildResultsJumpLink(entry, guildId) {
     if (!guildId || !ANNOUNCEMENTS_CHANNEL_ID)
         return undefined;
-    const msgId = entry.votingResultsMessageId;
+    const rawMsgId = entry.votingResultsMessageId;
+    const msgId = displayAuditValue(rawMsgId);
     if (!msgId)
         return undefined;
     return `https://discord.com/channels/${guildId}/${ANNOUNCEMENTS_CHANNEL_ID}/${msgId}`;
@@ -89,9 +98,10 @@ async function resolveThreadImageUrl(client, threadId) {
 }
 async function findFirstGameImage(client, games) {
     for (const g of games) {
-        if (!g.threadId)
+        const threadId = displayAuditValue(g.threadId);
+        if (!threadId)
             continue;
-        const imgUrl = await resolveThreadImageUrl(client, g.threadId).catch(() => undefined);
+        const imgUrl = await resolveThreadImageUrl(client, threadId).catch(() => undefined);
         if (imgUrl)
             return imgUrl;
     }

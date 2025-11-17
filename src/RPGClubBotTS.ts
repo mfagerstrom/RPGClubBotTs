@@ -9,7 +9,7 @@ import { updateBotPresence } from "./functions/SetPresence.js";
 import { initOraclePool } from "./db/oracleClient.js";
 import { loadGotmFromDb } from "./classes/Gotm.js";
 import { loadNrGotmFromDb } from "./classes/NrGotm.js";
-import { installConsoleLogging, setConsoleLoggingClient } from "./utilities/DiscordConsoleLogger.js";
+import { installConsoleLogging, logToDiscord, setConsoleLoggingClient } from "./utilities/DiscordConsoleLogger.js";
 import { startNominationReminderService } from "./services/NominationReminderService.js";
 
 dotenv.config();
@@ -47,7 +47,7 @@ bot.once("clientReady", async () => {
   await updateBotPresence(bot);
 
   // Synchronize applications commands with Discord
-  void bot.initApplicationCommands();
+  await bot.initApplicationCommands();
 
   // To clear all guild commands, uncomment this line,
   // This is useful when moving from guild commands to global commands
@@ -58,7 +58,7 @@ bot.once("clientReady", async () => {
   //  );
 
   startNominationReminderService(bot);
-  console.log("Bot started");
+  console.log("Startup sequence completed.");
 });
 
 bot.on("interactionCreate", async (interaction: Interaction) => {

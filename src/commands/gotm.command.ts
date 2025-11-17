@@ -250,15 +250,22 @@ function chunkEmbeds(list: EmbedBuilder[], size: number): EmbedBuilder[][] {
   return out;
 }
 
+function displayAuditValue(value: string | null | undefined): string | null {
+  if (value === AUDIT_NO_VALUE_SENTINEL) return null;
+  return value ?? null;
+}
+
 function formatGames(games: GotmGame[], guildId?: string): string {
   if (!games || games.length === 0) return "(no games listed)";
   const lines: string[] = [];
   for (const g of games) {
     const parts: string[] = [];
-    const titleWithThread = g.threadId ? `${g.title} - <#${g.threadId}>` : g.title;
+    const threadId = displayAuditValue(g.threadId);
+    const redditUrl = displayAuditValue(g.redditUrl);
+    const titleWithThread = threadId ? `${g.title} - <#${threadId}>` : g.title;
     parts.push(titleWithThread);
-    if (g.redditUrl) {
-      parts.push(`[Reddit](${g.redditUrl})`);
+    if (redditUrl) {
+      parts.push(`[Reddit](${redditUrl})`);
     }
     const firstLine = `- ${parts.join(' | ')}`;
     lines.push(firstLine);
@@ -274,7 +281,8 @@ function truncateField(value: string): string {
 
 function buildResultsJumpLink(entry: GotmEntry, guildId?: string): string | undefined {
   if (!guildId || !ANNOUNCEMENTS_CHANNEL_ID) return undefined;
-  const msgId = (entry as any).votingResultsMessageId as string | undefined | null;
+  const rawMsgId = (entry as any).votingResultsMessageId as string | undefined | null;
+  const msgId = displayAuditValue(rawMsgId);
   if (!msgId) return undefined;
   return `https://discord.com/channels/${guildId}/${ANNOUNCEMENTS_CHANNEL_ID}/${msgId}`;
 }
@@ -297,3 +305,4 @@ function appendWithTailTruncate(body: string, tail: string): string {
   const trimmedBody = body.slice(0, Math.max(0, availForBody - 3)) + '...';
   return trimmedBody + sep + tail;
 }
+import { AUDIT_NO_VALUE_SENTINEL } from "./superadmin.command.js";

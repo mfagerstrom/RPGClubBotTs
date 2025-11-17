@@ -9,6 +9,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
 import { Discord, Slash, SlashChoice, SlashOption } from "discordx";
+import { AUDIT_NO_VALUE_SENTINEL } from "./superadmin.command.js";
 // Use relative import with .js for ts-node ESM compatibility
 import NrGotm from "../classes/NrGotm.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
@@ -253,18 +254,23 @@ function chunkEmbeds(list, size) {
     }
     return out;
 }
+function displayAuditValue(value) {
+    if (value === AUDIT_NO_VALUE_SENTINEL)
+        return null;
+    return value ?? null;
+}
 function formatGames(games, guildId) {
     if (!games || games.length === 0)
         return "(no games listed)";
     const lines = [];
     for (const g of games) {
         const parts = [];
-        const titleWithThread = g.threadId
-            ? `${g.title} - <#${g.threadId}>`
-            : g.title;
+        const threadId = displayAuditValue(g.threadId);
+        const redditUrl = displayAuditValue(g.redditUrl);
+        const titleWithThread = threadId ? `${g.title} - <#${threadId}>` : g.title;
         parts.push(titleWithThread);
-        if (g.redditUrl) {
-            parts.push(`[Reddit](${g.redditUrl})`);
+        if (redditUrl) {
+            parts.push(`[Reddit](${redditUrl})`);
         }
         const firstLine = `- ${parts.join(" | ")}`;
         lines.push(firstLine);
@@ -280,7 +286,8 @@ function truncateField(value) {
 function buildResultsJumpLink(entry, guildId) {
     if (!guildId || !ANNOUNCEMENTS_CHANNEL_ID)
         return undefined;
-    const msgId = entry.votingResultsMessageId;
+    const rawMsgId = entry.votingResultsMessageId;
+    const msgId = displayAuditValue(rawMsgId);
     if (!msgId)
         return undefined;
     return `https://discord.com/channels/${guildId}/${ANNOUNCEMENTS_CHANNEL_ID}/${msgId}`;

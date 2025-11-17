@@ -61,6 +61,14 @@ npm run build
 npm run start
 ```
 
+If you're in an environment without a system-wide Node (for example, a sandbox/WSL session), use the helper script to download a local Node binary into `.node` and set `PATH` for the command:
+
+```
+./scripts/npm-local.sh install
+./scripts/npm-local.sh run build
+./scripts/npm-local.sh run start
+```
+
 # 🐋 Docker
 
 To start your application:

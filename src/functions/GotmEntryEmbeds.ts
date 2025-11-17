@@ -4,18 +4,27 @@ import type { NrGotmEntry, NrGotmGame } from "../classes/NrGotm.js";
 
 const ANNOUNCEMENTS_CHANNEL_ID: string | undefined = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 
+const AUDIT_NO_VALUE_SENTINEL = "__NO_VALUE__";
+
 type AnyGame = GotmGame | NrGotmGame;
 type AnyEntry = GotmEntry | NrGotmEntry;
+
+function displayAuditValue(value: string | null | undefined): string | null {
+  if (value === AUDIT_NO_VALUE_SENTINEL) return null;
+  return value ?? null;
+}
 
 function formatGames(games: AnyGame[]): string {
   if (!games || games.length === 0) return "(no games listed)";
   const lines: string[] = [];
   for (const g of games) {
+    const threadId = displayAuditValue((g as any).threadId);
+    const redditUrl = displayAuditValue((g as any).redditUrl);
     const parts: string[] = [];
-    const titleWithThread = g.threadId ? `${g.title} - <#${g.threadId}>` : g.title;
+    const titleWithThread = threadId ? `${g.title} - <#${threadId}>` : g.title;
     parts.push(titleWithThread);
-    if (g.redditUrl) {
-      parts.push(`[Reddit](${g.redditUrl})`);
+    if (redditUrl) {
+      parts.push(`[Reddit](${redditUrl})`);
     }
     const firstLine = `- ${parts.join(" | ")}`;
     lines.push(firstLine);
@@ -42,7 +51,8 @@ function appendWithTailTruncate(body: string, tail: string): string {
 
 function buildResultsJumpLink(entry: AnyEntry, guildId?: string): string | undefined {
   if (!guildId || !ANNOUNCEMENTS_CHANNEL_ID) return undefined;
-  const msgId = (entry as any).votingResultsMessageId as string | undefined | null;
+  const rawMsgId = (entry as any).votingResultsMessageId as string | undefined | null;
+  const msgId = displayAuditValue(rawMsgId);
   if (!msgId) return undefined;
   return `https://discord.com/channels/${guildId}/${ANNOUNCEMENTS_CHANNEL_ID}/${msgId}`;
 }
@@ -103,8 +113,9 @@ async function findFirstGameImage(
   games: AnyGame[],
 ): Promise<string | undefined> {
   for (const g of games) {
-    if (!g.threadId) continue;
-    const imgUrl = await resolveThreadImageUrl(client, g.threadId).catch(() => undefined);
+    const threadId = displayAuditValue((g as any).threadId);
+    if (!threadId) continue;
+    const imgUrl = await resolveThreadImageUrl(client, threadId).catch(() => undefined);
     if (imgUrl) return imgUrl;
   }
   return undefined;
@@ -153,4 +164,3 @@ export async function buildNrGotmEntryEmbed(
 
   return embed;
 }
-

@@ -78,3 +78,7 @@ export function installConsoleLogging() {
 export function setConsoleLoggingClient(client) {
     discordClient = client;
 }
+export async function logToDiscord(message, level = "log") {
+    const msg = formatArgs([message]);
+    await sendToDiscord(level, msg);
+}

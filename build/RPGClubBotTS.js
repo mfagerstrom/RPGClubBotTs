@@ -36,7 +36,7 @@ bot.once("clientReady", async () => {
     // Set presence state from stored value
     await updateBotPresence(bot);
     // Synchronize applications commands with Discord
-    void bot.initApplicationCommands();
+    await bot.initApplicationCommands();
     // To clear all guild commands, uncomment this line,
     // This is useful when moving from guild commands to global commands
     // It must only be executed once
@@ -45,7 +45,7 @@ bot.once("clientReady", async () => {
     //    ...bot.guilds.cache.map((g) => g.id)
     //  );
     startNominationReminderService(bot);
-    console.log("Bot started");
+    console.log("Startup sequence completed.");
 });
 bot.on("interactionCreate", async (interaction) => {
     if ("isChatInputCommand" in interaction && interaction.isChatInputCommand()) {
