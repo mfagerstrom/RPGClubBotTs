@@ -11,6 +11,7 @@ import type {
   ButtonInteraction,
   CommandInteraction,
   RepliableInteraction,
+  User,
 } from "discord.js";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import {
@@ -37,6 +38,18 @@ import NrGotm, {
   insertNrGotmRoundInDatabase,
 } from "../classes/NrGotm.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
+import {
+  buildNominationDeleteView,
+  handleNominationDeletionButton,
+  buildNominationDeleteViewEmbed,
+  announceNominationChange,
+} from "../functions/NominationAdminHelpers.js";
+import { getUpcomingNominationWindow } from "../functions/NominationWindow.js";
+import {
+  deleteNominationForUser,
+  getNominationForUser,
+  listNominationsForRound,
+} from "../classes/Nomination.js";
 
 type AdminHelpTopicId =
   | "presence"
@@ -44,6 +57,8 @@ type AdminHelpTopicId =
   | "edit-gotm"
   | "add-nr-gotm"
   | "edit-nr-gotm"
+  | "delete-gotm-nomination"
+  | "delete-nr-gotm-nomination"
   | "set-nextvote";
 
 type AdminHelpTopic = {
@@ -96,6 +111,20 @@ export const ADMIN_HELP_TOPICS: AdminHelpTopic[] = [
     syntax: "Syntax: /admin edit-nr-gotm round:<integer>",
     parameters:
       "round (required integer) - NR-GOTM round number to edit. The bot will show current data and prompt you for which game and field to update.",
+  },
+  {
+    id: "delete-gotm-nomination",
+    label: "/admin delete-gotm-nomination",
+    summary: "Delete any GOTM nomination for the upcoming round.",
+    syntax: "Syntax: /admin delete-gotm-nomination user:<user>",
+    notes: "Targets the upcoming nomination set (current round + 1).",
+  },
+  {
+    id: "delete-nr-gotm-nomination",
+    label: "/admin delete-nr-gotm-nomination",
+    summary: "Delete any NR-GOTM nomination for the upcoming round.",
+    syntax: "Syntax: /admin delete-nr-gotm-nomination user:<user>",
+    notes: "Targets the upcoming nomination set (current round + 1).",
   },
   {
     id: "set-nextvote",
@@ -283,10 +312,11 @@ export class Admin {
     text: string | undefined,
     interaction: CommandInteraction
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction);
 
     const okToUseCommand: boolean = await isAdmin(interaction);
     if (!okToUseCommand) {
+      await safeReply(interaction, { content: "Access denied. Command requires Administrator role.", ephemeral: true });
       return;
     }
 
@@ -409,6 +439,201 @@ export class Admin {
         ephemeral: true,
       });
     }
+  }
+
+  @Slash({
+    description: "Delete any GOTM nomination for the upcoming round",
+    name: "delete-gotm-nomination",
+  })
+  async deleteGotmNomination(
+    @SlashOption({
+      description: "User whose nomination should be removed",
+      name: "user",
+      required: true,
+      type: ApplicationCommandOptionType.User,
+    })
+    user: User,
+    @SlashOption({
+      description: "Reason for deletion (required)",
+      name: "reason",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    reason: string,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction, { ephemeral: true });
+
+    const okToUseCommand: boolean = await isAdmin(interaction);
+    if (!okToUseCommand) {
+      return;
+    }
+
+    try {
+      const window = await getUpcomingNominationWindow();
+      const targetRound = window.targetRound;
+      const nomination = await getNominationForUser("gotm", targetRound, user.id);
+      const targetUser = await interaction.client.users.fetch(user.id).catch(() => user);
+      const targetName = targetUser?.tag ?? user.tag ?? user.username ?? user.id;
+
+      if (!nomination) {
+        await safeReply(interaction, {
+          content: `No GOTM nomination found for Round ${targetRound} by ${targetName}.`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      await deleteNominationForUser("gotm", targetRound, user.id);
+      const nominations = await listNominationsForRound("gotm", targetRound);
+      const embed = buildNominationDeleteViewEmbed("GOTM", "/gotm nominate", targetRound, window, nominations);
+      const adminName = interaction.user.tag ?? interaction.user.username ?? interaction.user.id;
+      const content = `${adminName} deleted <@${user.id}>'s nomination "${nomination.gameTitle}" for GOTM Round ${targetRound}. Reason: ${reason}`;
+
+      await announceNominationChange("gotm", interaction as any, content, embed);
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      await safeReply(interaction, {
+        content: `Failed to delete nomination: ${msg}`,
+        ephemeral: true,
+      });
+    }
+  }
+
+  @Slash({
+    description: "Delete any NR-GOTM nomination for the upcoming round",
+    name: "delete-nr-gotm-nomination",
+  })
+  async deleteNrGotmNomination(
+    @SlashOption({
+      description: "User whose nomination should be removed",
+      name: "user",
+      required: true,
+      type: ApplicationCommandOptionType.User,
+    })
+    user: User,
+    @SlashOption({
+      description: "Reason for deletion (required)",
+      name: "reason",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    reason: string,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction);
+
+    const okToUseCommand: boolean = await isAdmin(interaction);
+    if (!okToUseCommand) {
+      await safeReply(interaction, { content: "Access denied. Command requires Administrator role.", ephemeral: true });
+      return;
+    }
+
+    try {
+      const window = await getUpcomingNominationWindow();
+      const targetRound = window.targetRound;
+      const nomination = await getNominationForUser("nr-gotm", targetRound, user.id);
+      const targetUser = await interaction.client.users.fetch(user.id).catch(() => user);
+      const targetName = targetUser?.tag ?? user.tag ?? user.username ?? user.id;
+
+      if (!nomination) {
+        await safeReply(interaction, {
+          content: `No NR-GOTM nomination found for Round ${targetRound} by ${targetName}.`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      await deleteNominationForUser("nr-gotm", targetRound, user.id);
+      const nominations = await listNominationsForRound("nr-gotm", targetRound);
+      const embed = buildNominationDeleteViewEmbed("NR-GOTM", "/nr-gotm nominate", targetRound, window, nominations);
+      const adminName = interaction.user.tag ?? interaction.user.username ?? interaction.user.id;
+      const content = `${adminName} deleted <@${user.id}>'s nomination "${nomination.gameTitle}" for NR-GOTM Round ${targetRound}. Reason: ${reason}`;
+
+      await announceNominationChange("nr-gotm", interaction as any, content, embed);
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      await safeReply(interaction, {
+        content: `Failed to delete nomination: ${msg}`,
+        ephemeral: true,
+      });
+    }
+  }
+
+  @Slash({
+    description: "Interactive deletion of GOTM nominations for the upcoming round",
+    name: "delete-gotm-noms",
+  })
+  async deleteGotmNomsPanel(interaction: CommandInteraction): Promise<void> {
+    await safeDeferReply(interaction, { ephemeral: true });
+
+    const okToUseCommand: boolean = await isAdmin(interaction);
+    if (!okToUseCommand) {
+      return;
+    }
+
+    const window = await getUpcomingNominationWindow();
+    const view = await buildNominationDeleteView("gotm", "/gotm nominate", "admin");
+    if (!view) {
+      await safeReply(interaction, {
+        content: `No GOTM nominations found for Round ${window.targetRound}.`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await safeReply(interaction, {
+      content: `Select a GOTM nomination to delete for Round ${window.targetRound}.`,
+      embeds: [view.embed],
+      components: view.components,
+      ephemeral: true,
+    });
+  }
+
+  @Slash({
+    description: "Interactive deletion of NR-GOTM nominations for the upcoming round",
+    name: "delete-nr-gotm-noms",
+  })
+  async deleteNrGotmNomsPanel(interaction: CommandInteraction): Promise<void> {
+    await safeDeferReply(interaction, { ephemeral: true });
+
+    const okToUseCommand: boolean = await isAdmin(interaction);
+    if (!okToUseCommand) {
+      return;
+    }
+
+    const window = await getUpcomingNominationWindow();
+    const view = await buildNominationDeleteView("nr-gotm", "/nr-gotm nominate", "admin");
+    if (!view) {
+      await safeReply(interaction, {
+        content: `No NR-GOTM nominations found for Round ${window.targetRound}.`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await safeReply(interaction, {
+      content: `Select an NR-GOTM nomination to delete for Round ${window.targetRound}.`,
+      embeds: [view.embed],
+      components: view.components,
+      ephemeral: true,
+    });
+  }
+
+  @ButtonComponent({ id: /^admin-(gotm|nr-gotm)-nom-del-(\d+)-(\d+)$/ })
+  async handleAdminNominationDeleteButton(interaction: ButtonInteraction): Promise<void> {
+    const okToUseCommand: boolean = await isAdmin(interaction);
+    if (!okToUseCommand) {
+      return;
+    }
+
+    const match = interaction.customId.match(/^admin-(gotm|nr-gotm)-nom-del-(\d+)-(\d+)$/);
+    if (!match) return;
+    const kind = match[1] as "gotm" | "nr-gotm";
+    const round = Number(match[2]);
+    const userId = match[3];
+
+    await handleNominationDeletionButton(interaction, kind, round, userId, "admin");
   }
 
   @Slash({ description: "Add a new GOTM round", name: "add-gotm" })

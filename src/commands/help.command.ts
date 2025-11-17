@@ -35,20 +35,22 @@ const HELP_TOPICS: HelpTopic[] = [
   {
     id: "gotm",
     label: "/gotm",
-    summary: "Search Game of the Month (GOTM) data (ephemeral by default).",
+    summary:
+      "GOTM commands: search history, list nominations, nominate, and delete your nomination (ephemeral by default).",
     syntax:
-      "Syntax: /gotm [round:<integer>] [year:<integer>] [month:<string>] [title:<string>] [showinchat:<boolean>]",
+      "Syntax: /gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>] | /gotm noms [showinchat:<bool>] | /gotm nominate title:<string> | /gotm delete-nomination",
     notes:
-      "If round is provided, it takes precedence. year+month target a specific month. title searches by game title. Set showinchat:true to post publicly.",
+      "Search: round takes precedence; year+month target a specific month; title searches by game title; set showinchat:true to post publicly. Nominations target the upcoming round (current round + 1) and close one day before the vote.",
   },
   {
     id: "nr-gotm",
     label: "/nr-gotm",
-    summary: "Search Non-RPG Game of the Month (NR-GOTM) data (ephemeral by default).",
+    summary:
+      "NR-GOTM commands: search history, list nominations, nominate, and delete your nomination (ephemeral by default).",
     syntax:
-      "Syntax: /nr-gotm [round:<integer>] [year:<integer>] [month:<string>] [title:<string>] [showinchat:<boolean>]",
+      "Syntax: /nr-gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>] | /nr-gotm noms [showinchat:<bool>] | /nr-gotm nominate title:<string> | /nr-gotm delete-nomination",
     notes:
-      "If round is provided, it takes precedence. year+month target a specific month. title searches by game title. Set showinchat:true to post publicly.",
+      "Search: round takes precedence; year+month target a specific month; title searches by game title; set showinchat:true to post publicly. Nominations target the upcoming round (current round + 1) and close one day before the vote.",
   },
   {
     id: "round",

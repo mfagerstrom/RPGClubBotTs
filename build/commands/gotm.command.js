@@ -8,10 +8,13 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
 import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
-import { Discord, Slash, SlashChoice, SlashOption } from "discordx";
+import { Discord, Slash, SlashChoice, SlashGroup, SlashOption } from "discordx";
 // Use relative import with .js for ts-node ESM compatibility
 import Gotm from "../classes/Gotm.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { areNominationsClosed, getUpcomingNominationWindow, } from "../functions/NominationWindow.js";
+import { deleteNominationForUser, getNominationForUser, listNominationsForRound, upsertNomination, } from "../classes/Nomination.js";
+import { GOTM_NOMINATION_CHANNEL_ID } from "../config/nominationChannels.js";
 const ANNOUNCEMENTS_CHANNEL_ID = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 // Precompute dropdown choices
 const MONTH_CHOICES = [
@@ -44,7 +47,7 @@ const YEAR_CHOICES = (() => {
     }
 })();
 let GotmSearch = class GotmSearch {
-    async gotm(round, year, month, title, showInChat, interaction) {
+    async search(round, year, month, title, showInChat, interaction) {
         const ephemeral = !showInChat;
         // Acknowledge early to avoid interaction timeouts while fetching images
         await safeDeferReply(interaction, { ephemeral });
@@ -105,9 +108,108 @@ let GotmSearch = class GotmSearch {
             await safeReply(interaction, { content: `Error processing request: ${msg}`, ephemeral: true });
         }
     }
+    async nominate(title, interaction) {
+        await safeDeferReply(interaction, { ephemeral: true });
+        const cleaned = title?.trim();
+        if (!cleaned) {
+            await safeReply(interaction, {
+                content: "Please provide a non-empty game title to nominate.",
+                ephemeral: true,
+            });
+            return;
+        }
+        try {
+            const window = await getUpcomingNominationWindow();
+            if (areNominationsClosed(window)) {
+                await safeReply(interaction, {
+                    content: `Nominations for Round ${window.targetRound} are closed. ` +
+                        `Voting is scheduled for ${window.nextVoteAt.toLocaleString()}.`,
+                    ephemeral: true,
+                });
+                return;
+            }
+            const userId = interaction.user.id;
+            const existing = await getNominationForUser("gotm", window.targetRound, userId);
+            const saved = await upsertNomination("gotm", window.targetRound, userId, cleaned);
+            const replaced = existing && existing.gameTitle !== saved.gameTitle
+                ? ` (replaced "${existing.gameTitle}")`
+                : existing
+                    ? " (no change to title)"
+                    : "";
+            await safeReply(interaction, {
+                content: `${existing ? "Updated" : "Recorded"} your GOTM nomination for Round ${window.targetRound}: "${saved.gameTitle}".${replaced}`,
+                ephemeral: true,
+            });
+            const nominations = await listNominationsForRound("gotm", window.targetRound);
+            const embed = buildNominationEmbed("GOTM", "/gotm nominate", window, nominations);
+            const content = `<@${interaction.user.id}> nominated "${saved.gameTitle}" for GOTM Round ${window.targetRound}.`;
+            await announceNomination("GOTM", interaction, content, embed);
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeReply(interaction, {
+                content: `Could not save your nomination: ${msg}`,
+                ephemeral: true,
+            });
+        }
+    }
+    async deleteNomination(interaction) {
+        await safeDeferReply(interaction, { ephemeral: true });
+        try {
+            const window = await getUpcomingNominationWindow();
+            if (areNominationsClosed(window)) {
+                await safeReply(interaction, {
+                    content: `Nominations for Round ${window.targetRound} are closed. ` +
+                        `Voting is scheduled for ${window.nextVoteAt.toLocaleString()}.`,
+                    ephemeral: true,
+                });
+                return;
+            }
+            const userId = interaction.user.id;
+            const existing = await getNominationForUser("gotm", window.targetRound, userId);
+            if (!existing) {
+                await safeReply(interaction, {
+                    content: `You do not have a GOTM nomination for Round ${window.targetRound}.`,
+                    ephemeral: true,
+                });
+                return;
+            }
+            await deleteNominationForUser("gotm", window.targetRound, userId);
+            const nominations = await listNominationsForRound("gotm", window.targetRound);
+            await safeReply(interaction, {
+                content: `Deleted your GOTM nomination for Round ${window.targetRound}: "${existing.gameTitle}".`,
+                ephemeral: true,
+            });
+            const embed = buildNominationEmbed("GOTM", "/gotm nominate", window, nominations);
+            const content = `<@${interaction.user.id}> removed their GOTM nomination "${existing.gameTitle}" for GOTM Round ${window.targetRound}.`;
+            await announceNomination("GOTM", interaction, content, embed);
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeReply(interaction, {
+                content: `Could not delete your nomination: ${msg}`,
+                ephemeral: true,
+            });
+        }
+    }
+    async listNominations(interaction) {
+        await safeDeferReply(interaction);
+        try {
+            const window = await getUpcomingNominationWindow();
+            const nominations = await listNominationsForRound("gotm", window.targetRound);
+            const embed = buildNominationEmbed("GOTM", "/gotm nominate", window, nominations);
+            await safeReply(interaction, { embeds: [embed] });
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeReply(interaction, {
+                content: `Could not list nominations: ${msg}`,
+            });
+        }
+    }
 };
 __decorate([
-    Slash({ description: "Search Game of the Month (GOTM)", name: "gotm" }),
+    Slash({ description: "Search Game of the Month (GOTM)", name: "search" }),
     __param(0, SlashOption({
         description: "Round number (takes precedence if provided)",
         name: "round",
@@ -140,11 +242,91 @@ __decorate([
         required: false,
         type: ApplicationCommandOptionType.Boolean,
     }))
-], GotmSearch.prototype, "gotm", null);
+], GotmSearch.prototype, "search", null);
+__decorate([
+    Slash({
+        description: "Nominate a game for the upcoming GOTM round",
+        name: "nominate",
+    }),
+    __param(0, SlashOption({
+        description: "Game title to nominate",
+        name: "title",
+        required: true,
+        type: ApplicationCommandOptionType.String,
+    }))
+], GotmSearch.prototype, "nominate", null);
+__decorate([
+    Slash({
+        description: "Delete your GOTM nomination for the upcoming round",
+        name: "delete-nomination",
+    })
+], GotmSearch.prototype, "deleteNomination", null);
+__decorate([
+    Slash({
+        description: "List current GOTM nominations for the upcoming round",
+        name: "noms",
+    })
+], GotmSearch.prototype, "listNominations", null);
 GotmSearch = __decorate([
-    Discord()
+    Discord(),
+    SlashGroup({ description: "Game of the Month commands", name: "gotm" }),
+    SlashGroup("gotm")
 ], GotmSearch);
 export { GotmSearch };
+function buildNominationEmbed(kindLabel, commandLabel, window, nominations) {
+    const lines = nominations.length > 0
+        ? nominations.map((n, idx) => `${numberEmoji(idx + 1)} ${n.gameTitle} — <@${n.userId}>`)
+        : ["No nominations yet."];
+    const closesLabel = formatCloseLabel(window.closesAt);
+    const voteLabel = formatDate(window.nextVoteAt);
+    return new EmbedBuilder()
+        .setColor(0x0099ff)
+        .setTitle(`${kindLabel} Nominations - Round ${window.targetRound}`)
+        .setDescription(lines.join("\n"))
+        .setFooter({
+        text: `Closes ${closesLabel} • Vote on ${voteLabel}\n` +
+            `Do you want to nominate a game? Use ${commandLabel}`,
+    });
+}
+async function announceNomination(kindLabel, interaction, content, embed) {
+    const channelId = GOTM_NOMINATION_CHANNEL_ID;
+    try {
+        const channel = await interaction.client.channels.fetch(channelId);
+        const textChannel = channel?.isTextBased() ? channel : null;
+        if (!textChannel || !isSendableTextChannel(textChannel))
+            return;
+        await textChannel.send({ content, embeds: [embed] });
+    }
+    catch (err) {
+        console.error(`Failed to announce ${kindLabel} nomination in channel ${channelId}:`, err);
+    }
+}
+function isSendableTextChannel(channel) {
+    return Boolean(channel && typeof channel.send === "function");
+}
+function numberEmoji(n) {
+    const lookup = {
+        1: ":one:",
+        2: ":two:",
+        3: ":three:",
+        4: ":four:",
+        5: ":five:",
+        6: ":six:",
+        7: ":seven:",
+        8: ":eight:",
+        9: ":nine:",
+        10: ":keycap_ten:",
+    };
+    return lookup[n] ?? `${n}.`;
+}
+function formatDate(date) {
+    return date.toLocaleDateString("en-US", { timeZone: "America/New_York" });
+}
+function formatCloseLabel(date) {
+    // Show close date (day before vote) at 11 PM ET.
+    const datePart = formatDate(date);
+    return `${datePart} 11:00 PM ET`;
+}
 function parseMonthValue(input) {
     const trimmed = input.trim();
     const num = Number(trimmed);

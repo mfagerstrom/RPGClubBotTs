@@ -15,6 +15,9 @@ import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEnt
 import Gotm, { updateGotmGameFieldInDatabase, insertGotmRoundInDatabase, deleteGotmRoundFromDatabase, updateGotmVotingResultsInDatabase, } from "../classes/Gotm.js";
 import NrGotm, { updateNrGotmGameFieldInDatabase, insertNrGotmRoundInDatabase, deleteNrGotmRoundFromDatabase, updateNrGotmVotingResultsInDatabase, } from "../classes/NrGotm.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
+import { buildNominationDeleteViewEmbed, announceNominationChange, } from "../functions/NominationAdminHelpers.js";
+import { getUpcomingNominationWindow } from "../functions/NominationWindow.js";
+import { deleteNominationForUser, getNominationForUser, listNominationsForRound, } from "../classes/Nomination.js";
 const SUPERADMIN_PRESENCE_CHOICES = new Map();
 export const SUPERADMIN_HELP_TOPICS = [
     {
@@ -1441,6 +1444,76 @@ let SuperAdmin = class SuperAdmin {
             components: response.components,
         });
     }
+    async deleteGotmNomination(user, reason, interaction) {
+        await safeDeferReply(interaction);
+        const okToUseCommand = await isSuperAdmin(interaction);
+        if (!okToUseCommand) {
+            await safeReply(interaction, { content: "Access denied. Command requires Superadmin role.", ephemeral: true });
+            return;
+        }
+        try {
+            const window = await getUpcomingNominationWindow();
+            const targetRound = window.targetRound;
+            const nomination = await getNominationForUser("gotm", targetRound, user.id);
+            const targetUser = await interaction.client.users.fetch(user.id).catch(() => user);
+            const targetName = targetUser?.tag ?? user.tag ?? user.username ?? user.id;
+            if (!nomination) {
+                await safeReply(interaction, {
+                    content: `No GOTM nomination found for Round ${targetRound} by ${targetName}.`,
+                    ephemeral: true,
+                });
+                return;
+            }
+            await deleteNominationForUser("gotm", targetRound, user.id);
+            const nominations = await listNominationsForRound("gotm", targetRound);
+            const embed = buildNominationDeleteViewEmbed("GOTM", "/gotm nominate", targetRound, window, nominations);
+            const adminName = interaction.user.tag ?? interaction.user.username ?? interaction.user.id;
+            const content = `${adminName} deleted <@${user.id}>'s nomination "${nomination.gameTitle}" for GOTM Round ${targetRound}. Reason: ${reason}`;
+            await announceNominationChange("gotm", interaction, content, embed);
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeReply(interaction, {
+                content: `Failed to delete nomination: ${msg}`,
+                ephemeral: true,
+            });
+        }
+    }
+    async deleteNrGotmNomination(user, reason, interaction) {
+        await safeDeferReply(interaction);
+        const okToUseCommand = await isSuperAdmin(interaction);
+        if (!okToUseCommand) {
+            await safeReply(interaction, { content: "Access denied. Command requires Superadmin role.", ephemeral: true });
+            return;
+        }
+        try {
+            const window = await getUpcomingNominationWindow();
+            const targetRound = window.targetRound;
+            const nomination = await getNominationForUser("nr-gotm", targetRound, user.id);
+            const targetUser = await interaction.client.users.fetch(user.id).catch(() => user);
+            const targetName = targetUser?.tag ?? user.tag ?? user.username ?? user.id;
+            if (!nomination) {
+                await safeReply(interaction, {
+                    content: `No NR-GOTM nomination found for Round ${targetRound} by ${targetName}.`,
+                    ephemeral: true,
+                });
+                return;
+            }
+            await deleteNominationForUser("nr-gotm", targetRound, user.id);
+            const nominations = await listNominationsForRound("nr-gotm", targetRound);
+            const embed = buildNominationDeleteViewEmbed("NR-GOTM", "/nr-gotm nominate", targetRound, window, nominations);
+            const adminName = interaction.user.tag ?? interaction.user.username ?? interaction.user.id;
+            const content = `${adminName} deleted <@${user.id}>'s nomination "${nomination.gameTitle}" for NR-GOTM Round ${targetRound}. Reason: ${reason}`;
+            await announceNominationChange("nr-gotm", interaction, content, embed);
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeReply(interaction, {
+                content: `Failed to delete nomination: ${msg}`,
+                ephemeral: true,
+            });
+        }
+    }
 };
 __decorate([
     Slash({ description: "Set Presence", name: "presence" }),
@@ -1586,6 +1659,42 @@ __decorate([
 __decorate([
     ButtonComponent({ id: /^superadmin-help-.+/ })
 ], SuperAdmin.prototype, "handleSuperAdminHelpButton", null);
+__decorate([
+    Slash({
+        description: "Delete any GOTM nomination for the upcoming round",
+        name: "delete-gotm-nomination",
+    }),
+    __param(0, SlashOption({
+        description: "User whose nomination should be removed",
+        name: "user",
+        required: true,
+        type: ApplicationCommandOptionType.User,
+    })),
+    __param(1, SlashOption({
+        description: "Reason for deletion (required)",
+        name: "reason",
+        required: true,
+        type: ApplicationCommandOptionType.String,
+    }))
+], SuperAdmin.prototype, "deleteGotmNomination", null);
+__decorate([
+    Slash({
+        description: "Delete any NR-GOTM nomination for the upcoming round",
+        name: "delete-nr-gotm-nomination",
+    }),
+    __param(0, SlashOption({
+        description: "User whose nomination should be removed",
+        name: "user",
+        required: true,
+        type: ApplicationCommandOptionType.User,
+    })),
+    __param(1, SlashOption({
+        description: "Reason for deletion (required)",
+        name: "reason",
+        required: true,
+        type: ApplicationCommandOptionType.String,
+    }))
+], SuperAdmin.prototype, "deleteNrGotmNomination", null);
 SuperAdmin = __decorate([
     Discord(),
     SlashGroup({ description: "Server Owner Commands", name: "superadmin" }),

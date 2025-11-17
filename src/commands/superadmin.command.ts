@@ -40,6 +40,16 @@ import NrGotm, {
   updateNrGotmVotingResultsInDatabase,
 } from "../classes/NrGotm.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
+import {
+  buildNominationDeleteViewEmbed,
+  announceNominationChange,
+} from "../functions/NominationAdminHelpers.js";
+import { getUpcomingNominationWindow } from "../functions/NominationWindow.js";
+import {
+  deleteNominationForUser,
+  getNominationForUser,
+  listNominationsForRound,
+} from "../classes/Nomination.js";
 
 type SuperAdminHelpTopicId =
   | "presence"
@@ -1898,6 +1908,126 @@ export class SuperAdmin {
       embeds: [helpEmbed],
       components: response.components,
     });
+  }
+
+  @Slash({
+    description: "Delete any GOTM nomination for the upcoming round",
+    name: "delete-gotm-nomination",
+  })
+  async deleteGotmNomination(
+    @SlashOption({
+      description: "User whose nomination should be removed",
+      name: "user",
+      required: true,
+      type: ApplicationCommandOptionType.User,
+    })
+    user: any,
+    @SlashOption({
+      description: "Reason for deletion (required)",
+      name: "reason",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    reason: string,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction);
+
+    const okToUseCommand: boolean = await isSuperAdmin(interaction);
+    if (!okToUseCommand) {
+      await safeReply(interaction, { content: "Access denied. Command requires Superadmin role.", ephemeral: true });
+      return;
+    }
+
+    try {
+      const window = await getUpcomingNominationWindow();
+      const targetRound = window.targetRound;
+      const nomination = await getNominationForUser("gotm", targetRound, user.id);
+      const targetUser = await interaction.client.users.fetch(user.id).catch(() => user);
+      const targetName = targetUser?.tag ?? user.tag ?? user.username ?? user.id;
+
+      if (!nomination) {
+        await safeReply(interaction, {
+          content: `No GOTM nomination found for Round ${targetRound} by ${targetName}.`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      await deleteNominationForUser("gotm", targetRound, user.id);
+      const nominations = await listNominationsForRound("gotm", targetRound);
+      const embed = buildNominationDeleteViewEmbed("GOTM", "/gotm nominate", targetRound, window, nominations);
+      const adminName = interaction.user.tag ?? interaction.user.username ?? interaction.user.id;
+      const content = `${adminName} deleted <@${user.id}>'s nomination "${nomination.gameTitle}" for GOTM Round ${targetRound}. Reason: ${reason}`;
+
+      await announceNominationChange("gotm", interaction as any, content, embed);
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      await safeReply(interaction, {
+        content: `Failed to delete nomination: ${msg}`,
+        ephemeral: true,
+      });
+    }
+  }
+
+  @Slash({
+    description: "Delete any NR-GOTM nomination for the upcoming round",
+    name: "delete-nr-gotm-nomination",
+  })
+  async deleteNrGotmNomination(
+    @SlashOption({
+      description: "User whose nomination should be removed",
+      name: "user",
+      required: true,
+      type: ApplicationCommandOptionType.User,
+    })
+    user: any,
+    @SlashOption({
+      description: "Reason for deletion (required)",
+      name: "reason",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    reason: string,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction);
+
+    const okToUseCommand: boolean = await isSuperAdmin(interaction);
+    if (!okToUseCommand) {
+      await safeReply(interaction, { content: "Access denied. Command requires Superadmin role.", ephemeral: true });
+      return;
+    }
+
+    try {
+      const window = await getUpcomingNominationWindow();
+      const targetRound = window.targetRound;
+      const nomination = await getNominationForUser("nr-gotm", targetRound, user.id);
+      const targetUser = await interaction.client.users.fetch(user.id).catch(() => user);
+      const targetName = targetUser?.tag ?? user.tag ?? user.username ?? user.id;
+
+      if (!nomination) {
+        await safeReply(interaction, {
+          content: `No NR-GOTM nomination found for Round ${targetRound} by ${targetName}.`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      await deleteNominationForUser("nr-gotm", targetRound, user.id);
+      const nominations = await listNominationsForRound("nr-gotm", targetRound);
+      const embed = buildNominationDeleteViewEmbed("NR-GOTM", "/nr-gotm nominate", targetRound, window, nominations);
+      const adminName = interaction.user.tag ?? interaction.user.username ?? interaction.user.id;
+      const content = `${adminName} deleted <@${user.id}>'s nomination "${nomination.gameTitle}" for NR-GOTM Round ${targetRound}. Reason: ${reason}`;
+
+      await announceNominationChange("nr-gotm", interaction as any, content, embed);
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      await safeReply(interaction, {
+        content: `Failed to delete nomination: ${msg}`,
+        ephemeral: true,
+      });
+    }
   }
 }
 
