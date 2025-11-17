@@ -16,6 +16,7 @@ import {
   upsertNomination,
 } from "../classes/Nomination.js";
 import { NR_GOTM_NOMINATION_CHANNEL_ID } from "../config/nominationChannels.js";
+import { buildNrGotmHelpResponse } from "./help.command.js";
 
 const ANNOUNCEMENTS_CHANNEL_ID: string | undefined = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 
@@ -66,6 +67,16 @@ const YEAR_CHOICES = (() => {
 @SlashGroup({ description: "Non-RPG Game of the Month commands", name: "nr-gotm" })
 @SlashGroup("nr-gotm")
 export class NrGotmSearch {
+  @Slash({
+    description: "Show help for NR-GOTM commands",
+    name: "help",
+  })
+  async help(interaction: CommandInteraction): Promise<void> {
+    await safeDeferReply(interaction, { ephemeral: true });
+    const response = buildNrGotmHelpResponse();
+    await safeReply(interaction, { ...response, ephemeral: true });
+  }
+
   @Slash({
     description: "Search Non-RPG Game of the Month (NR-GOTM)",
     name: "search",

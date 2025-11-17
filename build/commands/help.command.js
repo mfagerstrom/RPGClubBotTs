@@ -14,16 +14,23 @@ const HELP_TOPICS = [
     {
         id: "gotm",
         label: "/gotm",
-        summary: "GOTM commands: search history, list nominations, nominate, and delete your nomination (ephemeral by default).",
-        syntax: "Syntax: /gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>] | /gotm noms [showinchat:<bool>] | /gotm nominate title:<string> | /gotm delete-nomination",
-        notes: "Search: round takes precedence; year+month target a specific month; title searches by game title; set showinchat:true to post publicly. Nominations target the upcoming round (current round + 1) and close one day before the vote.",
+        summary: "GOTM commands: search history, list nominations (public), nominate or delete your own nomination (ephemeral).",
+        syntax: "Syntax: /gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>] | /gotm noms | /gotm nominate title:<string> | /gotm delete-nomination",
+        notes: "Search: round takes precedence; year+month target a specific month; title searches by game title; set showinchat:true to post publicly. Noms is public. Nominations target the upcoming round (current round + 1) and close one day before the vote.",
     },
     {
         id: "nr-gotm",
         label: "/nr-gotm",
-        summary: "NR-GOTM commands: search history, list nominations, nominate, and delete your nomination (ephemeral by default).",
-        syntax: "Syntax: /nr-gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>] | /nr-gotm noms [showinchat:<bool>] | /nr-gotm nominate title:<string> | /nr-gotm delete-nomination",
-        notes: "Search: round takes precedence; year+month target a specific month; title searches by game title; set showinchat:true to post publicly. Nominations target the upcoming round (current round + 1) and close one day before the vote.",
+        summary: "NR-GOTM commands: search history, list nominations (public), nominate or delete your own nomination (ephemeral).",
+        syntax: "Syntax: /nr-gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>] | /nr-gotm noms | /nr-gotm nominate title:<string> | /nr-gotm delete-nomination",
+        notes: "Search: round takes precedence; year+month target a specific month; title searches by game title; set showinchat:true to post publicly. Noms is public. Nominations target the upcoming round (current round + 1) and close one day before the vote.",
+    },
+    {
+        id: "noms",
+        label: "/noms",
+        summary: "Show both GOTM and NR-GOTM current nominations (public).",
+        syntax: "Syntax: /noms",
+        notes: "Lists the upcoming round nominations for GOTM and NR-GOTM together.",
     },
     {
         id: "round",
@@ -35,9 +42,9 @@ const HELP_TOPICS = [
     {
         id: "nextvote",
         label: "/nextvote",
-        summary: "Show the date of the next GOTM/NR-GOTM vote and the discussion channels (ephemeral by default).",
+        summary: "Show the date of the next GOTM/NR-GOTM vote (ephemeral by default).",
         syntax: "Syntax: /nextvote [showinchat:<boolean>]",
-        notes: "Set showinchat:true to post publicly.",
+        notes: "Set showinchat:true to post publicly. See nominations with /noms; nominate via /gotm nominate or /nr-gotm nominate.",
     },
     {
         id: "hltb",
@@ -95,6 +102,112 @@ function buildHelpDetailsEmbed(topic) {
     }
     return embed;
 }
+const GOTM_HELP_TOPICS = [
+    {
+        id: "search",
+        label: "/gotm search",
+        summary: "Search GOTM history by round, year/month, title, or default to current round.",
+        syntax: "Syntax: /gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>]",
+        notes: "Ephemeral by default; set showinchat:true to post publicly.",
+    },
+    {
+        id: "noms",
+        label: "/gotm noms",
+        summary: "Public list of current GOTM nominations for the upcoming round.",
+        syntax: "Syntax: /gotm noms",
+    },
+    {
+        id: "nominate",
+        label: "/gotm nominate",
+        summary: "Submit or update your GOTM nomination for the upcoming round.",
+        syntax: "Syntax: /gotm nominate title:<string>",
+        notes: "Ephemeral feedback; changes are announced publicly with the refreshed list.",
+    },
+    {
+        id: "delete-nomination",
+        label: "/gotm delete-nomination",
+        summary: "Delete your own GOTM nomination for the upcoming round.",
+        syntax: "Syntax: /gotm delete-nomination",
+        notes: "Ephemeral feedback; removal is announced publicly with the refreshed list.",
+    },
+];
+function buildGotmHelpButtons(activeId) {
+    const rows = [];
+    for (const chunk of chunkArray(GOTM_HELP_TOPICS, 5)) {
+        rows.push(new ActionRowBuilder().addComponents(chunk.map((topic) => new ButtonBuilder()
+            .setCustomId(`gotm-help-${topic.id}`)
+            .setLabel(topic.label)
+            .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary))));
+    }
+    rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
+        .setCustomId("help-main")
+        .setLabel("Back to Help Main Menu")
+        .setStyle(ButtonStyle.Secondary)));
+    return rows;
+}
+function buildGotmHelpEmbed(topic) {
+    const embed = new EmbedBuilder()
+        .setTitle(`${topic.label} help`)
+        .setDescription(topic.summary)
+        .addFields({ name: "Syntax", value: topic.syntax });
+    if (topic.notes) {
+        embed.addFields({ name: "Notes", value: topic.notes });
+    }
+    return embed;
+}
+const NR_GOTM_HELP_TOPICS = [
+    {
+        id: "search",
+        label: "/nr-gotm search",
+        summary: "Search NR-GOTM history by round, year/month, title, or default to current round.",
+        syntax: "Syntax: /nr-gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>]",
+        notes: "Ephemeral by default; set showinchat:true to post publicly.",
+    },
+    {
+        id: "noms",
+        label: "/nr-gotm noms",
+        summary: "Public list of current NR-GOTM nominations for the upcoming round.",
+        syntax: "Syntax: /nr-gotm noms",
+    },
+    {
+        id: "nominate",
+        label: "/nr-gotm nominate",
+        summary: "Submit or update your NR-GOTM nomination for the upcoming round.",
+        syntax: "Syntax: /nr-gotm nominate title:<string>",
+        notes: "Ephemeral feedback; changes are announced publicly with the refreshed list.",
+    },
+    {
+        id: "delete-nomination",
+        label: "/nr-gotm delete-nomination",
+        summary: "Delete your own NR-GOTM nomination for the upcoming round.",
+        syntax: "Syntax: /nr-gotm delete-nomination",
+        notes: "Ephemeral feedback; removal is announced publicly with the refreshed list.",
+    },
+];
+function buildNrGotmHelpButtons(activeId) {
+    const rows = [];
+    for (const chunk of chunkArray(NR_GOTM_HELP_TOPICS, 5)) {
+        rows.push(new ActionRowBuilder().addComponents(chunk.map((topic) => new ButtonBuilder()
+            .setCustomId(`nr-gotm-help-${topic.id}`)
+            .setLabel(topic.label)
+            .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary))));
+    }
+    rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
+        .setCustomId("help-main")
+        .setLabel("Back to Help Main Menu")
+        .setStyle(ButtonStyle.Secondary)));
+    return rows;
+}
+function buildNrGotmHelpEmbed(topic) {
+    const embed = new EmbedBuilder()
+        .setTitle(`${topic.label} help`)
+        .setDescription(topic.summary)
+        .addFields({ name: "Syntax", value: topic.syntax });
+    if (topic.notes) {
+        embed.addFields({ name: "Notes", value: topic.notes });
+    }
+    return embed;
+}
 export function buildMainHelpResponse(activeTopicId) {
     const embed = new EmbedBuilder()
         .setTitle("RPG Club Bot Help")
@@ -103,6 +216,20 @@ export function buildMainHelpResponse(activeTopicId) {
         embeds: [embed],
         components: buildHelpButtons(activeTopicId),
     };
+}
+export function buildGotmHelpResponse(activeTopicId) {
+    const embed = new EmbedBuilder()
+        .setTitle("/gotm commands")
+        .setDescription("Choose a GOTM subcommand button to view details.");
+    const components = buildGotmHelpButtons(activeTopicId);
+    return { embeds: [embed], components };
+}
+export function buildNrGotmHelpResponse(activeTopicId) {
+    const embed = new EmbedBuilder()
+        .setTitle("/nr-gotm commands")
+        .setDescription("Choose an NR-GOTM subcommand button to view details.");
+    const components = buildNrGotmHelpButtons(activeTopicId);
+    return { embeds: [embed], components };
 }
 function chunkArray(items, chunkSize) {
     const chunks = [];
@@ -166,6 +293,16 @@ let BotHelp = class BotHelp {
             });
             return;
         }
+        if (topicId === "gotm") {
+            const response = buildGotmHelpResponse();
+            await safeUpdate(interaction, response);
+            return;
+        }
+        if (topicId === "nr-gotm") {
+            const response = buildNrGotmHelpResponse();
+            await safeUpdate(interaction, response);
+            return;
+        }
         if (!topic) {
             const response = buildMainHelpResponse();
             await safeUpdate(interaction, {
@@ -180,6 +317,40 @@ let BotHelp = class BotHelp {
             components: buildHelpButtons(topic.id),
         });
     }
+    async handleGotmHelpButton(interaction) {
+        const topicId = interaction.customId.replace("gotm-help-", "");
+        const topic = GOTM_HELP_TOPICS.find((entry) => entry.id === topicId);
+        if (!topic) {
+            const response = buildGotmHelpResponse();
+            await safeUpdate(interaction, {
+                ...response,
+                content: "Sorry, I don't recognize that GOTM help topic. Showing the GOTM help menu.",
+            });
+            return;
+        }
+        const embed = buildGotmHelpEmbed(topic);
+        await safeUpdate(interaction, {
+            embeds: [embed],
+            components: buildGotmHelpButtons(topic.id),
+        });
+    }
+    async handleNrGotmHelpButton(interaction) {
+        const topicId = interaction.customId.replace("nr-gotm-help-", "");
+        const topic = NR_GOTM_HELP_TOPICS.find((entry) => entry.id === topicId);
+        if (!topic) {
+            const response = buildNrGotmHelpResponse();
+            await safeUpdate(interaction, {
+                ...response,
+                content: "Sorry, I don't recognize that NR-GOTM help topic. Showing the NR-GOTM help menu.",
+            });
+            return;
+        }
+        const embed = buildNrGotmHelpEmbed(topic);
+        await safeUpdate(interaction, {
+            embeds: [embed],
+            components: buildNrGotmHelpButtons(topic.id),
+        });
+    }
 };
 __decorate([
     Slash({ description: "Show help for all bot commands", name: "help" })
@@ -187,6 +358,12 @@ __decorate([
 __decorate([
     ButtonComponent({ id: /^help-.+/ })
 ], BotHelp.prototype, "handleHelpButton", null);
+__decorate([
+    ButtonComponent({ id: /^gotm-help-.+/ })
+], BotHelp.prototype, "handleGotmHelpButton", null);
+__decorate([
+    ButtonComponent({ id: /^nr-gotm-help-.+/ })
+], BotHelp.prototype, "handleNrGotmHelpButton", null);
 BotHelp = __decorate([
     Discord()
 ], BotHelp);

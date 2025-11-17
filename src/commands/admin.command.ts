@@ -115,16 +115,16 @@ export const ADMIN_HELP_TOPICS: AdminHelpTopic[] = [
   {
     id: "delete-gotm-nomination",
     label: "/admin delete-gotm-nomination",
-    summary: "Delete any GOTM nomination for the upcoming round.",
-    syntax: "Syntax: /admin delete-gotm-nomination user:<user>",
-    notes: "Targets the upcoming nomination set (current round + 1).",
+    summary: "Delete any GOTM nomination for the upcoming round and announce it.",
+    syntax: "Syntax: /admin delete-gotm-nomination user:<user> reason:<string>",
+    notes: "Targets the upcoming nomination set (current round + 1). Announcement is posted publicly with the updated list.",
   },
   {
     id: "delete-nr-gotm-nomination",
     label: "/admin delete-nr-gotm-nomination",
-    summary: "Delete any NR-GOTM nomination for the upcoming round.",
-    syntax: "Syntax: /admin delete-nr-gotm-nomination user:<user>",
-    notes: "Targets the upcoming nomination set (current round + 1).",
+    summary: "Delete any NR-GOTM nomination for the upcoming round and announce it.",
+    syntax: "Syntax: /admin delete-nr-gotm-nomination user:<user> reason:<string>",
+    notes: "Targets the upcoming nomination set (current round + 1). Announcement is posted publicly with the updated list.",
   },
   {
     id: "set-nextvote",

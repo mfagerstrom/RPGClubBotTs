@@ -70,6 +70,20 @@ export const SUPERADMIN_HELP_TOPICS = [
         notes: "This removes the latest NR-GOTM round from the database. Use this if a round was added too early or by mistake.",
     },
     {
+        id: "delete-gotm-nomination",
+        label: "/superadmin delete-gotm-nomination",
+        summary: "Delete any GOTM nomination for the upcoming round and announce it.",
+        syntax: "Syntax: /superadmin delete-gotm-nomination user:<user> reason:<string>",
+        notes: "Targets the upcoming nomination set (current round + 1). Announcement is posted publicly with the updated list.",
+    },
+    {
+        id: "delete-nr-gotm-nomination",
+        label: "/superadmin delete-nr-gotm-nomination",
+        summary: "Delete any NR-GOTM nomination for the upcoming round and announce it.",
+        syntax: "Syntax: /superadmin delete-nr-gotm-nomination user:<user> reason:<string>",
+        notes: "Targets the upcoming nomination set (current round + 1). Announcement is posted publicly with the updated list.",
+    },
+    {
         id: "set-nextvote",
         label: "/superadmin set-nextvote",
         summary: "Set the date of the next GOTM/NR-GOTM vote.",

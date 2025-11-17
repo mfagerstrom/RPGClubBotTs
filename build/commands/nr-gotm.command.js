@@ -16,6 +16,7 @@ import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import { areNominationsClosed, getUpcomingNominationWindow, } from "../functions/NominationWindow.js";
 import { deleteNominationForUser, getNominationForUser, listNominationsForRound, upsertNomination, } from "../classes/Nomination.js";
 import { NR_GOTM_NOMINATION_CHANNEL_ID } from "../config/nominationChannels.js";
+import { buildNrGotmHelpResponse } from "./help.command.js";
 const ANNOUNCEMENTS_CHANNEL_ID = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 function displayAuditValue(value) {
     if (value === AUDIT_NO_VALUE_SENTINEL)
@@ -55,6 +56,11 @@ const YEAR_CHOICES = (() => {
     }
 })();
 let NrGotmSearch = class NrGotmSearch {
+    async help(interaction) {
+        await safeDeferReply(interaction, { ephemeral: true });
+        const response = buildNrGotmHelpResponse();
+        await safeReply(interaction, { ...response, ephemeral: true });
+    }
     async search(round, year, month, title, showInChat, interaction) {
         const ephemeral = !showInChat;
         await safeDeferReply(interaction, { ephemeral });
@@ -236,6 +242,12 @@ let NrGotmSearch = class NrGotmSearch {
         }
     }
 };
+__decorate([
+    Slash({
+        description: "Show help for NR-GOTM commands",
+        name: "help",
+    })
+], NrGotmSearch.prototype, "help", null);
 __decorate([
     Slash({
         description: "Search Non-RPG Game of the Month (NR-GOTM)",

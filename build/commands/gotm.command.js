@@ -15,6 +15,7 @@ import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import { areNominationsClosed, getUpcomingNominationWindow, } from "../functions/NominationWindow.js";
 import { deleteNominationForUser, getNominationForUser, listNominationsForRound, upsertNomination, } from "../classes/Nomination.js";
 import { GOTM_NOMINATION_CHANNEL_ID } from "../config/nominationChannels.js";
+import { buildGotmHelpResponse } from "./help.command.js";
 const ANNOUNCEMENTS_CHANNEL_ID = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 // Precompute dropdown choices
 const MONTH_CHOICES = [
@@ -47,6 +48,11 @@ const YEAR_CHOICES = (() => {
     }
 })();
 let GotmSearch = class GotmSearch {
+    async help(interaction) {
+        await safeDeferReply(interaction, { ephemeral: true });
+        const response = buildGotmHelpResponse();
+        await safeReply(interaction, { ...response, ephemeral: true });
+    }
     async search(round, year, month, title, showInChat, interaction) {
         const ephemeral = !showInChat;
         // Acknowledge early to avoid interaction timeouts while fetching images
@@ -208,6 +214,9 @@ let GotmSearch = class GotmSearch {
         }
     }
 };
+__decorate([
+    Slash({ description: "Show help for GOTM commands", name: "help" })
+], GotmSearch.prototype, "help", null);
 __decorate([
     Slash({ description: "Search Game of the Month (GOTM)", name: "search" }),
     __param(0, SlashOption({
