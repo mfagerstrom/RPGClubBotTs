@@ -148,7 +148,6 @@ function buildStoredImageAttachment(
     description: `${kind.toUpperCase()} image for round ${(entry as any).round ?? "?"}, game ${
       gameIndex + 1
     }`,
-    contentType: mime ?? undefined,
   });
 }
 

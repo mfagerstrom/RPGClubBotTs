@@ -433,7 +433,13 @@ async function resolveThreadImageBuffer(client: any, threadId: string): Promise<
 async function resolveHltbImageBuffer(gameTitle: string): Promise<{ buffer: Buffer; mimeType: string | null; url: string } | null> {
   try {
     const result = await searchHltb(gameTitle);
-    const url = result?.imageUrl;
+    let url = result?.imageUrl;
+    if (!url) return null;
+    if (url.startsWith("//")) {
+      url = "https:" + url;
+    } else if (url.startsWith("/")) {
+      url = "https://howlongtobeat.com" + url;
+    }
     if (!url) return null;
     const { buffer, mimeType } = await downloadImageBuffer(url);
     return { buffer, mimeType, url };
@@ -461,7 +467,6 @@ function buildImageAttachment(
   })();
   return new AttachmentBuilder(buffer, {
     name: `${label}.${ext}`,
-    contentType: mimeType ?? undefined,
   });
 }
 

@@ -1,4 +1,4 @@
-import { EmbedBuilder } from "discord.js";
+import { AttachmentBuilder, EmbedBuilder } from "discord.js";
 const ANNOUNCEMENTS_CHANNEL_ID = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 const AUDIT_NO_VALUE_SENTINEL = "__NO_VALUE__";
 function displayAuditValue(value) {
@@ -59,6 +59,26 @@ function formatGamesWithJump(entry, guildId) {
     const tail = `[Voting Results](${link})`;
     return appendWithTailTruncate(body, tail);
 }
+function normalizeBuffer(value) {
+    if (!value)
+        return null;
+    if (Buffer.isBuffer(value))
+        return value;
+    return null;
+}
+function guessImageExtension(mimeType) {
+    const map = {
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/gif": "gif",
+        "image/webp": "webp",
+        "image/bmp": "bmp",
+        "image/tiff": "tiff",
+    };
+    if (!mimeType)
+        return "png";
+    return map[mimeType.toLowerCase()] ?? "png";
+}
 async function resolveThreadImageUrl(client, threadId) {
     try {
         const channel = await client.channels.fetch(threadId);
@@ -96,16 +116,33 @@ async function resolveThreadImageUrl(client, threadId) {
     }
     return undefined;
 }
-async function findFirstGameImage(client, games) {
-    for (const g of games) {
+function buildStoredImageAttachment(kind, entry, game, gameIndex) {
+    const buf = normalizeBuffer(game.imageBlob ?? null);
+    if (!buf)
+        return null;
+    const mime = game.imageMimeType ?? "image/png";
+    const ext = guessImageExtension(mime);
+    const name = `${kind}-${entry.round ?? "unknown"}-${gameIndex}.${ext}`;
+    return new AttachmentBuilder(buf, {
+        name,
+        description: `${kind.toUpperCase()} image for round ${entry.round ?? "?"}, game ${gameIndex + 1}`,
+    });
+}
+async function resolveEntryImage(kind, entry, games, client) {
+    for (let i = 0; i < games.length; i++) {
+        const g = games[i];
+        const stored = buildStoredImageAttachment(kind, entry, g, i);
+        if (stored) {
+            return { thumbnailUrl: `attachment://${stored.name}`, files: [stored] };
+        }
         const threadId = displayAuditValue(g.threadId);
         if (!threadId)
             continue;
         const imgUrl = await resolveThreadImageUrl(client, threadId).catch(() => undefined);
         if (imgUrl)
-            return imgUrl;
+            return { thumbnailUrl: imgUrl, files: [] };
     }
-    return undefined;
+    return { thumbnailUrl: undefined, files: [] };
 }
 export async function buildGotmEntryEmbed(entry, guildId, client) {
     const desc = formatGamesWithJump(entry, guildId);
@@ -116,11 +153,11 @@ export async function buildGotmEntryEmbed(entry, guildId, client) {
     const jumpLink = buildResultsJumpLink(entry, guildId);
     if (jumpLink)
         embed.setURL(jumpLink);
-    const imgUrl = await findFirstGameImage(client, entry.gameOfTheMonth);
-    if (imgUrl) {
-        embed.setThumbnail(imgUrl);
+    const { thumbnailUrl, files } = await resolveEntryImage("gotm", entry, entry.gameOfTheMonth, client);
+    if (thumbnailUrl) {
+        embed.setThumbnail(thumbnailUrl);
     }
-    return embed;
+    return { embed, files };
 }
 export async function buildNrGotmEntryEmbed(entry, guildId, client) {
     const desc = formatGamesWithJump(entry, guildId);
@@ -142,10 +179,10 @@ export async function buildNrGotmEntryEmbed(entry, guildId, client) {
             }
         }
     }
-    // Fallback thumbnail from winners with images
-    const imgUrl = await findFirstGameImage(client, entry.gameOfTheMonth);
-    if (imgUrl) {
-        embed.setThumbnail(imgUrl);
+    // Prefer stored images first; fall back to thread images
+    const { thumbnailUrl, files } = await resolveEntryImage("nr", entry, entry.gameOfTheMonth, client);
+    if (thumbnailUrl) {
+        embed.setThumbnail(thumbnailUrl);
     }
-    return embed;
+    return { embed, files };
 }

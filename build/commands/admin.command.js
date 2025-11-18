@@ -498,10 +498,11 @@ let Admin = class Admin {
         try {
             await insertGotmRoundInDatabase(nextRound, monthYear, games);
             const newEntry = Gotm.addRound(nextRound, monthYear, games);
-            const embed = await buildGotmEntryEmbed(newEntry, interaction.guildId ?? undefined, interaction.client);
+            const embedAssets = await buildGotmEntryEmbed(newEntry, interaction.guildId ?? undefined, interaction.client);
             await safeReply(interaction, {
                 content: `Created GOTM round ${nextRound}.`,
-                embeds: [embed],
+                embeds: [embedAssets.embed],
+                files: embedAssets.files?.length ? embedAssets.files : undefined,
             });
         }
         catch (err) {
@@ -590,10 +591,11 @@ let Admin = class Admin {
             const insertedIds = await insertNrGotmRoundInDatabase(nextRound, monthYear, games);
             const gamesWithIds = games.map((g, idx) => ({ ...g, id: insertedIds[idx] ?? null }));
             const newEntry = NrGotm.addRound(nextRound, monthYear, gamesWithIds);
-            const embed = await buildNrGotmEntryEmbed(newEntry, interaction.guildId ?? undefined, interaction.client);
+            const embedAssets = await buildNrGotmEntryEmbed(newEntry, interaction.guildId ?? undefined, interaction.client);
             await safeReply(interaction, {
                 content: `Created NR-GOTM round ${nextRound}.`,
-                embeds: [embed],
+                embeds: [embedAssets.embed],
+                files: embedAssets.files?.length ? embedAssets.files : undefined,
             });
         }
         catch (err) {
@@ -634,10 +636,11 @@ let Admin = class Admin {
             return;
         }
         const entry = entries[0];
-        const embed = await buildGotmEntryEmbed(entry, interaction.guildId ?? undefined, interaction.client);
+        const embedAssets = await buildGotmEntryEmbed(entry, interaction.guildId ?? undefined, interaction.client);
         await safeReply(interaction, {
             content: `Editing GOTM round ${roundNumber}.`,
-            embeds: [embed],
+            embeds: [embedAssets.embed],
+            files: embedAssets.files?.length ? embedAssets.files : undefined,
         });
         const totalGames = entry.gameOfTheMonth.length;
         let gameIndex = 0;
@@ -704,10 +707,11 @@ let Admin = class Admin {
                 updatedEntry = Gotm.updateRedditUrlByRound(roundNumber, newValue, gameIndex);
             }
             const entryToShow = updatedEntry ?? entry;
-            const updatedEmbed = await buildGotmEntryEmbed(entryToShow, interaction.guildId ?? undefined, interaction.client);
+            const updatedAssets = await buildGotmEntryEmbed(entryToShow, interaction.guildId ?? undefined, interaction.client);
             await safeReply(interaction, {
                 content: `GOTM round ${roundNumber} updated successfully.`,
-                embeds: [updatedEmbed],
+                embeds: [updatedAssets.embed],
+                files: updatedAssets.files?.length ? updatedAssets.files : undefined,
             });
         }
         catch (err) {
@@ -748,10 +752,11 @@ let Admin = class Admin {
             return;
         }
         const entry = entries[0];
-        const embed = await buildNrGotmEntryEmbed(entry, interaction.guildId ?? undefined, interaction.client);
+        const embedAssets = await buildNrGotmEntryEmbed(entry, interaction.guildId ?? undefined, interaction.client);
         await safeReply(interaction, {
             content: `Editing NR-GOTM round ${roundNumber}.`,
-            embeds: [embed],
+            embeds: [embedAssets.embed],
+            files: embedAssets.files?.length ? embedAssets.files : undefined,
         });
         const totalGames = entry.gameOfTheMonth.length;
         let gameIndex = 0;
@@ -824,10 +829,11 @@ let Admin = class Admin {
                 updatedEntry = NrGotm.updateRedditUrlByRound(roundNumber, newValue, gameIndex);
             }
             const entryToShow = updatedEntry ?? entry;
-            const updatedEmbed = await buildNrGotmEntryEmbed(entryToShow, interaction.guildId ?? undefined, interaction.client);
+            const updatedAssets = await buildNrGotmEntryEmbed(entryToShow, interaction.guildId ?? undefined, interaction.client);
             await safeReply(interaction, {
                 content: `NR-GOTM round ${roundNumber} updated successfully.`,
-                embeds: [updatedEmbed],
+                embeds: [updatedAssets.embed],
+                files: updatedAssets.files?.length ? updatedAssets.files : undefined,
             });
         }
         catch (err) {

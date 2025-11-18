@@ -7,13 +7,15 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ActionRowBuilder, ApplicationCommandOptionType, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, } from "discord.js";
+import { ActionRowBuilder, ApplicationCommandOptionType, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, } from "discord.js";
+import axios from "axios";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
+import { searchHltb } from "../functions/SearchHltb.js";
 import { getPresenceHistory, setPresence, setPresenceFromInteraction, } from "../functions/SetPresence.js";
 import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
-import Gotm, { updateGotmGameFieldInDatabase, insertGotmRoundInDatabase, deleteGotmRoundFromDatabase, updateGotmVotingResultsInDatabase, } from "../classes/Gotm.js";
-import NrGotm, { updateNrGotmGameFieldInDatabase, insertNrGotmRoundInDatabase, deleteNrGotmRoundFromDatabase, updateNrGotmVotingResultsInDatabase, } from "../classes/NrGotm.js";
+import Gotm, { updateGotmGameFieldInDatabase, updateGotmGameImageInDatabase, insertGotmRoundInDatabase, deleteGotmRoundFromDatabase, updateGotmVotingResultsInDatabase, } from "../classes/Gotm.js";
+import NrGotm, { updateNrGotmGameFieldInDatabase, updateNrGotmGameImageInDatabase, insertNrGotmRoundInDatabase, deleteNrGotmRoundFromDatabase, updateNrGotmVotingResultsInDatabase, } from "../classes/NrGotm.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
 import { buildNominationDeleteViewEmbed, announceNominationChange, } from "../functions/NominationAdminHelpers.js";
 import { getUpcomingNominationWindow } from "../functions/NominationWindow.js";
@@ -178,6 +180,9 @@ function isAuditNoValue(value) {
 function isAuditFieldMissing(value) {
     return !value && !isAuditNoValue(value);
 }
+function isAuditImageMissing(imageBlob, imageMimeType) {
+    return !imageBlob && !isAuditNoValue(imageMimeType);
+}
 function displayAuditValue(value) {
     if (isAuditNoValue(value))
         return null;
@@ -248,6 +253,91 @@ function buildAuditPromptEmbed(info) {
     return new EmbedBuilder()
         .setTitle(`${info.auditLabel} Data Audit`)
         .setDescription(lines.join("\n"));
+}
+async function downloadImageBuffer(url) {
+    const resp = await axios.get(url, { responseType: "arraybuffer" });
+    const mime = resp.headers?.["content-type"] ?? null;
+    return { buffer: Buffer.from(resp.data), mimeType: mime ? String(mime) : null };
+}
+async function resolveThreadImageBuffer(client, threadId) {
+    try {
+        const channel = await client.channels.fetch(threadId);
+        const anyThread = channel;
+        if (!anyThread || typeof anyThread.fetchStarterMessage !== "function")
+            return null;
+        const starter = await anyThread.fetchStarterMessage().catch(() => null);
+        if (!starter)
+            return null;
+        for (const att of starter.attachments?.values?.() ?? []) {
+            const anyAtt = att;
+            const nameLc = (anyAtt.name ?? "").toLowerCase();
+            const ctype = (anyAtt.contentType ?? "").toLowerCase();
+            if (ctype.startsWith("image/") ||
+                /\.(png|jpg|jpeg|gif|webp|bmp|tiff)$/.test(nameLc) ||
+                anyAtt.width) {
+                const url = anyAtt.url ?? anyAtt.proxyURL;
+                if (!url)
+                    continue;
+                const { buffer, mimeType } = await downloadImageBuffer(url);
+                return { buffer, mimeType, url };
+            }
+        }
+        for (const emb of starter.embeds ?? []) {
+            const anyEmb = emb;
+            const imgUrl = emb.image?.url || anyEmb?.image?.proxyURL || anyEmb?.image?.proxy_url;
+            const thumbUrl = emb.thumbnail?.url ||
+                anyEmb?.thumbnail?.proxyURL ||
+                anyEmb?.thumbnail?.proxy_url;
+            const chosen = imgUrl || thumbUrl;
+            if (chosen) {
+                const { buffer, mimeType } = await downloadImageBuffer(chosen);
+                return { buffer, mimeType, url: chosen };
+            }
+        }
+    }
+    catch {
+        // ignore
+    }
+    return null;
+}
+async function resolveHltbImageBuffer(gameTitle) {
+    try {
+        const result = await searchHltb(gameTitle);
+        let url = result?.imageUrl;
+        if (!url)
+            return null;
+        if (url.startsWith("//")) {
+            url = "https:" + url;
+        }
+        else if (url.startsWith("/")) {
+            url = "https://howlongtobeat.com" + url;
+        }
+        if (!url)
+            return null;
+        const { buffer, mimeType } = await downloadImageBuffer(url);
+        return { buffer, mimeType, url };
+    }
+    catch {
+        return null;
+    }
+}
+function buildImageAttachment(buffer, mimeType, label) {
+    const ext = (() => {
+        const map = {
+            "image/jpeg": "jpg",
+            "image/png": "png",
+            "image/gif": "gif",
+            "image/webp": "webp",
+            "image/bmp": "bmp",
+            "image/tiff": "tiff",
+        };
+        if (!mimeType)
+            return "png";
+        return map[mimeType.toLowerCase()] ?? "png";
+    })();
+    return new AttachmentBuilder(buffer, {
+        name: `${label}.${ext}`,
+    });
 }
 async function promptForAuditValue(interaction, opts) {
     const promptEmbed = buildAuditPromptEmbed({
@@ -379,6 +469,173 @@ async function promptForAuditValue(interaction, opts) {
         promptMessage,
     };
 }
+async function promptForAuditImage(interaction, opts) {
+    const token = `${opts.tokenPrefix}-auditimg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const stopPrefix = `${opts.tokenPrefix}-auditimg-stop`;
+    const skipPrefix = `${opts.tokenPrefix}-auditimg-skip`;
+    const noValuePrefix = `${opts.tokenPrefix}-auditimg-novalue`;
+    const useThreadPrefix = `${opts.tokenPrefix}-auditimg-thread`;
+    const useHltbPrefix = `${opts.tokenPrefix}-auditimg-hltb`;
+    const threadCandidate = opts.threadId
+        ? await resolveThreadImageBuffer(interaction.client, opts.threadId).catch(() => null)
+        : null;
+    const hltbCandidate = await resolveHltbImageBuffer(opts.gameTitle).catch(() => null);
+    const files = [];
+    const embed = new EmbedBuilder()
+        .setTitle(`${opts.auditLabel} Image Audit`)
+        .setDescription([
+        opts.roundLabel,
+        `Game: ${opts.gameTitle}`,
+        "",
+        "Choose an image source below, or paste/upload an image in chat.",
+        "Buttons:",
+        "- Use Thread Image: first image from the discussion thread (if available).",
+        "- Use HLTB Image: cover art from /coverart search (if available).",
+        "- Skip: leave image empty for now.",
+        "- No Value: mark as intentionally missing (won't be asked again).",
+        "- Stop Audit: end the audit.",
+    ].join("\n"));
+    if (threadCandidate) {
+        const att = buildImageAttachment(threadCandidate.buffer, threadCandidate.mimeType, "thread-image");
+        files.push(att);
+        embed.addFields({ name: "Thread Image", value: `attachment://${att.name}` });
+    }
+    if (hltbCandidate) {
+        const att = buildImageAttachment(hltbCandidate.buffer, hltbCandidate.mimeType, "hltb-image");
+        files.push(att);
+        embed.addFields({ name: "HLTB Image", value: `attachment://${att.name}` });
+    }
+    const buttonRow = new ActionRowBuilder().addComponents(new ButtonBuilder()
+        .setCustomId(`${stopPrefix}-${token}`)
+        .setLabel("Stop Audit")
+        .setStyle(ButtonStyle.Secondary), new ButtonBuilder()
+        .setCustomId(`${noValuePrefix}-${token}`)
+        .setLabel("No Value")
+        .setStyle(ButtonStyle.Secondary), new ButtonBuilder()
+        .setCustomId(`${skipPrefix}-${token}`)
+        .setLabel("Skip")
+        .setStyle(ButtonStyle.Danger));
+    const chooseRow = new ActionRowBuilder().addComponents(new ButtonBuilder()
+        .setCustomId(`${useThreadPrefix}-${token}`)
+        .setLabel("Use Thread Image")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(!threadCandidate), new ButtonBuilder()
+        .setCustomId(`${useHltbPrefix}-${token}`)
+        .setLabel("Use HLTB Image")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(!hltbCandidate));
+    let promptMessage = opts.promptMessage ?? null;
+    const payload = {
+        embeds: [embed],
+        components: [buttonRow, chooseRow],
+        files: files.length ? files : undefined,
+        content: undefined,
+    };
+    const editPrompt = async (msg, data) => {
+        try {
+            return await msg.edit(data);
+        }
+        catch (err) {
+            if (err?.code === 10008 || err?.code === 50027) {
+                return null;
+            }
+            throw err;
+        }
+    };
+    const tryEditReply = async () => {
+        try {
+            const edited = await interaction.editReply(payload);
+            return edited;
+        }
+        catch (err) {
+            if (err?.code === 10008 || err?.code === 50027)
+                return null;
+            throw err;
+        }
+    };
+    if (opts.useEditReply) {
+        promptMessage = await tryEditReply();
+    }
+    else if (promptMessage) {
+        const edited = await editPrompt(promptMessage, payload);
+        promptMessage = edited ?? null;
+    }
+    if (!promptMessage) {
+        promptMessage = await interaction.followUp({
+            ...payload,
+            ephemeral: true,
+        });
+    }
+    const buttonPromise = promptMessage
+        .awaitMessageComponent({
+        filter: (i) => {
+            const cid = i.customId ?? "";
+            return i.user?.id === interaction.user.id && cid.endsWith(token);
+        },
+        time: 120_000,
+    })
+        .then(async (i) => {
+        const cid = i.customId ?? "";
+        if (!i.deferred && !i.replied) {
+            await i.deferUpdate().catch(() => { });
+        }
+        if (cid.startsWith(stopPrefix))
+            return "stop";
+        if (cid.startsWith(noValuePrefix))
+            return { action: "no-value" };
+        if (cid.startsWith(skipPrefix))
+            return { action: "skip" };
+        if (cid.startsWith(useThreadPrefix) && threadCandidate) {
+            return { action: "store", buffer: threadCandidate.buffer, mimeType: threadCandidate.mimeType };
+        }
+        if (cid.startsWith(useHltbPrefix) && hltbCandidate) {
+            return { action: "store", buffer: hltbCandidate.buffer, mimeType: hltbCandidate.mimeType };
+        }
+        return { action: "skip" };
+    })
+        .catch(() => null);
+    const channel = interaction.channel;
+    const textPromise = channel?.awaitMessages
+        ? channel
+            .awaitMessages({
+            filter: (m) => m.author?.id === interaction.user.id,
+            max: 1,
+            time: 120_000,
+        })
+            .then(async (collected) => {
+            const first = collected?.first?.();
+            if (!first)
+                return null;
+            const attachment = first.attachments?.find?.((a) => (a.contentType ?? "").startsWith("image/") ||
+                /\.(png|jpg|jpeg|gif|webp|bmp|tiff)$/i.test((a.name ?? "").toLowerCase())) ?? null;
+            if (!attachment)
+                return null;
+            const url = attachment.url ?? attachment.proxyURL;
+            if (!url)
+                return null;
+            const { buffer, mimeType } = await downloadImageBuffer(url);
+            try {
+                await first.delete().catch(() => { });
+            }
+            catch {
+                // ignore
+            }
+            return { action: "store", buffer, mimeType };
+        })
+            .catch(() => null)
+        : Promise.resolve(null);
+    const result = await Promise.race([buttonPromise, textPromise]);
+    if (opts.useEditReply && promptMessage) {
+        await interaction.editReply({ components: [] });
+    }
+    else {
+        await editPrompt(promptMessage, { components: [] });
+    }
+    return {
+        result: result ?? { action: "skip" },
+        promptMessage,
+    };
+}
 let SuperAdmin = class SuperAdmin {
     async presence(text, interaction) {
         await safeDeferReply(interaction, { ephemeral: true });
@@ -448,7 +705,7 @@ let SuperAdmin = class SuperAdmin {
             await interaction.deferUpdate().catch(() => { });
         }
     }
-    async gotmDataAudit(threadIdFlag, redditUrlFlag, votingResultsFlag, order, showInChat, interaction) {
+    async gotmDataAudit(threadIdFlag, redditUrlFlag, votingResultsFlag, imageFlag, order, showInChat, interaction) {
         const ephemeral = !showInChat;
         await safeDeferReply(interaction, { ephemeral });
         const okToUseCommand = await isSuperAdmin(interaction);
@@ -458,11 +715,13 @@ let SuperAdmin = class SuperAdmin {
             threadId: Boolean(threadIdFlag),
             redditUrl: Boolean(redditUrlFlag),
             votingResults: Boolean(votingResultsFlag),
+            image: Boolean(imageFlag),
         };
-        if (!checks.threadId && !checks.redditUrl && !checks.votingResults) {
+        if (!checks.threadId && !checks.redditUrl && !checks.votingResults && !checks.image) {
             checks.threadId = true;
             checks.redditUrl = true;
             checks.votingResults = true;
+            checks.image = true;
         }
         const dir = (order ?? "desc").toLowerCase() === "asc" ? "asc" : "desc";
         const entries = Gotm.all()
@@ -562,6 +821,34 @@ let SuperAdmin = class SuperAdmin {
                         Gotm.updateRedditUrlByRound(entry.round, AUDIT_NO_VALUE_SENTINEL, i);
                     }
                 }
+                if (stopped)
+                    break;
+                if (checks.image && isAuditImageMissing(game.imageBlob, game.imageMimeType)) {
+                    const resImg = await promptForAuditImage(interaction, {
+                        auditLabel: "GOTM",
+                        tokenPrefix: "gotm",
+                        round: entry.round,
+                        roundLabel,
+                        gameIndex: i,
+                        gameTitle: game.title,
+                        threadId: displayAuditValue(game.threadId),
+                        promptMessage,
+                        useEditReply,
+                    });
+                    promptMessage = resImg.promptMessage;
+                    if (resImg.result === "stop") {
+                        stopped = true;
+                        break;
+                    }
+                    if (resImg.result && resImg.result.action === "store") {
+                        await updateGotmGameImageInDatabase(entry.round, i, resImg.result.buffer, resImg.result.mimeType);
+                        Gotm.updateImageByRound(entry.round, resImg.result.buffer, resImg.result.mimeType, i);
+                    }
+                    else if (resImg.result && resImg.result.action === "no-value") {
+                        await updateGotmGameImageInDatabase(entry.round, i, null, AUDIT_NO_VALUE_SENTINEL);
+                        Gotm.updateImageByRound(entry.round, null, AUDIT_NO_VALUE_SENTINEL, i);
+                    }
+                }
             }
             if (stopped)
                 break;
@@ -619,7 +906,7 @@ let SuperAdmin = class SuperAdmin {
             }
         }
     }
-    async nrGotmDataAudit(threadIdFlag, redditUrlFlag, votingResultsFlag, order, showInChat, interaction) {
+    async nrGotmDataAudit(threadIdFlag, redditUrlFlag, votingResultsFlag, imageFlag, order, showInChat, interaction) {
         const ephemeral = !showInChat;
         await safeDeferReply(interaction, { ephemeral });
         const okToUseCommand = await isSuperAdmin(interaction);
@@ -629,11 +916,13 @@ let SuperAdmin = class SuperAdmin {
             threadId: Boolean(threadIdFlag),
             redditUrl: Boolean(redditUrlFlag),
             votingResults: Boolean(votingResultsFlag),
+            image: Boolean(imageFlag),
         };
-        if (!checks.threadId && !checks.redditUrl && !checks.votingResults) {
+        if (!checks.threadId && !checks.redditUrl && !checks.votingResults && !checks.image) {
             checks.threadId = true;
             checks.redditUrl = true;
             checks.votingResults = true;
+            checks.image = true;
         }
         const dir = (order ?? "desc").toLowerCase() === "asc" ? "asc" : "desc";
         const entries = NrGotm.all()
@@ -755,6 +1044,46 @@ let SuperAdmin = class SuperAdmin {
                             value: AUDIT_NO_VALUE_SENTINEL,
                         });
                         NrGotm.updateRedditUrlByRound(entry.round, AUDIT_NO_VALUE_SENTINEL, i);
+                    }
+                }
+                if (stopped)
+                    break;
+                if (checks.image && isAuditImageMissing(game.imageBlob, game.imageMimeType)) {
+                    const resImg = await promptForAuditImage(interaction, {
+                        auditLabel: "NR-GOTM",
+                        tokenPrefix: "nr-gotm",
+                        round: entry.round,
+                        roundLabel,
+                        gameIndex: i,
+                        gameTitle: game.title,
+                        threadId: displayAuditValue(game.threadId),
+                        promptMessage,
+                        useEditReply,
+                    });
+                    promptMessage = resImg.promptMessage;
+                    if (resImg.result === "stop") {
+                        stopped = true;
+                        break;
+                    }
+                    if (resImg.result && resImg.result.action === "store") {
+                        await updateNrGotmGameImageInDatabase({
+                            rowId: game.id ?? null,
+                            round: entry.round,
+                            gameIndex: i,
+                            imageBlob: resImg.result.buffer,
+                            imageMimeType: resImg.result.mimeType,
+                        });
+                        NrGotm.updateImageByRound(entry.round, resImg.result.buffer, resImg.result.mimeType, i);
+                    }
+                    else if (resImg.result && resImg.result.action === "no-value") {
+                        await updateNrGotmGameImageInDatabase({
+                            rowId: game.id ?? null,
+                            round: entry.round,
+                            gameIndex: i,
+                            imageBlob: null,
+                            imageMimeType: AUDIT_NO_VALUE_SENTINEL,
+                        });
+                        NrGotm.updateImageByRound(entry.round, null, AUDIT_NO_VALUE_SENTINEL, i);
                     }
                 }
             }
@@ -928,10 +1257,11 @@ let SuperAdmin = class SuperAdmin {
         try {
             await insertGotmRoundInDatabase(nextRound, monthYear, games);
             const newEntry = Gotm.addRound(nextRound, monthYear, games);
-            const embed = await buildGotmEntryEmbed(newEntry, interaction.guildId ?? undefined, interaction.client);
+            const embedAssets = await buildGotmEntryEmbed(newEntry, interaction.guildId ?? undefined, interaction.client);
             await safeReply(interaction, {
                 content: `Created GOTM round ${nextRound}.`,
-                embeds: [embed],
+                embeds: [embedAssets.embed],
+                files: embedAssets.files?.length ? embedAssets.files : undefined,
             });
         }
         catch (err) {
@@ -1020,10 +1350,11 @@ let SuperAdmin = class SuperAdmin {
             const insertedIds = await insertNrGotmRoundInDatabase(nextRound, monthYear, games);
             const gamesWithIds = games.map((g, idx) => ({ ...g, id: insertedIds[idx] ?? null }));
             const newEntry = NrGotm.addRound(nextRound, monthYear, gamesWithIds);
-            const embed = await buildNrGotmEntryEmbed(newEntry, interaction.guildId ?? undefined, interaction.client);
+            const embedAssets = await buildNrGotmEntryEmbed(newEntry, interaction.guildId ?? undefined, interaction.client);
             await safeReply(interaction, {
                 content: `Created NR-GOTM round ${nextRound}.`,
-                embeds: [embed],
+                embeds: [embedAssets.embed],
+                files: embedAssets.files?.length ? embedAssets.files : undefined,
             });
         }
         catch (err) {
@@ -1064,10 +1395,11 @@ let SuperAdmin = class SuperAdmin {
             return;
         }
         const entry = entries[0];
-        const embed = await buildGotmEntryEmbed(entry, interaction.guildId ?? undefined, interaction.client);
+        const embedAssets = await buildGotmEntryEmbed(entry, interaction.guildId ?? undefined, interaction.client);
         await safeReply(interaction, {
             content: `Editing GOTM round ${roundNumber}.`,
-            embeds: [embed],
+            embeds: [embedAssets.embed],
+            files: embedAssets.files?.length ? embedAssets.files : undefined,
         });
         const totalGames = entry.gameOfTheMonth.length;
         let gameIndex = 0;
@@ -1135,10 +1467,11 @@ let SuperAdmin = class SuperAdmin {
                 updatedEntry = Gotm.updateRedditUrlByRound(roundNumber, newValue, gameIndex);
             }
             const entryToShow = updatedEntry ?? entry;
-            const updatedEmbed = await buildGotmEntryEmbed(entryToShow, interaction.guildId ?? undefined, interaction.client);
+            const updatedAssets = await buildGotmEntryEmbed(entryToShow, interaction.guildId ?? undefined, interaction.client);
             await safeReply(interaction, {
                 content: `GOTM round ${roundNumber} updated successfully.`,
-                embeds: [updatedEmbed],
+                embeds: [updatedAssets.embed],
+                files: updatedAssets.files?.length ? updatedAssets.files : undefined,
             });
         }
         catch (err) {
@@ -1179,10 +1512,11 @@ let SuperAdmin = class SuperAdmin {
             return;
         }
         const entry = entries[0];
-        const embed = await buildNrGotmEntryEmbed(entry, interaction.guildId ?? undefined, interaction.client);
+        const embedAssets = await buildNrGotmEntryEmbed(entry, interaction.guildId ?? undefined, interaction.client);
         await safeReply(interaction, {
             content: `Editing NR-GOTM round ${roundNumber}.`,
-            embeds: [embed],
+            embeds: [embedAssets.embed],
+            files: embedAssets.files?.length ? embedAssets.files : undefined,
         });
         const totalGames = entry.gameOfTheMonth.length;
         let gameIndex = 0;
@@ -1255,10 +1589,11 @@ let SuperAdmin = class SuperAdmin {
                 updatedEntry = NrGotm.updateRedditUrlByRound(roundNumber, newValue, gameIndex);
             }
             const entryToShow = updatedEntry ?? entry;
-            const updatedEmbed = await buildNrGotmEntryEmbed(entryToShow, interaction.guildId ?? undefined, interaction.client);
+            const updatedAssets = await buildNrGotmEntryEmbed(entryToShow, interaction.guildId ?? undefined, interaction.client);
             await safeReply(interaction, {
                 content: `NR-GOTM round ${roundNumber} updated successfully.`,
-                embeds: [updatedEmbed],
+                embeds: [updatedAssets.embed],
+                files: updatedAssets.files?.length ? updatedAssets.files : undefined,
             });
         }
         catch (err) {
@@ -1547,7 +1882,7 @@ __decorate([
     ButtonComponent({ id: "superadmin-presence-cancel" })
 ], SuperAdmin.prototype, "handleSuperAdminPresenceCancel", null);
 __decorate([
-    ButtonComponent({ id: /^(gotm|nr-gotm)-audit-(stop|skip|novalue)-.+/ })
+    ButtonComponent({ id: /^(gotm|nr-gotm)-audit(img)?-(stop|skip|novalue).*-/ })
 ], SuperAdmin.prototype, "handleAuditButtons", null);
 __decorate([
     Slash({
@@ -1573,12 +1908,18 @@ __decorate([
         type: ApplicationCommandOptionType.Boolean,
     })),
     __param(3, SlashOption({
+        description: "Ask only about missing images",
+        name: "image",
+        required: false,
+        type: ApplicationCommandOptionType.Boolean,
+    })),
+    __param(4, SlashOption({
         description: "Order to audit rounds (asc or desc, default desc)",
         name: "order",
         required: false,
         type: ApplicationCommandOptionType.String,
     })),
-    __param(4, SlashOption({
+    __param(5, SlashOption({
         description: "If true, show prompts in-channel (not ephemeral)",
         name: "showinchat",
         required: false,
@@ -1609,12 +1950,18 @@ __decorate([
         type: ApplicationCommandOptionType.Boolean,
     })),
     __param(3, SlashOption({
+        description: "Ask only about missing images",
+        name: "image",
+        required: false,
+        type: ApplicationCommandOptionType.Boolean,
+    })),
+    __param(4, SlashOption({
         description: "Order to audit rounds (asc or desc, default desc)",
         name: "order",
         required: false,
         type: ApplicationCommandOptionType.String,
     })),
-    __param(4, SlashOption({
+    __param(5, SlashOption({
         description: "If true, show prompts in-channel (not ephemeral)",
         name: "showinchat",
         required: false,

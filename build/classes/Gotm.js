@@ -27,9 +27,16 @@ async function loadFromDatabaseInternal() {
               GAME_TITLE,
               THREAD_ID,
               REDDIT_URL,
-              VOTING_RESULTS_MESSAGE_ID
+              VOTING_RESULTS_MESSAGE_ID,
+              IMAGE_BLOB,
+              IMAGE_MIME_TYPE
          FROM GOTM_ENTRIES
-        ORDER BY ROUND_NUMBER, GAME_INDEX`, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        ORDER BY ROUND_NUMBER, GAME_INDEX`, [], {
+            outFormat: oracledb.OUT_FORMAT_OBJECT,
+            fetchInfo: {
+                IMAGE_BLOB: { type: oracledb.BUFFER },
+            },
+        });
         const rows = result.rows ?? [];
         const byRound = new Map();
         for (const anyRow of rows) {
@@ -58,6 +65,8 @@ async function loadFromDatabaseInternal() {
                 title: row.GAME_TITLE,
                 threadId: row.THREAD_ID ?? null,
                 redditUrl: row.REDDIT_URL ?? null,
+                imageBlob: row.IMAGE_BLOB ?? null,
+                imageMimeType: row.IMAGE_MIME_TYPE ?? null,
             };
             entry.gameOfTheMonth.push(game);
         }
@@ -155,6 +164,8 @@ export default class Gotm {
                 title: g.title,
                 threadId: g.threadId ?? null,
                 redditUrl: g.redditUrl ?? null,
+                imageBlob: g.imageBlob ?? null,
+                imageMimeType: g.imageMimeType ?? null,
             })),
         };
         gotmData.push(entry);
@@ -207,6 +218,15 @@ export default class Gotm {
         entry.gameOfTheMonth[i].redditUrl = redditUrl;
         return entry;
     }
+    static updateImageByRound(round, imageBlob, imageMimeType, index) {
+        const entry = this.getRoundEntry(round);
+        if (!entry)
+            return null;
+        const i = this.resolveIndex(entry, index);
+        entry.gameOfTheMonth[i].imageBlob = imageBlob;
+        entry.gameOfTheMonth[i].imageMimeType = imageMimeType;
+        return entry;
+    }
     static updateVotingResultsByRound(round, messageId) {
         const entry = this.getRoundEntry(round);
         if (!entry)
@@ -224,6 +244,39 @@ export default class Gotm {
             return null;
         const [removed] = gotmData.splice(index, 1);
         return removed ?? null;
+    }
+}
+export async function updateGotmGameImageInDatabase(round, gameIndex, imageBlob, imageMimeType) {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+    try {
+        const result = await connection.execute(`SELECT ROUND_NUMBER,
+              GAME_INDEX
+         FROM GOTM_ENTRIES
+        WHERE ROUND_NUMBER = :round
+        ORDER BY GAME_INDEX`, { round }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const rows = (result.rows ?? []);
+        if (!rows.length) {
+            throw new Error(`No GOTM database rows found for round ${round}.`);
+        }
+        if (!Number.isInteger(gameIndex) || gameIndex < 0 || gameIndex >= rows.length) {
+            throw new Error(`Game index ${gameIndex} is out of range for round ${round} (have ${rows.length} games).`);
+        }
+        const targetRow = rows[gameIndex];
+        const dbGameIndex = targetRow.GAME_INDEX;
+        await connection.execute(`UPDATE GOTM_ENTRIES
+          SET IMAGE_BLOB = :imageBlob,
+              IMAGE_MIME_TYPE = :imageMimeType
+        WHERE ROUND_NUMBER = :round
+          AND GAME_INDEX = :gameIndex`, {
+            round,
+            gameIndex: dbGameIndex,
+            imageBlob,
+            imageMimeType,
+        }, { autoCommit: true });
+    }
+    finally {
+        await connection.close();
     }
 }
 export async function updateGotmGameFieldInDatabase(round, gameIndex, field, value) {
@@ -303,7 +356,9 @@ export async function insertGotmRoundInDatabase(round, monthYear, games) {
            GAME_TITLE,
            THREAD_ID,
            REDDIT_URL,
-           VOTING_RESULTS_MESSAGE_ID
+           VOTING_RESULTS_MESSAGE_ID,
+           IMAGE_BLOB,
+           IMAGE_MIME_TYPE
          ) VALUES (
            :round,
            :monthYear,
@@ -311,7 +366,9 @@ export async function insertGotmRoundInDatabase(round, monthYear, games) {
            :title,
            :threadId,
            :redditUrl,
-           NULL
+           NULL,
+           :imageBlob,
+           :imageMimeType
          )`, {
                 round,
                 monthYear,
@@ -319,6 +376,8 @@ export async function insertGotmRoundInDatabase(round, monthYear, games) {
                 title: g.title,
                 threadId: g.threadId ?? null,
                 redditUrl: g.redditUrl ?? null,
+                imageBlob: g.imageBlob ?? null,
+                imageMimeType: g.imageMimeType ?? null,
             }, { autoCommit: true });
         }
     }

@@ -60,24 +60,34 @@ let CurrentRoundCommand = class CurrentRoundCommand {
                 .setTitle("Current Round:")
                 .setDescription(currentDescLines.join("\n"));
             const embeds = [currentEmbed];
+            const files = [];
             if (hasGotm) {
                 const gotmEntry = gotmEntries[0];
-                const gotmEmbed = await buildGotmEntryEmbed(gotmEntry, interaction.guildId ?? undefined, interaction.client);
+                const gotmAssets = await buildGotmEntryEmbed(gotmEntry, interaction.guildId ?? undefined, interaction.client);
+                const gotmEmbed = gotmAssets.embed;
                 gotmEmbed.setTitle("Game of the Month");
                 // Ensure the title is not a clickable link
                 gotmEmbed.setURL(null);
                 embeds.push(gotmEmbed);
+                if (gotmAssets.files?.length) {
+                    files.push(...gotmAssets.files);
+                }
             }
             if (hasNrGotm) {
                 const nrGotmEntry = nrGotmEntries[0];
-                const nrEmbed = await buildNrGotmEntryEmbed(nrGotmEntry, interaction.guildId ?? undefined, interaction.client);
+                const nrAssets = await buildNrGotmEntryEmbed(nrGotmEntry, interaction.guildId ?? undefined, interaction.client);
+                const nrEmbed = nrAssets.embed;
                 nrEmbed.setTitle("Non-RPG Game of the Month");
                 // Ensure the title is not a clickable link
                 nrEmbed.setURL(null);
                 embeds.push(nrEmbed);
+                if (nrAssets.files?.length) {
+                    files.push(...nrAssets.files);
+                }
             }
             await safeReply(interaction, {
                 embeds,
+                files: files.length ? files : undefined,
                 ephemeral,
             });
         }
