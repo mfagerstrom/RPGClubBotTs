@@ -59,7 +59,8 @@ type AdminHelpTopicId =
   | "edit-nr-gotm"
   | "delete-gotm-nomination"
   | "delete-nr-gotm-nomination"
-  | "set-nextvote";
+  | "set-nextvote"
+  | "voting-setup";
 
 type AdminHelpTopic = {
   id: AdminHelpTopicId;
@@ -132,6 +133,14 @@ export const ADMIN_HELP_TOPICS: AdminHelpTopic[] = [
     summary: "Set the date of the next GOTM/NR-GOTM vote.",
     syntax: "Syntax: /admin set-nextvote date:<date>",
     notes: "Votes are typically held the last Friday of the month.",
+  },
+  {
+    id: "voting-setup",
+    label: "/admin voting-setup",
+    summary: "Create copy/pasteable /poll commands for Subo.",
+    syntax:
+      "Syntax: /admin voting-setup",
+    notes: "Uses current nomination data for GOTM and NR-GOTM; answers are auto-sorted and max_select is floor(count/2) (minimum 1).",
   },
 ];
 
@@ -569,7 +578,7 @@ export class Admin {
     name: "delete-gotm-noms",
   })
   async deleteGotmNomsPanel(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction);
 
     const okToUseCommand: boolean = await isAdmin(interaction);
     if (!okToUseCommand) {
@@ -592,6 +601,82 @@ export class Admin {
       components: view.components,
       ephemeral: true,
     });
+  }
+
+  @Slash({
+    description: "Generate Subo /poll commands for GOTM and NR-GOTM voting",
+    name: "voting-setup",
+  })
+  async votingSetup(
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction, { ephemeral: true });
+
+    const okToUseCommand: boolean = await isAdmin(interaction);
+    if (!okToUseCommand) return;
+
+    try {
+      const window = await getUpcomingNominationWindow();
+      const roundNumber = window.targetRound;
+      const nextMonth = (() => {
+        const base = new Date();
+        const d = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 1));
+        return d.toLocaleString("en-US", { month: "long", timeZone: "UTC" });
+      })();
+      const monthLabel = nextMonth || "the upcoming month";
+
+      const gotmNoms = await listNominationsForRound("gotm", roundNumber);
+      const nrNoms = await listNominationsForRound("nr-gotm", roundNumber);
+
+      const buildPoll = (kindLabel: string, answers: string[]): string => {
+        if (!answers.length) {
+          return `${kindLabel}: (no nominations found for Round ${roundNumber})`;
+        }
+        const maxSelect = Math.max(1, Math.floor(answers.length / 2));
+        const answersJoined = answers.join(";");
+        const pollName =
+          kindLabel === "GOTM"
+            ? `GOTM_Round_${roundNumber}`
+            : `NR-GOTM_Round_${roundNumber}`;
+        const question =
+          kindLabel === "GOTM"
+            ? `What Roleplaying Game(s) would you like to discuss in ${monthLabel}?`
+            : `What Non-Roleplaying Game(s) would you like to discuss in ${monthLabel}?`;
+        return `/poll question:${question} answers:${answersJoined} max_select:${maxSelect} start:0 time_limit:48h vote_change:Yes realtime_results:🙈 Hidden privacy:🤐 Semi-private role_required:@members channel:#announcements name:${pollName} final_reveal:Yes`;
+      };
+
+      const gotmAnswers = gotmNoms.map((n) => n.gameTitle).map((t) => t.trim()).filter(Boolean);
+      const nrAnswers = nrNoms.map((n) => n.gameTitle).map((t) => t.trim()).filter(Boolean);
+
+      const gotmPoll = buildPoll("GOTM", gotmAnswers);
+      const nrPoll = buildPoll("NR-GOTM", nrAnswers);
+
+      const adminChannelId = "428142514222923776";
+      const adminChannel = adminChannelId
+        ? await interaction.client.channels.fetch(adminChannelId).catch(() => null)
+        : null;
+
+      const messageContent = `GOTM:\n\`\`\`\n${gotmPoll}\n\`\`\`\nNR-GOTM:\n\`\`\`\n${nrPoll}\n\`\`\``;
+
+      if (adminChannel && (adminChannel as any).send) {
+        await (adminChannel as any).send({ content: messageContent });
+        await safeReply(interaction, {
+          content: "Voting setup commands posted to #admin.",
+          ephemeral: true,
+        });
+      } else {
+        await safeReply(interaction, {
+          content: messageContent,
+          ephemeral: true,
+        });
+      }
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      await safeReply(interaction, {
+        content: `Could not generate vote commands: ${msg}`,
+        ephemeral: true,
+      });
+    }
   }
 
   @Slash({

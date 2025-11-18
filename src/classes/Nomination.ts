@@ -160,7 +160,7 @@ export async function listNominationsForRound(
               NOMINATED_AT
          FROM ${tableName(kind)}
         WHERE ROUND_NUMBER = :roundNumber
-        ORDER BY NOMINATED_AT DESC`,
+        ORDER BY GAME_TITLE ASC`,
       { roundNumber },
       { outFormat: oracledb.OUT_FORMAT_OBJECT },
     );

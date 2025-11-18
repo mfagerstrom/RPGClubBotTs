@@ -20,6 +20,7 @@ import BotVotingInfo from "../classes/BotVotingInfo.js";
 import { buildNominationDeleteViewEmbed, announceNominationChange, } from "../functions/NominationAdminHelpers.js";
 import { getUpcomingNominationWindow } from "../functions/NominationWindow.js";
 import { deleteNominationForUser, getNominationForUser, listNominationsForRound, } from "../classes/Nomination.js";
+import { getOraclePool } from "../db/oracleClient.js";
 const SUPERADMIN_PRESENCE_CHOICES = new Map();
 export const SUPERADMIN_HELP_TOPICS = [
     {
@@ -704,6 +705,155 @@ let SuperAdmin = class SuperAdmin {
         if (!interaction.deferred && !interaction.replied) {
             await interaction.deferUpdate().catch(() => { });
         }
+    }
+    async memberScan(adminRole, modRole, regularRole, memberRole, newcomerRole, interaction) {
+        await safeDeferReply(interaction, { ephemeral: true });
+        const okToUseCommand = await isSuperAdmin(interaction);
+        if (!okToUseCommand)
+            return;
+        const guild = interaction.guild;
+        if (!guild) {
+            await safeReply(interaction, { content: "This command must be run in a guild.", ephemeral: true });
+            return;
+        }
+        const roleMap = {
+            admin: adminRole?.trim(),
+            mod: modRole?.trim(),
+            regular: regularRole?.trim(),
+            member: memberRole?.trim(),
+            newcomer: newcomerRole?.trim(),
+        };
+        await safeReply(interaction, { content: "Fetching all guild members... this may take a moment.", ephemeral: true });
+        const members = await guild.members.fetch();
+        const pool = getOraclePool();
+        let connection = await pool.getConnection();
+        const isRecoverableOracleError = (err) => {
+            const code = err?.code ?? err?.errorNum;
+            const msg = err?.message ?? "";
+            return (code === "NJS-500" ||
+                code === "NJS-503" ||
+                code === "ORA-03138" ||
+                code === "ORA-03146" ||
+                /DPI-1010|ORA-03135|end-of-file on communication channel/i.test(msg));
+        };
+        const reopenConnection = async () => {
+            try {
+                await connection?.close();
+            }
+            catch {
+                // ignore
+            }
+            connection = await pool.getConnection();
+        };
+        let successCount = 0;
+        let failCount = 0;
+        try {
+            for (const member of members.values()) {
+                const user = member.user;
+                // Build avatar blob
+                let avatarBlob = null;
+                const avatarUrl = user.displayAvatarURL({ extension: "png", size: 512, forceStatic: true });
+                if (avatarUrl) {
+                    try {
+                        const { buffer } = await downloadImageBuffer(avatarUrl);
+                        avatarBlob = buffer;
+                    }
+                    catch {
+                        // ignore avatar fetch failures
+                    }
+                }
+                const hasRole = (id) => {
+                    if (!id)
+                        return 0;
+                    return member.roles.cache.has(id) ? 1 : 0;
+                };
+                const execUpsert = async (avatarData) => connection.execute(`MERGE INTO RPG_CLUB_USERS t
+             USING (SELECT :userId AS USER_ID FROM dual) s
+             ON (t.USER_ID = s.USER_ID)
+             WHEN MATCHED THEN
+               UPDATE SET
+                 IS_BOT = :isBot,
+                 USERNAME = :username,
+                 GLOBAL_NAME = :globalName,
+                 AVATAR_BLOB = :avatarBlob,
+                 SERVER_JOINED_AT = :joinedAt,
+                 LAST_SEEN_AT = :lastSeenAt,
+                 LAST_FETCHED_AT = SYSTIMESTAMP,
+                 ROLE_ADMIN = :roleAdmin,
+                 ROLE_MODERATOR = :roleModerator,
+                 ROLE_REGULAR = :roleRegular,
+                 ROLE_MEMBER = :roleMember,
+                 ROLE_NEWCOMER = :roleNewcomer,
+                 UPDATED_AT = SYSTIMESTAMP
+             WHEN NOT MATCHED THEN
+               INSERT (
+                 USER_ID, IS_BOT, USERNAME, GLOBAL_NAME, AVATAR_BLOB,
+                 SERVER_JOINED_AT, LAST_SEEN_AT, LAST_FETCHED_AT,
+                 ROLE_ADMIN, ROLE_MODERATOR, ROLE_REGULAR, ROLE_MEMBER, ROLE_NEWCOMER,
+                 CREATED_AT, UPDATED_AT
+              ) VALUES (
+                 :userId, :isBot, :username, :globalName, :avatarBlob,
+                 :joinedAt, :lastSeenAt, SYSTIMESTAMP,
+                 :roleAdmin, :roleModerator, :roleRegular, :roleMember, :roleNewcomer,
+                 SYSTIMESTAMP, SYSTIMESTAMP
+              )`, {
+                    userId: user.id,
+                    isBot: user.bot ? 1 : 0,
+                    username: user.username,
+                    globalName: user.globalName ?? null,
+                    avatarBlob: avatarData,
+                    joinedAt: member.joinedAt ?? null,
+                    lastSeenAt: null,
+                    roleAdmin: hasRole(roleMap.admin),
+                    roleModerator: hasRole(roleMap.mod),
+                    roleRegular: hasRole(roleMap.regular),
+                    roleMember: hasRole(roleMap.member),
+                    roleNewcomer: hasRole(roleMap.newcomer),
+                }, { autoCommit: true });
+                try {
+                    await execUpsert(avatarBlob);
+                    successCount++;
+                }
+                catch (err) {
+                    const code = err?.code ?? err?.errorNum;
+                    if (code === "ORA-03146") {
+                        try {
+                            await execUpsert(null);
+                            successCount++;
+                            continue;
+                        }
+                        catch (retryErr) {
+                            failCount++;
+                            console.error(`Failed to upsert user ${user.id} after stripping avatar`, retryErr);
+                            continue;
+                        }
+                    }
+                    if (isRecoverableOracleError(err)) {
+                        await reopenConnection();
+                        try {
+                            await execUpsert(avatarBlob);
+                            successCount++;
+                            continue;
+                        }
+                        catch (retryErr) {
+                            failCount++;
+                            console.error(`Failed to upsert user ${user.id} after retry`, retryErr);
+                        }
+                    }
+                    else {
+                        failCount++;
+                        console.error(`Failed to upsert user ${user.id}`, err);
+                    }
+                }
+            }
+        }
+        finally {
+            await connection.close();
+        }
+        await safeReply(interaction, {
+            content: `Member scan complete. Upserts succeeded: ${successCount}. Failed: ${failCount}.`,
+            ephemeral: true,
+        });
     }
     async gotmDataAudit(threadIdFlag, redditUrlFlag, votingResultsFlag, imageFlag, order, showInChat, interaction) {
         const ephemeral = !showInChat;
@@ -1884,6 +2034,39 @@ __decorate([
 __decorate([
     ButtonComponent({ id: /^(gotm|nr-gotm)-audit(img)?-(stop|skip|novalue).*-/ })
 ], SuperAdmin.prototype, "handleAuditButtons", null);
+__decorate([
+    Slash({ description: "Scan guild members and upsert into RPG_CLUB_USERS", name: "memberscan" }),
+    __param(0, SlashOption({
+        description: "Admin role ID",
+        name: "adminrole",
+        required: false,
+        type: ApplicationCommandOptionType.String,
+    })),
+    __param(1, SlashOption({
+        description: "Moderator role ID",
+        name: "modrole",
+        required: false,
+        type: ApplicationCommandOptionType.String,
+    })),
+    __param(2, SlashOption({
+        description: "Regular role ID",
+        name: "regularrole",
+        required: false,
+        type: ApplicationCommandOptionType.String,
+    })),
+    __param(3, SlashOption({
+        description: "Member role ID",
+        name: "memberrole",
+        required: false,
+        type: ApplicationCommandOptionType.String,
+    })),
+    __param(4, SlashOption({
+        description: "Newcomer role ID",
+        name: "newcomerrole",
+        required: false,
+        type: ApplicationCommandOptionType.String,
+    }))
+], SuperAdmin.prototype, "memberScan", null);
 __decorate([
     Slash({
         description: "Audit GOTM data for missing fields",

@@ -91,7 +91,7 @@ export async function listNominationsForRound(kind, roundNumber) {
               NOMINATED_AT
          FROM ${tableName(kind)}
         WHERE ROUND_NUMBER = :roundNumber
-        ORDER BY NOMINATED_AT DESC`, { roundNumber }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        ORDER BY GAME_TITLE ASC`, { roundNumber }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
         const rows = (result.rows ?? []);
         return rows.map((row) => mapRow(row));
     }
