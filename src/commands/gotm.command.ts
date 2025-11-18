@@ -157,6 +157,21 @@ export class GotmSearch {
       );
       const content = criteriaLabel ? `Query: "${criteriaLabel}"` : undefined;
 
+      if (embedAssets.length === 1) {
+        const asset = embedAssets[0];
+        const embedJson = asset.embed.toJSON();
+        const thumbFromEmbed: string | undefined = embedJson.thumbnail?.url;
+        const imageUrl =
+          (asset.files && asset.files.length > 0
+            ? `attachment://${asset.files[0].name}`
+            : thumbFromEmbed) ?? undefined;
+
+        asset.embed.setThumbnail(null as any);
+        if (imageUrl) {
+          asset.embed.setImage(imageUrl);
+        }
+      }
+
       const sendGroup = async (group: EmbedWithAttachments[], first: boolean) => {
         const embeds = group.map((g) => g.embed);
         const files = group.flatMap((g) => g.files ?? []);

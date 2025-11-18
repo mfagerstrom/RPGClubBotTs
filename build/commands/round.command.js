@@ -72,6 +72,16 @@ let CurrentRoundCommand = class CurrentRoundCommand {
                 if (gotmAssets.files?.length) {
                     files.push(...gotmAssets.files);
                 }
+                if (gotmAssets.files?.length === 1 || gotmEmbed.toJSON().thumbnail?.url) {
+                    const thumbFromEmbed = gotmEmbed.toJSON().thumbnail?.url;
+                    const imageUrl = (gotmAssets.files && gotmAssets.files.length > 0
+                        ? `attachment://${gotmAssets.files[0].name}`
+                        : thumbFromEmbed) ?? undefined;
+                    gotmEmbed.setThumbnail(null);
+                    if (imageUrl) {
+                        gotmEmbed.setImage(imageUrl);
+                    }
+                }
             }
             if (hasNrGotm) {
                 const nrGotmEntry = nrGotmEntries[0];
@@ -83,6 +93,16 @@ let CurrentRoundCommand = class CurrentRoundCommand {
                 embeds.push(nrEmbed);
                 if (nrAssets.files?.length) {
                     files.push(...nrAssets.files);
+                }
+                if (nrAssets.files?.length === 1 || nrEmbed.toJSON().thumbnail?.url) {
+                    const thumbFromEmbed = nrEmbed.toJSON().thumbnail?.url;
+                    const imageUrl = (nrAssets.files && nrAssets.files.length > 0
+                        ? `attachment://${nrAssets.files[0].name}`
+                        : thumbFromEmbed) ?? undefined;
+                    nrEmbed.setThumbnail(null);
+                    if (imageUrl) {
+                        nrEmbed.setImage(imageUrl);
+                    }
                 }
             }
             await safeReply(interaction, {
