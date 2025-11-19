@@ -913,41 +913,6 @@ export class SuperAdmin {
 
   @Slash({ description: "Scan guild members and upsert into RPG_CLUB_USERS", name: "memberscan" })
   async memberScan(
-    @SlashOption({
-      description: "Admin role ID",
-      name: "adminrole",
-      required: false,
-      type: ApplicationCommandOptionType.String,
-    })
-    adminRole: string | undefined,
-    @SlashOption({
-      description: "Moderator role ID",
-      name: "modrole",
-      required: false,
-      type: ApplicationCommandOptionType.String,
-    })
-    modRole: string | undefined,
-    @SlashOption({
-      description: "Regular role ID",
-      name: "regularrole",
-      required: false,
-      type: ApplicationCommandOptionType.String,
-    })
-    regularRole: string | undefined,
-    @SlashOption({
-      description: "Member role ID",
-      name: "memberrole",
-      required: false,
-      type: ApplicationCommandOptionType.String,
-    })
-    memberRole: string | undefined,
-    @SlashOption({
-      description: "Newcomer role ID",
-      name: "newcomerrole",
-      required: false,
-      type: ApplicationCommandOptionType.String,
-    })
-    newcomerRole: string | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction, { ephemeral: true });
@@ -962,11 +927,11 @@ export class SuperAdmin {
     }
 
     const roleMap = {
-      admin: adminRole?.trim(),
-      mod: modRole?.trim(),
-      regular: regularRole?.trim(),
-      member: memberRole?.trim(),
-      newcomer: newcomerRole?.trim(),
+      admin: process.env.ADMIN_ROLE_ID?.replace(/[<@&>]/g, "").trim() || null,
+      mod: process.env.MODERATOR_ROLE_ID?.replace(/[<@&>]/g, "").trim() || null,
+      regular: process.env.REGULAR_ROLE_ID?.replace(/[<@&>]/g, "").trim() || null,
+      member: process.env.MEMBER_ROLE_ID?.replace(/[<@&>]/g, "").trim() || null,
+      newcomer: process.env.NEWCOMER_ROLE_ID?.replace(/[<@&>]/g, "").trim() || null,
     };
 
     await safeReply(interaction, { content: "Fetching all guild members... this may take a moment.", ephemeral: true });
@@ -997,11 +962,13 @@ export class SuperAdmin {
     let successCount = 0;
     let failCount = 0;
 
+    const delay = async (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
     try {
       for (const member of members.values()) {
         const user = member.user;
 
-        // Build avatar blob
+        // Build avatar blob (throttled per-user)
         let avatarBlob: Buffer | null = null;
         const avatarUrl = user.displayAvatarURL({ extension: "png", size: 512, forceStatic: true });
         if (avatarUrl) {
@@ -1017,39 +984,32 @@ export class SuperAdmin {
           if (!id) return 0;
           return member.roles.cache.has(id) ? 1 : 0;
         };
+        const adminFlag =
+          hasRole(roleMap.admin) || member.permissions.has("Administrator") ? 1 : 0;
+        const moderatorFlag =
+          hasRole(roleMap.mod) || member.permissions.has("ManageMessages") ? 1 : 0;
+        const regularFlag = hasRole(roleMap.regular);
+        const memberFlag = hasRole(roleMap.member);
+        const newcomerFlag = hasRole(roleMap.newcomer);
 
-        const execUpsert = async (avatarData: Buffer | null) =>
-          connection.execute(
-            `MERGE INTO RPG_CLUB_USERS t
-             USING (SELECT :userId AS USER_ID FROM dual) s
-             ON (t.USER_ID = s.USER_ID)
-             WHEN MATCHED THEN
-               UPDATE SET
-                 IS_BOT = :isBot,
-                 USERNAME = :username,
-                 GLOBAL_NAME = :globalName,
-                 AVATAR_BLOB = :avatarBlob,
-                 SERVER_JOINED_AT = :joinedAt,
-                 LAST_SEEN_AT = :lastSeenAt,
-                 LAST_FETCHED_AT = SYSTIMESTAMP,
-                 ROLE_ADMIN = :roleAdmin,
-                 ROLE_MODERATOR = :roleModerator,
-                 ROLE_REGULAR = :roleRegular,
-                 ROLE_MEMBER = :roleMember,
-                 ROLE_NEWCOMER = :roleNewcomer,
-                 UPDATED_AT = SYSTIMESTAMP
-             WHEN NOT MATCHED THEN
-               INSERT (
-                 USER_ID, IS_BOT, USERNAME, GLOBAL_NAME, AVATAR_BLOB,
-                 SERVER_JOINED_AT, LAST_SEEN_AT, LAST_FETCHED_AT,
-                 ROLE_ADMIN, ROLE_MODERATOR, ROLE_REGULAR, ROLE_MEMBER, ROLE_NEWCOMER,
-                 CREATED_AT, UPDATED_AT
-              ) VALUES (
-                 :userId, :isBot, :username, :globalName, :avatarBlob,
-                 :joinedAt, :lastSeenAt, SYSTIMESTAMP,
-                 :roleAdmin, :roleModerator, :roleRegular, :roleMember, :roleNewcomer,
-                 SYSTIMESTAMP, SYSTIMESTAMP
-              )`,
+        const execUpsert = async (avatarData: Buffer | null) => {
+          // Try update first
+          const update = await connection.execute(
+            `UPDATE RPG_CLUB_USERS
+                SET IS_BOT = :isBot,
+                    USERNAME = :username,
+                    GLOBAL_NAME = :globalName,
+                    AVATAR_BLOB = :avatarBlob,
+                    SERVER_JOINED_AT = :joinedAt,
+                    LAST_SEEN_AT = :lastSeenAt,
+                    LAST_FETCHED_AT = SYSTIMESTAMP,
+                    ROLE_ADMIN = :roleAdmin,
+                    ROLE_MODERATOR = :roleModerator,
+                    ROLE_REGULAR = :roleRegular,
+                    ROLE_MEMBER = :roleMember,
+                    ROLE_NEWCOMER = :roleNewcomer,
+                    UPDATED_AT = SYSTIMESTAMP
+              WHERE USER_ID = :userId`,
             {
               userId: user.id,
               isBot: user.bot ? 1 : 0,
@@ -1058,14 +1018,89 @@ export class SuperAdmin {
               avatarBlob: avatarData,
               joinedAt: member.joinedAt ?? null,
               lastSeenAt: null,
-              roleAdmin: hasRole(roleMap.admin),
-              roleModerator: hasRole(roleMap.mod),
-              roleRegular: hasRole(roleMap.regular),
-              roleMember: hasRole(roleMap.member),
-              roleNewcomer: hasRole(roleMap.newcomer),
+              roleAdmin: adminFlag,
+              roleModerator: moderatorFlag,
+              roleRegular: regularFlag,
+              roleMember: memberFlag,
+              roleNewcomer: newcomerFlag,
             },
             { autoCommit: true },
           );
+
+          const updated = update.rowsAffected ?? 0;
+          if (updated > 0) return;
+
+          // Insert if no existing row
+          try {
+            await connection.execute(
+              `INSERT INTO RPG_CLUB_USERS (
+                 USER_ID, IS_BOT, USERNAME, GLOBAL_NAME, AVATAR_BLOB,
+                 SERVER_JOINED_AT, LAST_SEEN_AT, LAST_FETCHED_AT,
+                 ROLE_ADMIN, ROLE_MODERATOR, ROLE_REGULAR, ROLE_MEMBER, ROLE_NEWCOMER,
+                 CREATED_AT, UPDATED_AT
+               ) VALUES (
+                 :userId, :isBot, :username, :globalName, :avatarBlob,
+                 :joinedAt, :lastSeenAt, SYSTIMESTAMP,
+                 :roleAdmin, :roleModerator, :roleRegular, :roleMember, :roleNewcomer,
+                 SYSTIMESTAMP, SYSTIMESTAMP
+               )`,
+              {
+                userId: user.id,
+                isBot: user.bot ? 1 : 0,
+                username: user.username,
+                globalName: (user as any).globalName ?? null,
+                avatarBlob: avatarData,
+                joinedAt: member.joinedAt ?? null,
+                lastSeenAt: null,
+                roleAdmin: adminFlag,
+                roleModerator: moderatorFlag,
+                roleRegular: regularFlag,
+                roleMember: memberFlag,
+                roleNewcomer: newcomerFlag,
+              },
+              { autoCommit: true },
+            );
+          } catch (insErr: any) {
+            const code = insErr?.code ?? insErr?.errorNum;
+            if (code === "ORA-00001") {
+              // Row existed; fallback to update
+              await connection.execute(
+                `UPDATE RPG_CLUB_USERS
+                    SET IS_BOT = :isBot,
+                        USERNAME = :username,
+                        GLOBAL_NAME = :globalName,
+                        AVATAR_BLOB = :avatarBlob,
+                        SERVER_JOINED_AT = :joinedAt,
+                        LAST_SEEN_AT = :lastSeenAt,
+                        LAST_FETCHED_AT = SYSTIMESTAMP,
+                        ROLE_ADMIN = :roleAdmin,
+                        ROLE_MODERATOR = :roleModerator,
+                        ROLE_REGULAR = :roleRegular,
+                        ROLE_MEMBER = :roleMember,
+                        ROLE_NEWCOMER = :roleNewcomer,
+                        UPDATED_AT = SYSTIMESTAMP
+                  WHERE USER_ID = :userId`,
+                {
+                  userId: user.id,
+                  isBot: user.bot ? 1 : 0,
+                  username: user.username,
+                  globalName: (user as any).globalName ?? null,
+                  avatarBlob: avatarData,
+                  joinedAt: member.joinedAt ?? null,
+                  lastSeenAt: null,
+                  roleAdmin: hasRole(roleMap.admin),
+                  roleModerator: hasRole(roleMap.mod),
+                  roleRegular: hasRole(roleMap.regular),
+                  roleMember: hasRole(roleMap.member),
+                  roleNewcomer: hasRole(roleMap.newcomer),
+                },
+                { autoCommit: true },
+              );
+            } else {
+              throw insErr;
+            }
+          }
+        };
 
         try {
           await execUpsert(avatarBlob);
@@ -1100,6 +1135,9 @@ export class SuperAdmin {
             console.error(`Failed to upsert user ${user.id}`, err);
           }
         }
+
+        // throttle: one user per second
+        await delay(1000);
 
       }
     } finally {
