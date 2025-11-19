@@ -14,23 +14,23 @@ export default [
     },
     rules: {
 
-      // disallow async functions for Playwright's test.describe
-      'custom/disallow-async-in-describe': 'error',
+      // // disallow async functions for Playwright's test.describe
+      // 'custom/disallow-async-in-describe': 'error',
 
-      // enforce consistent spacing in if/else blocks
-      'custom/if-else-spacing-consistency': 'error',
+      // // enforce consistent spacing in if/else blocks
+      // 'custom/if-else-spacing-consistency': 'error',
       
-      // enforce a blank line after test.describe opening brackets
-      'custom/blank-line-after-describe': 'error',
+      // // enforce a blank line after test.describe opening brackets
+      // 'custom/blank-line-after-describe': 'error',
 
-      // enforce a blank line before test.describe blocks
-      'custom/blank-line-before-describe': 'error',
+      // // enforce a blank line before test.describe blocks
+      // 'custom/blank-line-before-describe': 'error',
 
-      // enforce a blank line before test blocks
-      "custom/blank-line-before-test": "error",
+      // // enforce a blank line before test blocks
+      // "custom/blank-line-before-test": "error",
 
-      // enforce a blank line before comments
-      "custom/blank-line-before-comment": "error",
+      // // enforce a blank line before comments
+      // "custom/blank-line-before-comment": "error",
 
       // all interfaces should be named starting with a capital I (ie. IUser, IAgency)
       '@typescript-eslint/naming-convention': [

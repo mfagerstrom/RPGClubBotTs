@@ -1,4 +1,7 @@
 # Task Checklist
 
 - Bootstrap Node.js locally (Node v22) even if system Node is missing: `bash scripts/ensure-local-node.sh`
-- Use the repo-local npm wrapper so the bundled Node is picked up: `bash scripts/npm-local.sh <npm args>` (e.g., `bash scripts/npm-local.sh run build`)  Do not use buildDev.
+- Use the repo-local npm wrapper so the bundled Node is picked up: `bash scripts/npm-local.sh <npm args>` (e.g., `bash scripts/npm-local.sh run compile`)
+- After code changes, run `npm run lint` and `npm run compile`, fixing all errors reported by each command
+- You are disallowed from using npm run build or npm run buildDev
+- You are disallowed from using git commands that can result in file change losses
