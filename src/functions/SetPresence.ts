@@ -1,4 +1,4 @@
-import { ActivityType, Client, type CommandInteraction } from "discord.js";
+import { ActivityType, Client, type CommandInteraction, type Activity } from "discord.js";
 import type { AnyRepliable } from "./InteractionUtils.js";
 import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
@@ -117,7 +117,10 @@ export async function getPresenceHistory(limit: number): Promise<PresenceHistory
   }
 }
 
-export async function setPresence(interaction: CommandInteraction, activityName: string) {
+export async function setPresence(
+  interaction: CommandInteraction,
+  activityName: string,
+): Promise<void> {
   interaction.client.user!.setPresence({
     activities: [
       {
@@ -131,7 +134,10 @@ export async function setPresence(interaction: CommandInteraction, activityName:
   await savePresenceToDatabase(interaction, activityName);
 }
 
-export async function setPresenceFromInteraction(interaction: AnyRepliable, activityName: string) {
+export async function setPresenceFromInteraction(
+  interaction: AnyRepliable,
+  activityName: string,
+): Promise<void> {
   interaction.client.user!.setPresence({
     activities: [
       {
@@ -145,7 +151,7 @@ export async function setPresenceFromInteraction(interaction: AnyRepliable, acti
   await savePresenceToDatabase(interaction, activityName);
 }
 
-export async function updateBotPresence(bot: Client) {
+export async function updateBotPresence(bot: Client): Promise<void> {
   const activityName = await readLatestPresenceFromDatabase();
   if (activityName) {
     bot.user!.setPresence({
@@ -161,4 +167,31 @@ export async function updateBotPresence(bot: Client) {
   } else {
     console.log("No presence data found in database.");
   }
+}
+
+export async function restorePresenceIfMissing(bot: Client): Promise<void> {
+  const activities: readonly Activity[] = bot.user?.presence?.activities ?? [];
+  const hasPresence: boolean = activities.some(
+    (activity) => (activity.name ?? "").trim().length > 0,
+  );
+  if (hasPresence) {
+    return;
+  }
+
+  const activityName = await readLatestPresenceFromDatabase();
+  if (!activityName) {
+    console.log("No presence data found in database to restore.");
+    return;
+  }
+
+  bot.user!.setPresence({
+    activities: [
+      {
+        name: activityName,
+        type: ActivityType.Playing,
+      },
+    ],
+    status: "online",
+  });
+  console.log("Bot presence restored after detecting missing activity.");
 }

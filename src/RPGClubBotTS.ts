@@ -4,16 +4,22 @@ import { IntentsBitField } from "discord.js";
 import { Client } from "discordx";
 
 import dotenv from "dotenv";
-import { updateBotPresence } from "./functions/SetPresence.js";
+import { restorePresenceIfMissing, updateBotPresence } from "./functions/SetPresence.js";
 
 import { initOraclePool } from "./db/oracleClient.js";
 import { loadGotmFromDb } from "./classes/Gotm.js";
 import { loadNrGotmFromDb } from "./classes/NrGotm.js";
-import { installConsoleLogging, logToDiscord, setConsoleLoggingClient } from "./utilities/DiscordConsoleLogger.js";
+import {
+  installConsoleLogging,
+  logToDiscord,
+  setConsoleLoggingClient,
+} from "./utilities/DiscordConsoleLogger.js";
 import { startNominationReminderService } from "./services/NominationReminderService.js";
 
 dotenv.config();
 installConsoleLogging();
+
+const PRESENCE_CHECK_INTERVAL_MS: number = 30 * 60 * 1000;
 
 export const bot = new Client({
   // To use only guild command
@@ -45,6 +51,11 @@ bot.once("clientReady", async () => {
 
   // Set presence state from stored value
   await updateBotPresence(bot);
+
+  // Periodically ensure presence is restored if Discord drops it
+  setInterval(() => {
+    void restorePresenceIfMissing(bot);
+  }, PRESENCE_CHECK_INTERVAL_MS);
 
   // Synchronize applications commands with Discord
   await bot.initApplicationCommands();
