@@ -14,6 +14,7 @@ import {
   setConsoleLoggingClient,
 } from "./utilities/DiscordConsoleLogger.js";
 import { startNominationReminderService } from "./services/NominationReminderService.js";
+import { startReminderService } from "./services/ReminderService.js";
 
 dotenv.config();
 installConsoleLogging();
@@ -87,6 +88,7 @@ bot.once("clientReady", async () => {
   //  );
 
   startNominationReminderService(bot);
+  startReminderService(bot);
   console.log("Startup sequence completed.");
 });
 

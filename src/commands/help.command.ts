@@ -19,6 +19,7 @@ type HelpTopicId =
   | "nextvote"
   | "hltb"
   | "coverart"
+  | "remindme"
   | "admin"
   | "mod"
   | "superadmin";
@@ -107,6 +108,15 @@ const HELP_TOPICS: HelpTopic[] = [
     summary: "Search for video game cover art using Google/HLTB data (ephemeral by default).",
     syntax: "Syntax: /coverart title:<string> [showinchat:<boolean>]",
     parameters: "title (required string) - game title and optional descriptors. showinchat (optional boolean) - post publicly if true.",
+  },
+  {
+    id: "remindme",
+    label: "/remindme",
+    summary: "Personal reminders with quick snooze buttons (DM delivery).",
+    syntax:
+      "Syntax: /remindme create when:<date/time> [note:<text>] | /remindme menu | /remindme snooze id:<int> until:<date/time> | /remindme delete id:<int>",
+    notes:
+      "Use natural inputs like 'in 45m' or absolute datetimes. Menu shows your reminders and ids.",
   },
   {
     id: "admin",
