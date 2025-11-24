@@ -3,11 +3,12 @@ import { Discord, On } from "discordx";
 
 @Discord()
 export class GuildMemberUpdate {
-    @On()
-    async guildMemberUpdate(
-        [oldMember, newMember]: ArgsOf<"guildMemberUpdate">,
-        client: Client,
-    ): Promise<void> {
+  @On()
+  async guildMemberUpdate(
+    [oldMember, newMember]: ArgsOf<"guildMemberUpdate">,
+    _client: Client,
+  ): Promise<void> {
+    void _client;
 
         // has the member's nickname changed?
         if (newMember.nickname && oldMember.nickname !== newMember.nickname) {

@@ -3,7 +3,7 @@ import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
 import { Discord, Slash, SlashChoice, SlashGroup, SlashOption } from "discordx";
 import { AUDIT_NO_VALUE_SENTINEL } from "./superadmin.command.js";
 // Use relative import with .js for ts-node ESM compatibility
-import NrGotm, { NrGotmEntry, NrGotmGame } from "../classes/NrGotm.js";
+import NrGotm, { INrGotmEntry } from "../classes/NrGotm.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import {
   areNominationsClosed,
@@ -17,16 +17,11 @@ import {
 } from "../classes/Nomination.js";
 import { NR_GOTM_NOMINATION_CHANNEL_ID } from "../config/nominationChannels.js";
 import { buildNrGotmHelpResponse } from "./help.command.js";
-import { buildNrGotmEntryEmbed, type EmbedWithAttachments } from "../functions/GotmEntryEmbeds.js";
+import { buildNrGotmEntryEmbed, type IEmbedWithAttachments } from "../functions/GotmEntryEmbeds.js";
 
 const ANNOUNCEMENTS_CHANNEL_ID: string | undefined = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 
-function displayAuditValue(value: string | null | undefined): string | null {
-  if (value === AUDIT_NO_VALUE_SENTINEL) return null;
-  return value ?? null;
-}
-
-function isNoNrGotm(entry: NrGotmEntry): boolean {
+function isNoNrGotm(entry: INrGotmEntry): boolean {
   return entry.gameOfTheMonth.some((g) => (g.title ?? "").trim().toLowerCase() === "n/a");
 }
 
@@ -125,7 +120,7 @@ export class NrGotmSearch {
     const ephemeral = !showInChat;
     await safeDeferReply(interaction, { ephemeral });
 
-    let results: NrGotmEntry[] = [];
+    let results: INrGotmEntry[] = [];
     let criteriaLabel: string | undefined;
 
     try {
@@ -210,7 +205,7 @@ export class NrGotmSearch {
         }
       }
 
-      const sendGroup = async (group: EmbedWithAttachments[], first: boolean) => {
+      const sendGroup = async (group: IEmbedWithAttachments[], first: boolean) => {
         const embeds = group.map((g) => g.embed);
         const files = group.flatMap((g) => g.files ?? []);
         const payload: any = {
@@ -430,7 +425,9 @@ async function announceNomination(
   const channelId = NR_GOTM_NOMINATION_CHANNEL_ID;
   try {
     const channel = await interaction.client.channels.fetch(channelId);
-    const textChannel: TextBasedChannel | null = channel?.isTextBased() ? (channel as TextBasedChannel) : null;
+    const textChannel: TextBasedChannel | null = channel?.isTextBased()
+      ? (channel as TextBasedChannel)
+      : null;
     if (!textChannel || !isSendableTextChannel(textChannel)) return;
     await textChannel.send({ content, embeds: [embed] });
   } catch (err) {
@@ -479,12 +476,12 @@ function parseMonthValue(input: string): number | string {
 }
 
 async function buildNrGotmEmbeds(
-  results: NrGotmEntry[],
+  results: INrGotmEntry[],
   criteriaLabel: string | undefined,
   guildId: string | undefined,
   client: Client,
-): Promise<EmbedWithAttachments[]> {
-  const buildNoEmbed = (entry: NrGotmEntry): EmbedBuilder => {
+): Promise<IEmbedWithAttachments[]> {
+  const buildNoEmbed = (entry: INrGotmEntry): EmbedBuilder => {
     return new EmbedBuilder()
       .setColor(0x0099ff)
       .setTitle(`NR-GOTM Round ${entry.round} - ${entry.monthYear}`)
@@ -498,7 +495,7 @@ async function buildNrGotmEmbeds(
     }));
   }
 
-  const assets: EmbedWithAttachments[] = [];
+  const assets: IEmbedWithAttachments[] = [];
 
   for (const entry of results) {
     if (isNoNrGotm(entry)) {
@@ -514,7 +511,7 @@ async function buildNrGotmEmbeds(
 }
 
 function buildCompactEmbeds(
-  results: NrGotmEntry[],
+  results: INrGotmEntry[],
   criteriaLabel: string | undefined,
   guildId?: string,
 ): EmbedBuilder[] {
@@ -544,8 +541,8 @@ function buildCompactEmbeds(
   return embeds;
 }
 
-function chunkAssets(list: EmbedWithAttachments[], size: number): EmbedWithAttachments[][] {
-  const out: EmbedWithAttachments[][] = [];
+function chunkAssets(list: IEmbedWithAttachments[], size: number): IEmbedWithAttachments[][] {
+  const out: IEmbedWithAttachments[][] = [];
   for (let i = 0; i < list.length; i += size) {
     out.push(list.slice(i, i + size));
   }
@@ -557,7 +554,8 @@ function displayValueSafe(value: string | null | undefined): string | null {
   return value ?? null;
 }
 
-function formatGames(entry: NrGotmEntry, guildId?: string): { body: string; winners: string[] } {
+function formatGames(entry: INrGotmEntry, _guildId?: string): { body: string; winners: string[] } {
+  void _guildId;
   const games = entry.gameOfTheMonth;
   if (!games || games.length === 0) return { body: "(no games listed)", winners: [] };
   const lines: string[] = [];
@@ -585,7 +583,7 @@ function truncateField(value: string): string {
 }
 
 function buildResultsJumpLink(
-  entry: NrGotmEntry,
+  entry: INrGotmEntry,
   guildId?: string,
 ): string | undefined {
   if (!guildId || !ANNOUNCEMENTS_CHANNEL_ID) return undefined;
@@ -599,7 +597,7 @@ function buildResultsJumpLink(
 }
 
 function formatGamesWithJump(
-  entry: NrGotmEntry,
+  entry: INrGotmEntry,
   guildId?: string,
 ): string {
   const { body } = formatGames(entry, guildId);

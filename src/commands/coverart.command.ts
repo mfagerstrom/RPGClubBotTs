@@ -40,7 +40,7 @@ export class Coverart {
           ephemeral,
         });
       }
-    } catch (error) {
+    } catch {
       await safeReply(interaction, {
         content: `Sorry, there was an error searching for cover art for "${title}". Please try again later.`,
         ephemeral,

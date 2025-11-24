@@ -13,7 +13,9 @@ const ROLE_IDS = {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function isSendable(channel: TextBasedChannel | null): channel is TextBasedChannel & { send: (content: any) => Promise<any> } {
+function isSendable(
+  channel: TextBasedChannel | null,
+): channel is TextBasedChannel & { send: (content: any) => Promise<any> } {
   return Boolean(channel && typeof (channel as any).send === "function");
 }
 
@@ -291,7 +293,9 @@ export async function memberScanTick(
 
       // announce nickname/avatar changes
       if (logChannel && isSendable(logChannel)) {
-        const oldNick = existingRow ? (existingRow.GLOBAL_NAME ?? existingRow.USERNAME ?? null) : null;
+        const oldNick = existingRow
+          ? (existingRow.GLOBAL_NAME ?? existingRow.USERNAME ?? null)
+          : null;
         const newNick = (user as any).globalName ?? user.username ?? null;
         if (oldNick !== newNick) {
           const embed = new EmbedBuilder()

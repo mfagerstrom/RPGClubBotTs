@@ -7,12 +7,7 @@ import {
   MessageFlags,
   PermissionsBitField,
 } from "discord.js";
-import type {
-  ButtonInteraction,
-  CommandInteraction,
-  RepliableInteraction,
-  User,
-} from "discord.js";
+import type { ButtonInteraction, CommandInteraction, User } from "discord.js";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import {
   getPresenceHistory,
@@ -24,15 +19,15 @@ import { AnyRepliable, safeDeferReply, safeReply, safeUpdate } from "../function
 import type { Message } from "discord.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
 import Gotm, {
-  type GotmEntry,
-  type GotmGame,
+  type IGotmEntry,
+  type IGotmGame,
   updateGotmGameFieldInDatabase,
   type GotmEditableField,
   insertGotmRoundInDatabase,
 } from "../classes/Gotm.js";
 import NrGotm, {
-  type NrGotmEntry,
-  type NrGotmGame,
+  type INrGotmEntry,
+  type INrGotmGame,
   updateNrGotmGameFieldInDatabase,
   type NrGotmEditableField,
   insertNrGotmRoundInDatabase,
@@ -169,7 +164,9 @@ function extractAdminTopicId(customId: string): AdminHelpTopicId | null {
   if (startIndex === -1) return null;
 
   const raw = customId.slice(startIndex + prefix.length).trim();
-  return (ADMIN_HELP_TOPICS.find((entry) => entry.id === raw)?.id ?? null) as AdminHelpTopicId | null;
+  return (ADMIN_HELP_TOPICS.find((entry) => entry.id === raw)?.id ?? null) as
+    | AdminHelpTopicId
+    | null;
 }
 
 export function buildAdminHelpEmbed(topic: AdminHelpTopic): EmbedBuilder {
@@ -734,7 +731,7 @@ export class Admin {
       return;
     }
 
-    let allEntries: GotmEntry[];
+    let allEntries: IGotmEntry[];
     try {
       allEntries = Gotm.all();
     } catch (err: any) {
@@ -783,7 +780,7 @@ export class Admin {
       return;
     }
 
-    const games: GotmGame[] = [];
+    const games: IGotmGame[] = [];
 
     for (let i = 0; i < gameCount; i++) {
       const n = i + 1;
@@ -863,7 +860,7 @@ export class Admin {
       return;
     }
 
-    let allEntries: NrGotmEntry[];
+    let allEntries: INrGotmEntry[];
     try {
       allEntries = NrGotm.all();
     } catch (err: any) {
@@ -912,7 +909,7 @@ export class Admin {
       return;
     }
 
-    const games: NrGotmGame[] = [];
+    const games: INrGotmGame[] = [];
 
     for (let i = 0; i < gameCount; i++) {
       const n = i + 1;
@@ -1010,7 +1007,7 @@ export class Admin {
       return;
     }
 
-    let entries: GotmEntry[];
+    let entries: IGotmEntry[];
     try {
       entries = Gotm.getByRound(roundNumber);
     } catch (err: any) {
@@ -1110,7 +1107,7 @@ export class Admin {
     try {
       await updateGotmGameFieldInDatabase(roundNumber, gameIndex, field!, newValue);
 
-      let updatedEntry: GotmEntry | null = null;
+      let updatedEntry: IGotmEntry | null = null;
       if (field === "title") {
         updatedEntry = Gotm.updateTitleByRound(roundNumber, newValue ?? "", gameIndex);
       } else if (field === "threadId") {
@@ -1165,7 +1162,7 @@ export class Admin {
       return;
     }
 
-    let entries: NrGotmEntry[];
+    let entries: INrGotmEntry[];
     try {
       entries = NrGotm.getByRound(roundNumber);
     } catch (err: any) {
@@ -1271,7 +1268,7 @@ export class Admin {
         value: newValue,
       });
 
-      let updatedEntry: NrGotmEntry | null = null;
+      let updatedEntry: INrGotmEntry | null = null;
       if (field === "title") {
         updatedEntry = NrGotm.updateTitleByRound(roundNumber, newValue ?? "", gameIndex);
       } else if (field === "threadId") {
@@ -1408,29 +1405,14 @@ async function promptUserForInput(
   }
 }
 
-function formatGotmEntryForEdit(entry: GotmEntry): string {
-  const lines: string[] = [];
-  lines.push(`Round ${entry.round} - ${entry.monthYear}`);
-
-  if (!entry.gameOfTheMonth.length) {
-    lines.push("  (no games listed)");
-    return lines.join("\n");
-  }
-
-  entry.gameOfTheMonth.forEach((game, index) => {
-    const num = index + 1;
-    lines.push(`${num}) Title: ${game.title}`);
-    lines.push(`   Thread: ${game.threadId ?? "(none)"}`);
-    lines.push(`   Reddit: ${game.redditUrl ?? "(none)"}`);
-  });
-
-  return lines.join("\n");
-}
-
 export async function isAdmin(interaction: AnyRepliable) {
   const anyInteraction = interaction as any;
-  // @ts-ignore
-  const isAdmin = await interaction.member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.Administrator);
+  const member: any = (interaction as any).member;
+  const canCheck =
+    member && typeof member.permissionsIn === "function" && interaction.channel;
+  const isAdmin = canCheck
+    ? member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.Administrator)
+    : false;
 
   if (!isAdmin) {
     const denial = {
@@ -1446,7 +1428,7 @@ export async function isAdmin(interaction: AnyRepliable) {
         anyInteraction.__rpgAcked = true;
         anyInteraction.__rpgDeferred = false;
       }
-    } catch (err: any) {
+    } catch {
       // swallow to avoid leaking
     }
   }

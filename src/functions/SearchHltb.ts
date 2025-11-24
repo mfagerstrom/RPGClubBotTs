@@ -3,7 +3,7 @@ import * as cheerio from 'cheerio';
 import UserAgent from 'user-agents';
 import { google } from 'googleapis';
 
-interface GoogleSearchResult {
+interface IGoogleSearchResult {
     kind: string;
     title: string;
     htmlTitle: string;
@@ -19,7 +19,7 @@ interface GoogleSearchResult {
 export async function searchHltb(title: string) {
     const hltbQuery: string = title;
 
-    const searchData: GoogleSearchResult[] = await searchGoogleCustomSearchAPI(`How long is ${hltbQuery}?`) as GoogleSearchResult[];
+    const searchData: IGoogleSearchResult[] = await searchGoogleCustomSearchAPI(`How long is ${hltbQuery}?`) as IGoogleSearchResult[];
 
     // grab the first link of the bunch and pull out the id from it
     const hltbUrl: string = searchData[0].link;

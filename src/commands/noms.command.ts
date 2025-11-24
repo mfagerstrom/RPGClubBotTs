@@ -1,6 +1,6 @@
 import type { CommandInteraction } from "discord.js";
-import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
-import { Discord, Slash, SlashOption } from "discordx";
+import { EmbedBuilder } from "discord.js";
+import { Discord, Slash } from "discordx";
 import { getUpcomingNominationWindow } from "../functions/NominationWindow.js";
 import { listNominationsForRound } from "../classes/Nomination.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";

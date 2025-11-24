@@ -1,7 +1,7 @@
 import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
 
-export interface NrGotmGame {
+export interface INrGotmGame {
   id?: number | null;
   title: string;
   threadId: string | null;
@@ -10,10 +10,10 @@ export interface NrGotmGame {
   imageMimeType?: string | null;
 }
 
-export interface NrGotmEntry {
+export interface INrGotmEntry {
   round: number;
   monthYear: string;
-  gameOfTheMonth: NrGotmGame[];
+  gameOfTheMonth: INrGotmGame[];
   votingResultsMessageId?: string | null;
 }
 
@@ -32,11 +32,11 @@ const MONTHS = [
   "december",
 ] as const;
 
-let nrGotmData: NrGotmEntry[] = [];
-let loadPromise: Promise<NrGotmEntry[]> | null = null;
+let nrGotmData: INrGotmEntry[] = [];
+let loadPromise: Promise<INrGotmEntry[]> | null = null;
 let nrGotmLoaded = false;
 
-async function loadFromDatabaseInternal(): Promise<NrGotmEntry[]> {
+async function loadFromDatabaseInternal(): Promise<INrGotmEntry[]> {
   const pool = getOraclePool();
   const connection = await pool.getConnection();
 
@@ -74,7 +74,7 @@ async function loadFromDatabaseInternal(): Promise<NrGotmEntry[]> {
     );
 
     const rows = result.rows ?? [];
-    const byRound = new Map<number, NrGotmEntry>();
+    const byRound = new Map<number, INrGotmEntry>();
 
     for (const anyRow of rows as any[]) {
       const row = anyRow as {
@@ -111,7 +111,7 @@ async function loadFromDatabaseInternal(): Promise<NrGotmEntry[]> {
         entry.votingResultsMessageId = votingId;
       }
 
-      const game: NrGotmGame = {
+      const game: INrGotmGame = {
         id: Number(row.NR_GOTM_ID),
         title: row.GAME_TITLE,
         threadId: row.THREAD_ID ?? null,
@@ -165,17 +165,17 @@ function monthNumberToName(month: number): string | null {
 }
 
 export default class NrGotm {
-  static all(): NrGotmEntry[] {
+  static all(): INrGotmEntry[] {
     ensureInitialized();
     return nrGotmData.slice();
   }
 
-  static getByRound(round: number): NrGotmEntry[] {
+  static getByRound(round: number): INrGotmEntry[] {
     ensureInitialized();
     return nrGotmData.filter((e) => e.round === round);
   }
 
-  static getByYearMonth(year: number, month: number | string): NrGotmEntry[] {
+  static getByYearMonth(year: number, month: number | string): INrGotmEntry[] {
     ensureInitialized();
     const yearNum = Number(year);
     if (!Number.isFinite(yearNum)) return [];
@@ -194,14 +194,14 @@ export default class NrGotm {
     });
   }
 
-  static getByYear(year: number): NrGotmEntry[] {
+  static getByYear(year: number): INrGotmEntry[] {
     ensureInitialized();
     const yearNum = Number(year);
     if (!Number.isFinite(yearNum)) return [];
     return nrGotmData.filter((e) => parseYear(e.monthYear) === yearNum);
   }
 
-  static searchByTitle(query: string): NrGotmEntry[] {
+  static searchByTitle(query: string): INrGotmEntry[] {
     ensureInitialized();
     if (!query?.trim()) return [];
     const q = query.toLowerCase();
@@ -210,7 +210,7 @@ export default class NrGotm {
     );
   }
 
-  static addRound(round: number, monthYear: string, games: NrGotmGame[]): NrGotmEntry {
+  static addRound(round: number, monthYear: string, games: INrGotmGame[]): INrGotmEntry {
     ensureInitialized();
     const r = Number(round);
     if (!Number.isFinite(r)) {
@@ -219,7 +219,7 @@ export default class NrGotm {
     if (nrGotmData.some((e) => e.round === r)) {
       throw new Error(`NR-GOTM round ${r} already exists.`);
     }
-    const entry: NrGotmEntry = {
+    const entry: INrGotmEntry = {
       round: r,
       monthYear,
       gameOfTheMonth: games.map((g) => ({
@@ -236,7 +236,7 @@ export default class NrGotm {
     return entry;
   }
 
-  private static getRoundEntry(round: number): NrGotmEntry | null {
+  private static getRoundEntry(round: number): INrGotmEntry | null {
     ensureInitialized();
     const r = Number(round);
     if (!Number.isFinite(r)) return null;
@@ -244,7 +244,7 @@ export default class NrGotm {
     return entry ?? null;
   }
 
-  private static resolveIndex(entry: NrGotmEntry, index?: number): number {
+  private static resolveIndex(entry: INrGotmEntry, index?: number): number {
     const arrLen = entry.gameOfTheMonth.length;
     if (arrLen === 0) throw new Error(`Round ${entry.round} has no games.`);
     if (arrLen === 1) return 0;
@@ -263,7 +263,7 @@ export default class NrGotm {
     round: number,
     newTitle: string,
     index?: number,
-  ): NrGotmEntry | null {
+  ): INrGotmEntry | null {
     const entry = this.getRoundEntry(round);
     if (!entry) return null;
     const i = this.resolveIndex(entry, index);
@@ -275,7 +275,7 @@ export default class NrGotm {
     round: number,
     threadId: string | null,
     index?: number,
-  ): NrGotmEntry | null {
+  ): INrGotmEntry | null {
     const entry = this.getRoundEntry(round);
     if (!entry) return null;
     const i = this.resolveIndex(entry, index);
@@ -287,7 +287,7 @@ export default class NrGotm {
     round: number,
     redditUrl: string | null,
     index?: number,
-  ): NrGotmEntry | null {
+  ): INrGotmEntry | null {
     const entry = this.getRoundEntry(round);
     if (!entry) return null;
     const i = this.resolveIndex(entry, index);
@@ -300,7 +300,7 @@ export default class NrGotm {
     imageBlob: Buffer | null,
     imageMimeType: string | null,
     index?: number,
-  ): NrGotmEntry | null {
+  ): INrGotmEntry | null {
     const entry = this.getRoundEntry(round);
     if (!entry) return null;
     const i = this.resolveIndex(entry, index);
@@ -312,14 +312,14 @@ export default class NrGotm {
   static updateVotingResultsByRound(
     round: number,
     messageId: string | null,
-  ): NrGotmEntry | null {
+  ): INrGotmEntry | null {
     const entry = this.getRoundEntry(round);
     if (!entry) return null;
     entry.votingResultsMessageId = messageId;
     return entry;
   }
 
-  static deleteRound(round: number): NrGotmEntry | null {
+  static deleteRound(round: number): INrGotmEntry | null {
     ensureInitialized();
     const r = Number(round);
     if (!Number.isFinite(r)) return null;
@@ -536,7 +536,7 @@ export async function updateNrGotmVotingResultsInDatabase(
 export async function insertNrGotmRoundInDatabase(
   round: number,
   monthYear: string,
-  games: NrGotmGame[],
+  games: INrGotmGame[],
 ): Promise<number[]> {
   if (!Number.isFinite(round) || round <= 0) {
     throw new Error("Invalid round number for NR-GOTM insert.");
@@ -639,4 +639,3 @@ export async function deleteNrGotmRoundFromDatabase(round: number): Promise<numb
     await connection.close();
   }
 }
-

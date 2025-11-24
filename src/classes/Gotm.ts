@@ -1,7 +1,7 @@
 import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
 
-export interface GotmGame {
+export interface IGotmGame {
   title: string;
   threadId: string | null;
   redditUrl: string | null;
@@ -9,10 +9,10 @@ export interface GotmGame {
   imageMimeType?: string | null;
 }
 
-export interface GotmEntry {
+export interface IGotmEntry {
   round: number;
   monthYear: string;
-  gameOfTheMonth: GotmGame[];
+  gameOfTheMonth: IGotmGame[];
   votingResultsMessageId?: string | null;
 }
 
@@ -31,11 +31,11 @@ const MONTHS = [
   "december",
 ] as const;
 
-let gotmData: GotmEntry[] = [];
-let loadPromise: Promise<GotmEntry[]> | null = null;
+let gotmData: IGotmEntry[] = [];
+let loadPromise: Promise<IGotmEntry[]> | null = null;
 let gotmLoaded = false;
 
-async function loadFromDatabaseInternal(): Promise<GotmEntry[]> {
+async function loadFromDatabaseInternal(): Promise<IGotmEntry[]> {
   const pool = getOraclePool();
   const connection = await pool.getConnection();
 
@@ -72,7 +72,7 @@ async function loadFromDatabaseInternal(): Promise<GotmEntry[]> {
     );
 
     const rows = result.rows ?? [];
-    const byRound = new Map<number, GotmEntry>();
+    const byRound = new Map<number, IGotmEntry>();
 
     for (const anyRow of rows as any[]) {
       const row = anyRow as {
@@ -108,7 +108,7 @@ async function loadFromDatabaseInternal(): Promise<GotmEntry[]> {
         entry.votingResultsMessageId = votingId;
       }
 
-      const game: GotmGame = {
+      const game: IGotmGame = {
         title: row.GAME_TITLE,
         threadId: row.THREAD_ID ?? null,
         redditUrl: row.REDDIT_URL ?? null,
@@ -161,17 +161,17 @@ function monthNumberToName(month: number): string | null {
 }
 
 export default class Gotm {
-  static all(): GotmEntry[] {
+  static all(): IGotmEntry[] {
     ensureInitialized();
     return gotmData.slice();
   }
 
-  static getByRound(round: number): GotmEntry[] {
+  static getByRound(round: number): IGotmEntry[] {
     ensureInitialized();
     return gotmData.filter((e) => e.round === round);
   }
 
-  static getByYearMonth(year: number, month: number | string): GotmEntry[] {
+  static getByYearMonth(year: number, month: number | string): IGotmEntry[] {
     ensureInitialized();
     const yearNum = Number(year);
     if (!Number.isFinite(yearNum)) return [];
@@ -190,14 +190,14 @@ export default class Gotm {
     });
   }
 
-  static getByYear(year: number): GotmEntry[] {
+  static getByYear(year: number): IGotmEntry[] {
     ensureInitialized();
     const yearNum = Number(year);
     if (!Number.isFinite(yearNum)) return [];
     return gotmData.filter((e) => parseYear(e.monthYear) === yearNum);
   }
 
-  static searchByTitle(query: string): GotmEntry[] {
+  static searchByTitle(query: string): IGotmEntry[] {
     ensureInitialized();
     if (!query?.trim()) return [];
     const q = query.toLowerCase();
@@ -206,7 +206,7 @@ export default class Gotm {
     );
   }
 
-  static addRound(round: number, monthYear: string, games: GotmGame[]): GotmEntry {
+  static addRound(round: number, monthYear: string, games: IGotmGame[]): IGotmEntry {
     ensureInitialized();
     const r = Number(round);
     if (!Number.isFinite(r)) {
@@ -215,7 +215,7 @@ export default class Gotm {
     if (gotmData.some((e) => e.round === r)) {
       throw new Error(`GOTM round ${r} already exists.`);
     }
-    const entry: GotmEntry = {
+    const entry: IGotmEntry = {
       round: r,
       monthYear,
       gameOfTheMonth: games.map((g) => ({
@@ -231,7 +231,7 @@ export default class Gotm {
     return entry;
   }
 
-  private static getRoundEntry(round: number): GotmEntry | null {
+  private static getRoundEntry(round: number): IGotmEntry | null {
     ensureInitialized();
     const r = Number(round);
     if (!Number.isFinite(r)) return null;
@@ -239,7 +239,7 @@ export default class Gotm {
     return entry ?? null;
   }
 
-  private static resolveIndex(entry: GotmEntry, index?: number): number {
+  private static resolveIndex(entry: IGotmEntry, index?: number): number {
     const arrLen = entry.gameOfTheMonth.length;
     if (arrLen === 0) throw new Error(`Round ${entry.round} has no games.`);
     if (arrLen === 1) return 0;
@@ -258,7 +258,7 @@ export default class Gotm {
     round: number,
     newTitle: string,
     index?: number,
-  ): GotmEntry | null {
+  ): IGotmEntry | null {
     const entry = this.getRoundEntry(round);
     if (!entry) return null;
     const i = this.resolveIndex(entry, index);
@@ -270,7 +270,7 @@ export default class Gotm {
     round: number,
     threadId: string | null,
     index?: number,
-  ): GotmEntry | null {
+  ): IGotmEntry | null {
     const entry = this.getRoundEntry(round);
     if (!entry) return null;
     const i = this.resolveIndex(entry, index);
@@ -282,7 +282,7 @@ export default class Gotm {
     round: number,
     redditUrl: string | null,
     index?: number,
-  ): GotmEntry | null {
+  ): IGotmEntry | null {
     const entry = this.getRoundEntry(round);
     if (!entry) return null;
     const i = this.resolveIndex(entry, index);
@@ -295,7 +295,7 @@ export default class Gotm {
     imageBlob: Buffer | null,
     imageMimeType: string | null,
     index?: number,
-  ): GotmEntry | null {
+  ): IGotmEntry | null {
     const entry = this.getRoundEntry(round);
     if (!entry) return null;
     const i = this.resolveIndex(entry, index);
@@ -304,14 +304,14 @@ export default class Gotm {
     return entry;
   }
 
-  static updateVotingResultsByRound(round: number, messageId: string | null): GotmEntry | null {
+  static updateVotingResultsByRound(round: number, messageId: string | null): IGotmEntry | null {
     const entry = this.getRoundEntry(round);
     if (!entry) return null;
     entry.votingResultsMessageId = messageId;
     return entry;
   }
 
-  static deleteRound(round: number): GotmEntry | null {
+  static deleteRound(round: number): IGotmEntry | null {
     ensureInitialized();
     const r = Number(round);
     if (!Number.isFinite(r)) return null;
@@ -475,7 +475,7 @@ export async function updateGotmVotingResultsInDatabase(
 export async function insertGotmRoundInDatabase(
   round: number,
   monthYear: string,
-  games: GotmGame[],
+  games: IGotmGame[],
 ): Promise<void> {
   if (!Number.isFinite(round) || round <= 0) {
     throw new Error("Invalid round number for GOTM insert.");

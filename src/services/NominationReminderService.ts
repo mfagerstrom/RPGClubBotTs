@@ -1,7 +1,7 @@
 import type { TextBasedChannel } from "discord.js";
 import type { Client } from "discordx";
 import { DateTime } from "luxon";
-import BotVotingInfo, { type BotVotingInfoEntry } from "../classes/BotVotingInfo.js";
+import BotVotingInfo, { type IBotVotingInfoEntry } from "../classes/BotVotingInfo.js";
 import { NOMINATION_DISCUSSION_CHANNEL_IDS } from "../config/nominationChannels.js";
 
 const CHECK_INTERVAL_MS = 60_000;
@@ -10,7 +10,7 @@ const REMINDER_ZONE = "America/New_York";
 type ReminderDefinition = {
   kind: "fiveDay" | "oneDay";
   daysBefore: number;
-  wasSent: (entry: BotVotingInfoEntry) => boolean;
+  wasSent: (entry: IBotVotingInfoEntry) => boolean;
   description: string;
 };
 

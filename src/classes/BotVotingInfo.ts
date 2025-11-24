@@ -1,7 +1,7 @@
 import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
 
-export interface BotVotingInfoEntry {
+export interface IBotVotingInfoEntry {
   roundNumber: number;
   nominationListId: number | null;
   nextVoteAt: Date;
@@ -15,7 +15,7 @@ function mapRowToEntry(row: {
   NEXT_VOTE_AT: Date | string;
   FIVE_DAY_REMINDER_SENT: number | null;
   ONE_DAY_REMINDER_SENT: number | null;
-}): BotVotingInfoEntry {
+}): IBotVotingInfoEntry {
   const roundNumber = Number(row.ROUND_NUMBER);
   const nominationListId =
     row.NOMINATION_LIST_ID === null || row.NOMINATION_LIST_ID === undefined
@@ -68,7 +68,7 @@ function normalizeDate(value: Date | string): Date {
 }
 
 export default class BotVotingInfo {
-  static async getAll(): Promise<BotVotingInfoEntry[]> {
+  static async getAll(): Promise<IBotVotingInfoEntry[]> {
     const pool = getOraclePool();
     const connection = await pool.getConnection();
 
@@ -106,7 +106,7 @@ export default class BotVotingInfo {
     }
   }
 
-  static async getByRound(roundNumber: number): Promise<BotVotingInfoEntry | null> {
+  static async getByRound(roundNumber: number): Promise<IBotVotingInfoEntry | null> {
     const round = normalizeRoundNumber(roundNumber);
 
     const pool = getOraclePool();
@@ -151,7 +151,7 @@ export default class BotVotingInfo {
    * Return the entry for the highest round number in BOT_VOTING_INFO,
    * or null if the table is empty.
    */
-  static async getCurrentRound(): Promise<BotVotingInfoEntry | null> {
+  static async getCurrentRound(): Promise<IBotVotingInfoEntry | null> {
     const pool = getOraclePool();
     const connection = await pool.getConnection();
 

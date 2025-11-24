@@ -1,7 +1,7 @@
 import { DateTime } from "luxon";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
 
-export interface NominationWindow {
+export interface INominationWindow {
   targetRound: number;
   nextVoteAt: Date;
   closesAt: Date;
@@ -21,7 +21,7 @@ function normalizeDate(value: Date | string): Date {
   return d;
 }
 
-export async function getUpcomingNominationWindow(): Promise<NominationWindow> {
+export async function getUpcomingNominationWindow(): Promise<INominationWindow> {
   const currentRound = await BotVotingInfo.getCurrentRound();
   if (!currentRound) {
     throw new Error("No current round found. Set next vote date first.");
@@ -37,6 +37,6 @@ export async function getUpcomingNominationWindow(): Promise<NominationWindow> {
   };
 }
 
-export function areNominationsClosed(window: NominationWindow, now: Date = new Date()): boolean {
+export function areNominationsClosed(window: INominationWindow, now: Date = new Date()): boolean {
   return now >= window.closesAt;
 }

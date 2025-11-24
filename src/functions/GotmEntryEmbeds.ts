@@ -1,18 +1,18 @@
 import { AttachmentBuilder, EmbedBuilder, type Client } from "discord.js";
-import type { GotmEntry, GotmGame } from "../classes/Gotm.js";
-import type { NrGotmEntry, NrGotmGame } from "../classes/NrGotm.js";
+import type { IGotmEntry, IGotmGame } from "../classes/Gotm.js";
+import type { INrGotmEntry, INrGotmGame } from "../classes/NrGotm.js";
 
 const ANNOUNCEMENTS_CHANNEL_ID: string | undefined = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 
 const AUDIT_NO_VALUE_SENTINEL = "__NO_VALUE__";
 
-export interface EmbedWithAttachments {
+export interface IEmbedWithAttachments {
   embed: EmbedBuilder;
   files: AttachmentBuilder[];
 }
 
-type AnyGame = GotmGame | NrGotmGame;
-type AnyEntry = GotmEntry | NrGotmEntry;
+type AnyGame = IGotmGame | INrGotmGame;
+type AnyEntry = IGotmEntry | INrGotmEntry;
 
 function displayAuditValue(value: string | null | undefined): string | null {
   if (value === AUDIT_NO_VALUE_SENTINEL) return null;
@@ -174,10 +174,10 @@ async function resolveEntryImage(
 }
 
 export async function buildGotmEntryEmbed(
-  entry: GotmEntry,
+  entry: IGotmEntry,
   guildId: string | undefined,
   client: Client,
-): Promise<EmbedWithAttachments> {
+): Promise<IEmbedWithAttachments> {
   const desc = formatGamesWithJump(entry as AnyEntry, guildId);
   const embed = new EmbedBuilder()
     .setColor(0x0099ff)
@@ -196,10 +196,10 @@ export async function buildGotmEntryEmbed(
 }
 
 export async function buildNrGotmEntryEmbed(
-  entry: NrGotmEntry,
+  entry: INrGotmEntry,
   guildId: string | undefined,
   client: Client,
-): Promise<EmbedWithAttachments> {
+): Promise<IEmbedWithAttachments> {
   const desc = formatGamesWithJump(entry as AnyEntry, guildId);
   const embed = new EmbedBuilder()
     .setColor(0x0099ff)

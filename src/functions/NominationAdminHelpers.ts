@@ -4,7 +4,6 @@ import {
   ButtonStyle,
   EmbedBuilder,
   type ButtonInteraction,
-  type CommandInteraction,
   type RepliableInteraction,
   type TextBasedChannel,
 } from "discord.js";
@@ -16,14 +15,14 @@ import {
   deleteNominationForUser,
   getNominationForUser,
   listNominationsForRound,
-  type NominationEntry,
+  type INominationEntry,
   type NominationKind,
 } from "../classes/Nomination.js";
 import {
   getUpcomingNominationWindow,
-  type NominationWindow,
+  type INominationWindow,
 } from "./NominationWindow.js";
-import { safeReply, safeUpdate } from "./InteractionUtils.js";
+import { safeUpdate } from "./InteractionUtils.js";
 
 export async function buildNominationDeleteView(
   kind: NominationKind,
@@ -48,10 +47,10 @@ export function buildNominationDeleteViewEmbed(
   kindLabel: string,
   commandLabel: string,
   targetRound: number,
-  window: NominationWindow,
-  nominations: NominationEntry[],
+  window: INominationWindow,
+  nominations: INominationEntry[],
 ): EmbedBuilder {
-  const windowWithRound: NominationWindow & { targetRound: number } = {
+  const windowWithRound: INominationWindow & { targetRound: number } = {
     ...window,
     targetRound,
   };
@@ -61,8 +60,8 @@ export function buildNominationDeleteViewEmbed(
 export function buildNominationEmbed(
   kindLabel: string,
   commandLabel: string,
-  window: NominationWindow & { targetRound: number },
-  nominations: NominationEntry[],
+  window: INominationWindow & { targetRound: number },
+  nominations: INominationEntry[],
 ): EmbedBuilder {
   const lines =
     nominations.length > 0
@@ -86,7 +85,7 @@ export function buildNominationEmbed(
 export function buildDeletionComponents(
   kind: NominationKind,
   round: number,
-  nominations: NominationEntry[],
+  nominations: INominationEntry[],
   prefix: string,
 ): ActionRowBuilder<ButtonBuilder>[] {
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
@@ -131,7 +130,7 @@ export async function handleNominationDeletionButton(
   await deleteNominationForUser(kind, round, userId);
 
   const window = await getUpcomingNominationWindow();
-  const windowForRound: NominationWindow & { targetRound: number } = {
+  const windowForRound: INominationWindow & { targetRound: number } = {
     ...window,
     targetRound: round,
   };
@@ -166,7 +165,6 @@ export async function announceNominationChange(
     kind === "gotm" ? GOTM_NOMINATION_CHANNEL_ID : NR_GOTM_NOMINATION_CHANNEL_ID;
 
   try {
-    // @ts-ignore
     const channel = await (interaction.client as any).channels.fetch(channelId);
     const textChannel: TextBasedChannel | null = channel?.isTextBased()
       ? (channel as TextBasedChannel)

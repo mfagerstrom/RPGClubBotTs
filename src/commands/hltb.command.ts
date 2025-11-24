@@ -31,7 +31,7 @@ export class hltb {
     try {
       const result = await searchHltb(title);
       await outputHltbResultsAsEmbed(interaction, result, title, { ephemeral });
-    } catch (error) {
+  } catch {
       await safeReply(interaction, {
         content: `Sorry, there was an error searching for "${title}". Please try again later.`,
         ephemeral,

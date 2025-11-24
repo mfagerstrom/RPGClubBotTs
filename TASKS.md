@@ -11,3 +11,4 @@
 - Prefer npm/Node commands over Python or other languages for scripting and tooling.
 - Check the TODO.md file for development goals.  Don't do these automatically but ask me if I would like you to tackle one of them when you set up a new task context.
 - Do not keep making this mistake: [ERROR] (node:30760) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+- Do not delete the build directory.

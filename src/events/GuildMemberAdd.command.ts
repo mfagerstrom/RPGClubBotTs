@@ -7,8 +7,9 @@ export class GuildMemberAdd {
   @On()
   async guildMemberAdd(
     [member]: ArgsOf<"guildMemberAdd">,
-    client: Client,
+    _client: Client,
   ): Promise<void> {
+    void _client;
 
     // auto-role assignment on member join
     const role: Role | undefined = member.guild.roles.cache.find(r=> r.name === "newcomers");

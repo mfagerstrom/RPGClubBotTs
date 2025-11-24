@@ -3,7 +3,7 @@ import { getOraclePool } from "../db/oracleClient.js";
 
 export type NominationKind = "gotm" | "nr-gotm";
 
-export interface NominationEntry {
+export interface INominationEntry {
   id: number;
   roundNumber: number;
   userId: string;
@@ -21,7 +21,7 @@ function mapRow(row: {
   USER_ID: string;
   GAME_TITLE: string;
   NOMINATED_AT: Date | string;
-}): NominationEntry {
+}): INominationEntry {
   const nominatedAt =
     row.NOMINATED_AT instanceof Date ? row.NOMINATED_AT : new Date(row.NOMINATED_AT);
 
@@ -38,7 +38,7 @@ export async function getNominationForUser(
   kind: NominationKind,
   roundNumber: number,
   userId: string,
-): Promise<NominationEntry | null> {
+): Promise<INominationEntry | null> {
   const pool = getOraclePool();
   const connection = await pool.getConnection();
 
@@ -74,7 +74,7 @@ export async function upsertNomination(
   roundNumber: number,
   userId: string,
   gameTitle: string,
-): Promise<NominationEntry> {
+): Promise<INominationEntry> {
   const pool = getOraclePool();
   const connection = await pool.getConnection();
 
@@ -141,7 +141,7 @@ export async function deleteNominationForUser(
 export async function listNominationsForRound(
   kind: NominationKind,
   roundNumber: number,
-): Promise<NominationEntry[]> {
+): Promise<INominationEntry[]> {
   const pool = getOraclePool();
   const connection = await pool.getConnection();
 

@@ -1,4 +1,3 @@
-import { Role } from "discord.js";
 import type { ArgsOf, Client } from "discordx";
 import { Discord, On } from "discordx";
 
@@ -6,9 +5,11 @@ import { Discord, On } from "discordx";
 export class GuildMemberRemove {
   @On()
   async guildMemberRemove(
-    [member]: ArgsOf<"guildMemberRemove">,
-    client: Client,
+    [_member]: ArgsOf<"guildMemberRemove">,
+    _client: Client,
   ): Promise<void> {
+    void _member;
+    void _client;
 
     // record member part date when member leaves
     // TODO: Connect to database

@@ -12,7 +12,8 @@ function normalizeOptions(options: any): any {
     return options;
   }
 
-  const { __forceFollowUp, ...restOptions } = options as any;
+  const { __forceFollowUp: _forceFollowUp, ...restOptions } = options as any;
+  void _forceFollowUp;
 
   if ("ephemeral" in options) {
     const { ephemeral, flags, ...rest } = restOptions as any;
@@ -98,8 +99,7 @@ export async function safeReply(interaction: AnyRepliable, options: any): Promis
       if (typeof options === "string") {
         await interaction.editReply({ content: options });
       } else {
-        const { ephemeral, ...rest } = normalizedOptions ?? {};
-        await interaction.editReply(rest as any);
+        await interaction.editReply(normalizedOptions as any);
       }
     } catch (err: any) {
       if (!isAckError(err)) throw err;

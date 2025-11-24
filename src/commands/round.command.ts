@@ -113,9 +113,9 @@ export class CurrentRoundCommand {
       }
 
       if (hasNrGotm) {
-        const nrGotmEntry = nrGotmEntries[0];
+        const nrIGotmEntry = nrGotmEntries[0];
         const nrAssets = await buildNrGotmEntryEmbed(
-          nrGotmEntry,
+          nrIGotmEntry,
           interaction.guildId ?? undefined,
           interaction.client as any,
         );

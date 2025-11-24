@@ -17,7 +17,10 @@ export class ThreadCreated {
     // New Threads in Now Playing forum channel get announced in the Whatcha Playing channel
     if (thread.parentId === NOW_PLAYING_FORUM_ID) {
       // Always wait 10 seconds before fetching the starter message
-      const sleep = (ms: number): Promise<void> => new Promise<void>((resolve): void => { setTimeout(resolve, ms); });
+      const sleep = (ms: number): Promise<void> =>
+        new Promise<void>((resolve): void => {
+          setTimeout(resolve, ms);
+        });
       await sleep(10_000);
       // Resolve thread author (prefer starter message author; fallback to thread.ownerId)
       let authorName: string = 'Unknown';
@@ -48,10 +51,20 @@ export class ThreadCreated {
           if (!imageUrl) {
             for (const emb of starter.embeds) {
               const anyEmb: any = emb as any;
-              const imgUrl: string | undefined = emb.image?.url || anyEmb?.image?.proxyURL || anyEmb?.image?.proxy_url;
-              const thumbUrl: string | undefined = emb.thumbnail?.url || anyEmb?.thumbnail?.proxyURL || anyEmb?.thumbnail?.proxy_url;
-              if (imgUrl) { imageUrl = imgUrl; break; }
-              if (thumbUrl) { imageUrl = thumbUrl; break; }
+              const imgUrl: string | undefined =
+                emb.image?.url || anyEmb?.image?.proxyURL || anyEmb?.image?.proxy_url;
+              const thumbUrl: string | undefined =
+                emb.thumbnail?.url ||
+                anyEmb?.thumbnail?.proxyURL ||
+                anyEmb?.thumbnail?.proxy_url;
+              if (imgUrl) {
+                imageUrl = imgUrl;
+                break;
+              }
+              if (thumbUrl) {
+                imageUrl = thumbUrl;
+                break;
+              }
             }
           }
         }
@@ -78,10 +91,20 @@ export class ThreadCreated {
               if (!imageUrl) {
                 for (const emb of again.embeds) {
                   const anyEmb: any = emb as any;
-                  const imgUrl: string | undefined = emb.image?.url || anyEmb?.image?.proxyURL || anyEmb?.image?.proxy_url;
-                  const thumbUrl: string | undefined = emb.thumbnail?.url || anyEmb?.thumbnail?.proxyURL || anyEmb?.thumbnail?.proxy_url;
-                  if (imgUrl) { imageUrl = imgUrl; break; }
-                  if (thumbUrl) { imageUrl = thumbUrl; break; }
+                  const imgUrl: string | undefined =
+                    emb.image?.url || anyEmb?.image?.proxyURL || anyEmb?.image?.proxy_url;
+                  const thumbUrl: string | undefined =
+                    emb.thumbnail?.url ||
+                    anyEmb?.thumbnail?.proxyURL ||
+                    anyEmb?.thumbnail?.proxy_url;
+                  if (imgUrl) {
+                    imageUrl = imgUrl;
+                    break;
+                  }
+                  if (thumbUrl) {
+                    imageUrl = thumbUrl;
+                    break;
+                  }
                 }
               }
             }
@@ -120,10 +143,6 @@ export class ThreadCreated {
       if (imageUrl) {
         nowPlayingEmbed.setImage(imageUrl);
       }
-
-      // Do not try to attach remote URLs as files — discord.js expects
-      // local paths/Buffers for attachments. Keep direct image URLs in the embed.
-      let files: undefined;
 
       // Add forum thread tag names as fields (if any)
       try {

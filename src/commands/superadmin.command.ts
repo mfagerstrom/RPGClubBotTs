@@ -7,12 +7,7 @@ import {
   EmbedBuilder,
   MessageFlags,
 } from "discord.js";
-import type {
-  ButtonInteraction,
-  CommandInteraction,
-  RepliableInteraction,
-  Message,
-} from "discord.js";
+import type { ButtonInteraction, CommandInteraction, Message } from "discord.js";
 import axios from "axios";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { searchHltb } from "../functions/SearchHltb.js";
@@ -25,8 +20,8 @@ import {
 import { AnyRepliable, safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
 import Gotm, {
-  type GotmEntry,
-  type GotmGame,
+  type IGotmEntry,
+  type IGotmGame,
   updateGotmGameFieldInDatabase,
   updateGotmGameImageInDatabase,
   type GotmEditableField,
@@ -35,8 +30,8 @@ import Gotm, {
   updateGotmVotingResultsInDatabase,
 } from "../classes/Gotm.js";
 import NrGotm, {
-  type NrGotmEntry,
-  type NrGotmGame,
+  type INrGotmEntry,
+  type INrGotmGame,
   updateNrGotmGameFieldInDatabase,
   updateNrGotmGameImageInDatabase,
   type NrGotmEditableField,
@@ -300,7 +295,10 @@ function isAuditFieldMissing(value: string | null | undefined): boolean {
   return !value && !isAuditNoValue(value);
 }
 
-function isAuditImageMissing(imageBlob: Buffer | null | undefined, imageMimeType: string | null | undefined): boolean {
+function isAuditImageMissing(
+  imageBlob: Buffer | null | undefined,
+  imageMimeType: string | null | undefined,
+): boolean {
   return !imageBlob && !isAuditNoValue(imageMimeType);
 }
 
@@ -381,13 +379,20 @@ function buildAuditPromptEmbed(info: {
     .setDescription(lines.join("\n"));
 }
 
-async function downloadImageBuffer(url: string): Promise<{ buffer: Buffer; mimeType: string | null }> {
+type ImageBufferResult = { buffer: Buffer; mimeType: string | null };
+
+async function downloadImageBuffer(url: string): Promise<ImageBufferResult> {
   const resp = await axios.get<ArrayBuffer>(url, { responseType: "arraybuffer" });
   const mime = resp.headers?.["content-type"] ?? null;
   return { buffer: Buffer.from(resp.data), mimeType: mime ? String(mime) : null };
 }
 
-async function resolveThreadImageBuffer(client: any, threadId: string): Promise<{ buffer: Buffer; mimeType: string | null; url: string } | null> {
+type ThreadImageResult = { buffer: Buffer; mimeType: string | null; url: string };
+
+async function resolveThreadImageBuffer(
+  client: any,
+  threadId: string,
+): Promise<ThreadImageResult | null> {
   try {
     const channel = await client.channels.fetch(threadId);
     const anyThread = channel as any;
@@ -431,7 +436,7 @@ async function resolveThreadImageBuffer(client: any, threadId: string): Promise<
   return null;
 }
 
-async function resolveHltbImageBuffer(gameTitle: string): Promise<{ buffer: Buffer; mimeType: string | null; url: string } | null> {
+async function resolveHltbImageBuffer(gameTitle: string): Promise<ThreadImageResult | null> {
   try {
     const result = await searchHltb(gameTitle);
     let url = result?.imageUrl;
@@ -1322,7 +1327,10 @@ export class SuperAdmin {
 
         if (stopped) break;
 
-        if (checks.image && isAuditImageMissing(game.imageBlob as any, (game as any).imageMimeType)) {
+        if (
+          checks.image &&
+          isAuditImageMissing(game.imageBlob as any, (game as any).imageMimeType)
+        ) {
           const resImg = await promptForAuditImage(interaction, {
             auditLabel: "GOTM",
             tokenPrefix: "gotm",
@@ -1388,8 +1396,18 @@ export class SuperAdmin {
     if (promptMessage) {
       const finalContent = stopped ? "Audit stopped." : "Audit completed.";
       try {
-        if ((interaction as any).editReply && promptMessage && promptMessage.id === (await interaction.fetchReply().catch(() => null))?.id) {
-          await (interaction as any).editReply({ content: finalContent, embeds: [], components: [] });
+        const fetchedReply = await interaction.fetchReply().catch(() => null);
+        const canEdit =
+          (interaction as any).editReply &&
+          promptMessage &&
+          promptMessage.id === fetchedReply?.id;
+
+        if (canEdit) {
+          await (interaction as any).editReply({
+            content: finalContent,
+            embeds: [],
+            components: [],
+          });
         } else {
           await promptMessage.edit({ content: finalContent, embeds: [], components: [] });
         }
@@ -1603,7 +1621,10 @@ export class SuperAdmin {
 
         if (stopped) break;
 
-        if (checks.image && isAuditImageMissing(game.imageBlob as any, (game as any).imageMimeType)) {
+        if (
+          checks.image &&
+          isAuditImageMissing(game.imageBlob as any, (game as any).imageMimeType)
+        ) {
           const resImg = await promptForAuditImage(interaction, {
             auditLabel: "NR-GOTM",
             tokenPrefix: "nr-gotm",
@@ -1676,8 +1697,18 @@ export class SuperAdmin {
     if (promptMessage) {
       const finalContent = stopped ? "Audit stopped." : "Audit completed.";
       try {
-        if ((interaction as any).editReply && promptMessage && promptMessage.id === (await interaction.fetchReply().catch(() => null))?.id) {
-          await (interaction as any).editReply({ content: finalContent, embeds: [], components: [] });
+        const fetchedReply = await interaction.fetchReply().catch(() => null);
+        const canEdit =
+          (interaction as any).editReply &&
+          promptMessage &&
+          promptMessage.id === fetchedReply?.id;
+
+        if (canEdit) {
+          await (interaction as any).editReply({
+            content: finalContent,
+            embeds: [],
+            components: [],
+          });
         } else {
           await promptMessage.edit({ content: finalContent, embeds: [], components: [] });
         }
@@ -1761,7 +1792,7 @@ export class SuperAdmin {
       return;
     }
 
-    let allEntries: GotmEntry[];
+    let allEntries: IGotmEntry[];
     try {
       allEntries = Gotm.all();
     } catch (err: any) {
@@ -1810,7 +1841,7 @@ export class SuperAdmin {
       return;
     }
 
-    const games: GotmGame[] = [];
+    const games: IGotmGame[] = [];
 
     for (let i = 0; i < gameCount; i++) {
       const n = i + 1;
@@ -1890,7 +1921,7 @@ export class SuperAdmin {
       return;
     }
 
-    let allEntries: NrGotmEntry[];
+    let allEntries: INrGotmEntry[];
     try {
       allEntries = NrGotm.all();
     } catch (err: any) {
@@ -1939,7 +1970,7 @@ export class SuperAdmin {
       return;
     }
 
-    const games: NrGotmGame[] = [];
+    const games: INrGotmGame[] = [];
 
     for (let i = 0; i < gameCount; i++) {
       const n = i + 1;
@@ -2037,7 +2068,7 @@ export class SuperAdmin {
       return;
     }
 
-    let entries: GotmEntry[];
+    let entries: IGotmEntry[];
     try {
       entries = Gotm.getByRound(roundNumber);
     } catch (err: any) {
@@ -2138,7 +2169,7 @@ export class SuperAdmin {
     try {
       await updateGotmGameFieldInDatabase(roundNumber, gameIndex, field!, newValue);
 
-      let updatedEntry: GotmEntry | null = null;
+      let updatedEntry: IGotmEntry | null = null;
       if (field === "title") {
         updatedEntry = Gotm.updateTitleByRound(roundNumber, newValue ?? "", gameIndex);
       } else if (field === "threadId") {
@@ -2193,7 +2224,7 @@ export class SuperAdmin {
       return;
     }
 
-    let entries: NrGotmEntry[];
+    let entries: INrGotmEntry[];
     try {
       entries = NrGotm.getByRound(roundNumber);
     } catch (err: any) {
@@ -2299,7 +2330,7 @@ export class SuperAdmin {
         value: newValue,
       });
 
-      let updatedEntry: NrGotmEntry | null = null;
+      let updatedEntry: INrGotmEntry | null = null;
       if (field === "title") {
         updatedEntry = NrGotm.updateTitleByRound(roundNumber, newValue ?? "", gameIndex);
       } else if (field === "threadId") {
@@ -2340,7 +2371,7 @@ export class SuperAdmin {
       return;
     }
 
-    let allEntries: GotmEntry[];
+    let allEntries: IGotmEntry[];
     try {
       allEntries = Gotm.all();
     } catch (err: any) {
@@ -2368,7 +2399,7 @@ export class SuperAdmin {
       return;
     }
 
-    const summary = formatGotmEntryForEdit(latestEntry);
+    const summary = formatIGotmEntryForEdit(latestEntry);
 
     await safeReply(interaction, {
       content: [
@@ -2438,7 +2469,7 @@ export class SuperAdmin {
       return;
     }
 
-    let allEntries: NrGotmEntry[];
+    let allEntries: INrGotmEntry[];
     try {
       allEntries = NrGotm.all();
     } catch (err: any) {
@@ -2466,7 +2497,7 @@ export class SuperAdmin {
       return;
     }
 
-    const summary = formatGotmEntryForEdit(latestEntry as any);
+    const summary = formatIGotmEntryForEdit(latestEntry as any);
 
     await safeReply(interaction, {
       content: [
@@ -2756,7 +2787,7 @@ async function promptUserForInput(
   }
 }
 
-function formatGotmEntryForEdit(entry: GotmEntry): string {
+function formatIGotmEntryForEdit(entry: IGotmEntry): string {
   const lines: string[] = [];
   lines.push(`Round ${entry.round} - ${entry.monthYear}`);
 

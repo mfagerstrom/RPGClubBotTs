@@ -7,11 +7,7 @@ import {
   MessageFlags,
   PermissionsBitField,
 } from "discord.js";
-import type {
-  ButtonInteraction,
-  CommandInteraction,
-  RepliableInteraction,
-} from "discord.js";
+import type { ButtonInteraction, CommandInteraction } from "discord.js";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { getPresenceHistory, setPresence } from "../functions/SetPresence.js";
 import { AnyRepliable, safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
@@ -213,12 +209,17 @@ export class Mod {
 
 export async function isModerator(interaction: AnyRepliable) {
   const anyInteraction = interaction as any;
-  // @ts-ignore
-  let isMod = await interaction.member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.ManageMessages);
+  const member: any = (interaction as any).member;
+  const canCheck =
+    member && typeof member.permissionsIn === "function" && interaction.channel;
+  let isMod = canCheck
+    ? member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.ManageMessages)
+    : false;
 
   if (!isMod) {
-    // @ts-ignore
-    const isAdmin = await interaction.member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.Administrator);
+    const isAdmin = canCheck
+      ? member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.Administrator)
+      : false;
 
     if (!isAdmin) {
       const denial = {

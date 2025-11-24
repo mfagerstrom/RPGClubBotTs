@@ -2,7 +2,7 @@ import type { CommandInteraction, Client, TextBasedChannel } from "discord.js";
 import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
 import { Discord, Slash, SlashChoice, SlashGroup, SlashOption } from "discordx";
 // Use relative import with .js for ts-node ESM compatibility
-import Gotm, { GotmEntry, GotmGame } from "../classes/Gotm.js";
+import Gotm, { IGotmEntry, IGotmGame } from "../classes/Gotm.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import {
   areNominationsClosed,
@@ -16,7 +16,7 @@ import {
 } from "../classes/Nomination.js";
 import { GOTM_NOMINATION_CHANNEL_ID } from "../config/nominationChannels.js";
 import { buildGotmHelpResponse } from "./help.command.js";
-import { buildGotmEntryEmbed, type EmbedWithAttachments } from "../functions/GotmEntryEmbeds.js";
+import { buildGotmEntryEmbed, type IEmbedWithAttachments } from "../functions/GotmEntryEmbeds.js";
 
 const ANNOUNCEMENTS_CHANNEL_ID: string | undefined = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 
@@ -112,7 +112,7 @@ export class GotmSearch {
     await safeDeferReply(interaction, { ephemeral });
 
     // Determine search mode
-    let results: GotmEntry[] = [];
+    let results: IGotmEntry[] = [];
     let criteriaLabel: string | undefined;
 
     try {
@@ -172,7 +172,7 @@ export class GotmSearch {
         }
       }
 
-      const sendGroup = async (group: EmbedWithAttachments[], first: boolean) => {
+      const sendGroup = async (group: IEmbedWithAttachments[], first: boolean) => {
         const embeds = group.map((g) => g.embed);
         const files = group.flatMap((g) => g.files ?? []);
         const payload: any = {
@@ -390,7 +390,9 @@ async function announceNomination(
   const channelId = GOTM_NOMINATION_CHANNEL_ID;
   try {
     const channel = await interaction.client.channels.fetch(channelId);
-    const textChannel: TextBasedChannel | null = channel?.isTextBased() ? (channel as TextBasedChannel) : null;
+    const textChannel: TextBasedChannel | null = channel?.isTextBased()
+      ? (channel as TextBasedChannel)
+      : null;
     if (!textChannel || !isSendableTextChannel(textChannel)) return;
     await textChannel.send({ content, embeds: [embed] });
   } catch (err) {
@@ -440,11 +442,11 @@ function parseMonthValue(input: string): number | string {
 }
 
 async function buildGotmEmbeds(
-  results: GotmEntry[],
+  results: IGotmEntry[],
   criteriaLabel: string | undefined,
   guildId: string | undefined,
   client: Client,
-): Promise<EmbedWithAttachments[]> {
+): Promise<IEmbedWithAttachments[]> {
   // If many results, fall back to compact, field-based embeds (no thumbnails)
   if (results.length > 12) {
     return buildCompactEmbeds(results, criteriaLabel, guildId).map((embed) => ({
@@ -453,7 +455,7 @@ async function buildGotmEmbeds(
     }));
   }
 
-  const assets: EmbedWithAttachments[] = [];
+  const assets: IEmbedWithAttachments[] = [];
   for (const entry of results) {
     const embedAssets = await buildGotmEntryEmbed(entry, guildId, client);
     assets.push(embedAssets);
@@ -463,7 +465,7 @@ async function buildGotmEmbeds(
 }
 
 function buildCompactEmbeds(
-  results: GotmEntry[],
+  results: IGotmEntry[],
   criteriaLabel: string | undefined,
   guildId?: string,
 ): EmbedBuilder[] {
@@ -489,8 +491,8 @@ function buildCompactEmbeds(
   return embeds;
 }
 
-function chunkAssets(list: EmbedWithAttachments[], size: number): EmbedWithAttachments[][] {
-  const out: EmbedWithAttachments[][] = [];
+function chunkAssets(list: IEmbedWithAttachments[], size: number): IEmbedWithAttachments[][] {
+  const out: IEmbedWithAttachments[][] = [];
   for (let i = 0; i < list.length; i += size) {
     out.push(list.slice(i, i + size));
   }
@@ -502,7 +504,8 @@ function displayAuditValue(value: string | null | undefined): string | null {
   return value ?? null;
 }
 
-function formatGames(games: GotmGame[], guildId?: string): string {
+function formatGames(games: IGotmGame[], _guildId?: string): string {
+  void _guildId;
   if (!games || games.length === 0) return "(no games listed)";
   const lines: string[] = [];
   for (const g of games) {
@@ -526,7 +529,7 @@ function truncateField(value: string): string {
   return value.slice(0, MAX - 3) + '...';
 }
 
-function buildResultsJumpLink(entry: GotmEntry, guildId?: string): string | undefined {
+function buildResultsJumpLink(entry: IGotmEntry, guildId?: string): string | undefined {
   if (!guildId || !ANNOUNCEMENTS_CHANNEL_ID) return undefined;
   const rawMsgId = (entry as any).votingResultsMessageId as string | undefined | null;
   const msgId = displayAuditValue(rawMsgId);
@@ -534,7 +537,7 @@ function buildResultsJumpLink(entry: GotmEntry, guildId?: string): string | unde
   return `https://discord.com/channels/${guildId}/${ANNOUNCEMENTS_CHANNEL_ID}/${msgId}`;
 }
 
-function formatGamesWithJump(entry: GotmEntry, guildId?: string): string {
+function formatGamesWithJump(entry: IGotmEntry, guildId?: string): string {
   const body = formatGames(entry.gameOfTheMonth, guildId);
   const link = buildResultsJumpLink(entry, guildId);
   if (!link) return truncateField(body);
