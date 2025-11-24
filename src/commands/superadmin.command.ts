@@ -39,6 +39,7 @@ import NrGotm, {
   deleteNrGotmRoundFromDatabase,
   updateNrGotmVotingResultsInDatabase,
 } from "../classes/NrGotm.js";
+import Member, { type IMemberRecord } from "../classes/Member.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
 import {
   buildNominationDeleteViewEmbed,
@@ -997,114 +998,24 @@ export class SuperAdmin {
         const memberFlag = hasRole(roleMap.member);
         const newcomerFlag = hasRole(roleMap.newcomer);
 
+        const baseRecord: IMemberRecord = {
+          userId: user.id,
+          isBot: user.bot ? 1 : 0,
+          username: user.username,
+          globalName: (user as any).globalName ?? null,
+          avatarBlob: null,
+          serverJoinedAt: member.joinedAt ?? null,
+          lastSeenAt: null,
+          roleAdmin: adminFlag,
+          roleModerator: moderatorFlag,
+          roleRegular: regularFlag,
+          roleMember: memberFlag,
+          roleNewcomer: newcomerFlag,
+        };
+
         const execUpsert = async (avatarData: Buffer | null) => {
-          // Try update first
-          const update = await connection.execute(
-            `UPDATE RPG_CLUB_USERS
-                SET IS_BOT = :isBot,
-                    USERNAME = :username,
-                    GLOBAL_NAME = :globalName,
-                    AVATAR_BLOB = :avatarBlob,
-                    SERVER_JOINED_AT = :joinedAt,
-                    LAST_SEEN_AT = :lastSeenAt,
-                    LAST_FETCHED_AT = SYSTIMESTAMP,
-                    ROLE_ADMIN = :roleAdmin,
-                    ROLE_MODERATOR = :roleModerator,
-                    ROLE_REGULAR = :roleRegular,
-                    ROLE_MEMBER = :roleMember,
-                    ROLE_NEWCOMER = :roleNewcomer,
-                    UPDATED_AT = SYSTIMESTAMP
-              WHERE USER_ID = :userId`,
-            {
-              userId: user.id,
-              isBot: user.bot ? 1 : 0,
-              username: user.username,
-              globalName: (user as any).globalName ?? null,
-              avatarBlob: avatarData,
-              joinedAt: member.joinedAt ?? null,
-              lastSeenAt: null,
-              roleAdmin: adminFlag,
-              roleModerator: moderatorFlag,
-              roleRegular: regularFlag,
-              roleMember: memberFlag,
-              roleNewcomer: newcomerFlag,
-            },
-            { autoCommit: true },
-          );
-
-          const updated = update.rowsAffected ?? 0;
-          if (updated > 0) return;
-
-          // Insert if no existing row
-          try {
-            await connection.execute(
-              `INSERT INTO RPG_CLUB_USERS (
-                 USER_ID, IS_BOT, USERNAME, GLOBAL_NAME, AVATAR_BLOB,
-                 SERVER_JOINED_AT, LAST_SEEN_AT, LAST_FETCHED_AT,
-                 ROLE_ADMIN, ROLE_MODERATOR, ROLE_REGULAR, ROLE_MEMBER, ROLE_NEWCOMER,
-                 CREATED_AT, UPDATED_AT
-               ) VALUES (
-                 :userId, :isBot, :username, :globalName, :avatarBlob,
-                 :joinedAt, :lastSeenAt, SYSTIMESTAMP,
-                 :roleAdmin, :roleModerator, :roleRegular, :roleMember, :roleNewcomer,
-                 SYSTIMESTAMP, SYSTIMESTAMP
-               )`,
-              {
-                userId: user.id,
-                isBot: user.bot ? 1 : 0,
-                username: user.username,
-                globalName: (user as any).globalName ?? null,
-                avatarBlob: avatarData,
-                joinedAt: member.joinedAt ?? null,
-                lastSeenAt: null,
-                roleAdmin: adminFlag,
-                roleModerator: moderatorFlag,
-                roleRegular: regularFlag,
-                roleMember: memberFlag,
-                roleNewcomer: newcomerFlag,
-              },
-              { autoCommit: true },
-            );
-          } catch (insErr: any) {
-            const code = insErr?.code ?? insErr?.errorNum;
-            if (code === "ORA-00001") {
-              // Row existed; fallback to update
-              await connection.execute(
-                `UPDATE RPG_CLUB_USERS
-                    SET IS_BOT = :isBot,
-                        USERNAME = :username,
-                        GLOBAL_NAME = :globalName,
-                        AVATAR_BLOB = :avatarBlob,
-                        SERVER_JOINED_AT = :joinedAt,
-                        LAST_SEEN_AT = :lastSeenAt,
-                        LAST_FETCHED_AT = SYSTIMESTAMP,
-                        ROLE_ADMIN = :roleAdmin,
-                        ROLE_MODERATOR = :roleModerator,
-                        ROLE_REGULAR = :roleRegular,
-                        ROLE_MEMBER = :roleMember,
-                        ROLE_NEWCOMER = :roleNewcomer,
-                        UPDATED_AT = SYSTIMESTAMP
-                  WHERE USER_ID = :userId`,
-                {
-                  userId: user.id,
-                  isBot: user.bot ? 1 : 0,
-                  username: user.username,
-                  globalName: (user as any).globalName ?? null,
-                  avatarBlob: avatarData,
-                  joinedAt: member.joinedAt ?? null,
-                  lastSeenAt: null,
-                  roleAdmin: hasRole(roleMap.admin),
-                  roleModerator: hasRole(roleMap.mod),
-                  roleRegular: hasRole(roleMap.regular),
-                  roleMember: hasRole(roleMap.member),
-                  roleNewcomer: hasRole(roleMap.newcomer),
-                },
-                { autoCommit: true },
-              );
-            } else {
-              throw insErr;
-            }
-          }
+          const record: IMemberRecord = { ...baseRecord, avatarBlob: avatarData };
+          await Member.upsert(record, { connection });
         };
 
         try {

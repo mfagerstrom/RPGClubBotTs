@@ -2,6 +2,7 @@ import axios from "axios";
 import { AttachmentBuilder, EmbedBuilder, type Client, type TextBasedChannel } from "discord.js";
 import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
+import Member, { type IMemberRecord } from "../classes/Member.js";
 
 const ROLE_IDS = {
   admin: process.env.ADMIN_ROLE_ID?.replace(/[<@&>]/g, "").trim() || null,
@@ -147,111 +148,24 @@ export async function memberScanTick(
       const memberFlag = hasRole(ROLE_IDS.member);
       const newcomerFlag = hasRole(ROLE_IDS.newcomer);
 
+      const baseRecord: IMemberRecord = {
+        userId: user.id,
+        isBot: user.bot ? 1 : 0,
+        username: user.username,
+        globalName: (user as any).globalName ?? null,
+        avatarBlob: null,
+        serverJoinedAt: member.joinedAt ?? null,
+        lastSeenAt: null,
+        roleAdmin: adminFlag,
+        roleModerator: moderatorFlag,
+        roleRegular: regularFlag,
+        roleMember: memberFlag,
+        roleNewcomer: newcomerFlag,
+      };
+
       const execUpsert = async (avatarData: Buffer | null) => {
-        const update = await connection.execute(
-          `UPDATE RPG_CLUB_USERS
-              SET IS_BOT = :isBot,
-                  USERNAME = :username,
-                  GLOBAL_NAME = :globalName,
-                  AVATAR_BLOB = :avatarBlob,
-                  SERVER_JOINED_AT = :joinedAt,
-                  LAST_SEEN_AT = :lastSeenAt,
-                  LAST_FETCHED_AT = SYSTIMESTAMP,
-                  ROLE_ADMIN = :roleAdmin,
-                  ROLE_MODERATOR = :roleModerator,
-                  ROLE_REGULAR = :roleRegular,
-                  ROLE_MEMBER = :roleMember,
-                  ROLE_NEWCOMER = :roleNewcomer,
-                  UPDATED_AT = SYSTIMESTAMP
-            WHERE USER_ID = :userId`,
-          {
-            userId: user.id,
-            isBot: user.bot ? 1 : 0,
-            username: user.username,
-            globalName: (user as any).globalName ?? null,
-            avatarBlob: avatarData,
-            joinedAt: member.joinedAt ?? null,
-            lastSeenAt: null,
-            roleAdmin: adminFlag,
-            roleModerator: moderatorFlag,
-            roleRegular: regularFlag,
-            roleMember: memberFlag,
-            roleNewcomer: newcomerFlag,
-          },
-          { autoCommit: true },
-        );
-
-        const updated = update.rowsAffected ?? 0;
-        if (updated > 0) return;
-
-        try {
-          await connection.execute(
-            `INSERT INTO RPG_CLUB_USERS (
-               USER_ID, IS_BOT, USERNAME, GLOBAL_NAME, AVATAR_BLOB,
-               SERVER_JOINED_AT, LAST_SEEN_AT, LAST_FETCHED_AT,
-               ROLE_ADMIN, ROLE_MODERATOR, ROLE_REGULAR, ROLE_MEMBER, ROLE_NEWCOMER,
-               CREATED_AT, UPDATED_AT
-             ) VALUES (
-               :userId, :isBot, :username, :globalName, :avatarBlob,
-               :joinedAt, :lastSeenAt, SYSTIMESTAMP,
-               :roleAdmin, :roleModerator, :roleRegular, :roleMember, :roleNewcomer,
-               SYSTIMESTAMP, SYSTIMESTAMP
-             )`,
-            {
-              userId: user.id,
-              isBot: user.bot ? 1 : 0,
-              username: user.username,
-              globalName: (user as any).globalName ?? null,
-              avatarBlob: avatarData,
-              joinedAt: member.joinedAt ?? null,
-              lastSeenAt: null,
-              roleAdmin: adminFlag,
-              roleModerator: moderatorFlag,
-              roleRegular: regularFlag,
-              roleMember: memberFlag,
-              roleNewcomer: newcomerFlag,
-            },
-            { autoCommit: true },
-          );
-        } catch (insErr: any) {
-          const code = insErr?.code ?? insErr?.errorNum;
-          if (code === "ORA-00001") {
-            await connection.execute(
-              `UPDATE RPG_CLUB_USERS
-                  SET IS_BOT = :isBot,
-                      USERNAME = :username,
-                      GLOBAL_NAME = :globalName,
-                      AVATAR_BLOB = :avatarBlob,
-                      SERVER_JOINED_AT = :joinedAt,
-                      LAST_SEEN_AT = :lastSeenAt,
-                      LAST_FETCHED_AT = SYSTIMESTAMP,
-                      ROLE_ADMIN = :roleAdmin,
-                      ROLE_MODERATOR = :roleModerator,
-                      ROLE_REGULAR = :roleRegular,
-                      ROLE_MEMBER = :roleMember,
-                      ROLE_NEWCOMER = :roleNewcomer,
-                      UPDATED_AT = SYSTIMESTAMP
-                WHERE USER_ID = :userId`,
-              {
-                userId: user.id,
-                isBot: user.bot ? 1 : 0,
-                username: user.username,
-                globalName: (user as any).globalName ?? null,
-                avatarBlob: avatarData,
-                joinedAt: member.joinedAt ?? null,
-                lastSeenAt: null,
-                roleAdmin: adminFlag,
-                roleModerator: moderatorFlag,
-                roleRegular: regularFlag,
-                roleMember: memberFlag,
-                roleNewcomer: newcomerFlag,
-              },
-              { autoCommit: true },
-            );
-          } else {
-            throw insErr;
-          }
-        }
+        const record: IMemberRecord = { ...baseRecord, avatarBlob: avatarData };
+        await Member.upsert(record, { connection });
       };
 
       try {
