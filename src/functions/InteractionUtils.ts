@@ -39,7 +39,7 @@ export async function safeDeferReply(
       (interaction as any).isChatInputCommand() &&
       ["admin", "mod", "superadmin"].includes((interaction as any).commandName)
     ) {
-      deferOptions = { ephemeral: true };
+      deferOptions = { flags: MessageFlags.Ephemeral };
     }
   } catch {
     // ignore detection issues
@@ -52,7 +52,8 @@ export async function safeDeferReply(
 
   try {
     if (typeof anyInteraction.deferReply === "function") {
-      await anyInteraction.deferReply(deferOptions);
+      const normalized = deferOptions ? normalizeOptions(deferOptions) : deferOptions;
+      await anyInteraction.deferReply(normalized as any);
       anyInteraction.__rpgAcked = true;
       anyInteraction.__rpgDeferred = true;
     }
