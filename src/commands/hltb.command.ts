@@ -100,7 +100,6 @@ async function outputHltbResultsAsEmbed(
       });
     }
 
-
     const hltbEmbed = new EmbedBuilder()
       .setColor(0x0099ff)
       .setTitle(`How Long to Beat ${hltb_result.name}`)

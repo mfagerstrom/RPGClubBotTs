@@ -26,7 +26,7 @@ export class ThreadCreated {
       let imageUrl: string | undefined;
 
       try {
-        let starter = await thread.fetchStarterMessage();
+        const starter = await thread.fetchStarterMessage();
         if (starter) {
           authorName = starter.member?.displayName ?? starter.author.username;
           authorIconUrl = starter.author.displayAvatarURL();

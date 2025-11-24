@@ -71,7 +71,7 @@ async function fetchPage(url: string) {
             headers: {
                 'User-Agent': new UserAgent().toString(),
                 'origin': 'https://howlongtobeat.com',
-                'referer': 'https://howlongtobeat.com'
+                'referer': 'https://howlongtobeat.com',
             },
         })
         .then(res => res.data)

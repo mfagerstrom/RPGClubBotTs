@@ -18,7 +18,7 @@ import {
   getPresenceHistory,
   setPresence,
   setPresenceFromInteraction,
-  type PresenceHistoryEntry,
+  type IPresenceHistoryEntry,
 } from "../functions/SetPresence.js";
 import { AnyRepliable, safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 import type { Message } from "discord.js";
@@ -223,7 +223,7 @@ export function buildAdminHelpResponse(
   };
 }
 
-function buildPresenceHistoryEmbed(entries: PresenceHistoryEntry[]): EmbedBuilder {
+function buildPresenceHistoryEmbed(entries: IPresenceHistoryEntry[]): EmbedBuilder {
   const descriptionLines: string[] = entries.map((entry, index) => {
     const timestamp =
       entry.setAt instanceof Date
@@ -319,7 +319,7 @@ export class Admin {
       type: ApplicationCommandOptionType.String,
     })
     text: string | undefined,
-    interaction: CommandInteraction
+    interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction);
 

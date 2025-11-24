@@ -46,8 +46,8 @@ const YEAR_CHOICES = (() => {
             const m = e.monthYear.match(/(\d{4})$/);
             return m ? Number(m[1]) : null;
           })
-          .filter((n): n is number => n !== null)
-      )
+          .filter((n): n is number => n !== null),
+      ),
     ).sort((a, b) => b - a);
     return years.map((y) => ({ name: y.toString(), value: y }));
   } catch {

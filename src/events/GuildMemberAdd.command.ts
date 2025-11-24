@@ -11,7 +11,7 @@ export class GuildMemberAdd {
   ): Promise<void> {
 
     // auto-role assignment on member join
-    let role: Role | undefined = member.guild.roles.cache.find(r=> r.name === "newcomers");
+    const role: Role | undefined = member.guild.roles.cache.find(r=> r.name === "newcomers");
     if (role) {
         member.roles.add(role);
     }

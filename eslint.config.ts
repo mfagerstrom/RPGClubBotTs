@@ -45,13 +45,6 @@ export default [
         },
       ],
 
-      // all functions should be typed
-      // formatting for asynchronous functions:
-      //   async function myAsyncFunction(): Promise<INSERT_RETURNTYPE_HERE> {}
-      // formatting for normal functions:
-      //   function myFunction(): INSERT_RETURNTYPE_HERE {}
-      '@typescript-eslint/explicit-function-return-type': 'error',
-
       // turn off default rule - allow arrays/objects to be initialized empty ([], {})
       '@typescript-eslint/no-empty-interface': 0,
 
@@ -67,16 +60,9 @@ export default [
         }
       }],
 
-      // turn off default rule - hides warnings for non-explicit variable typing
-      "@typescript-eslint/no-inferrable-types": 0,
-
-      // require variables to be typed
-      "@typescript-eslint/typedef": [
-        "error",
-        {
-          "variableDeclaration": true
-        }
-      ],
+      // do not require variables to be typed
+      "@typescript-eslint/typedef": 0,
+      "@typescript-eslint/no-explicit-any": 0,
 
       // enforce trailing commas in object an object and array literals, function parameters, 
       // and other syntactic structures -- when they are each on their own line

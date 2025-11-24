@@ -3,15 +3,15 @@ import type { AnyRepliable } from "./InteractionUtils.js";
 import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
 
-const PRESENCE_TABLE = "BOT_PRESENCE_HISTORY";
+const PRESENCE_TABLE: string = "BOT_PRESENCE_HISTORY";
 
 async function savePresenceToDatabase(
   interaction: AnyRepliable,
   activityName: string,
 ): Promise<void> {
   try {
-    const pool = getOraclePool();
-    const connection = await pool.getConnection();
+    const pool: oracledb.Pool = getOraclePool();
+    const connection: oracledb.Connection = await pool.getConnection();
 
     try {
       await connection.execute(
@@ -35,26 +35,27 @@ async function savePresenceToDatabase(
 
 async function readLatestPresenceFromDatabase(): Promise<string | null> {
   try {
-    const pool = getOraclePool();
-    const connection = await pool.getConnection();
+    const pool: oracledb.Pool = getOraclePool();
+    const connection: oracledb.Connection = await pool.getConnection();
 
     try {
-      const result = await connection.execute<{ ACTIVITY_NAME: string }>(
-        `SELECT ACTIVITY_NAME
-           FROM ${PRESENCE_TABLE}
-          ORDER BY SET_AT DESC
-          FETCH FIRST 1 ROW ONLY`,
-        [],
-        { outFormat: oracledb.OUT_FORMAT_OBJECT },
-      );
+      const result: oracledb.Result<{ ACTIVITY_NAME: string }> =
+        await connection.execute<{ ACTIVITY_NAME: string }>(
+          `SELECT ACTIVITY_NAME
+             FROM ${PRESENCE_TABLE}
+            ORDER BY SET_AT DESC
+            FETCH FIRST 1 ROW ONLY`,
+          [],
+          { outFormat: oracledb.OUT_FORMAT_OBJECT },
+        );
 
-      const rows = result.rows ?? [];
+      const rows: { ACTIVITY_NAME: string }[] = result.rows ?? [];
       if (!rows.length) {
         return null;
       }
 
-      const row = rows[0] as any;
-      const activityName = row.ACTIVITY_NAME;
+      const row: { ACTIVITY_NAME: string } = rows[0];
+      const activityName: string = row.ACTIVITY_NAME;
       if (typeof activityName === "string" && activityName.trim().length > 0) {
         return activityName;
       }
@@ -69,22 +70,27 @@ async function readLatestPresenceFromDatabase(): Promise<string | null> {
   }
 }
 
-export interface PresenceHistoryEntry {
+export interface IPresenceHistoryEntry {
   activityName: string;
   setAt: Date | null;
   setByUserId: string | null;
   setByUsername: string | null;
 }
 
-export async function getPresenceHistory(limit: number): Promise<PresenceHistoryEntry[]> {
-  const safeLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 50) : 5;
+export async function getPresenceHistory(limit: number): Promise<IPresenceHistoryEntry[]> {
+  const safeLimit: number = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 50) : 5;
 
   try {
-    const pool = getOraclePool();
-    const connection = await pool.getConnection();
+    const pool: oracledb.Pool = getOraclePool();
+    const connection: oracledb.Connection = await pool.getConnection();
 
     try {
-      const result = await connection.execute<{
+      const result: oracledb.Result<{
+        ACTIVITY_NAME: string;
+        SET_AT: Date;
+        SET_BY_USER_ID: string | null;
+        SET_BY_USERNAME: string | null;
+      }> = await connection.execute<{
         ACTIVITY_NAME: string;
         SET_AT: Date;
         SET_BY_USER_ID: string | null;
@@ -101,7 +107,12 @@ export async function getPresenceHistory(limit: number): Promise<PresenceHistory
         { outFormat: oracledb.OUT_FORMAT_OBJECT },
       );
 
-      const rows = (result.rows ?? []) as any[];
+      const rows: {
+        ACTIVITY_NAME: string;
+        SET_AT: Date;
+        SET_BY_USER_ID: string | null;
+        SET_BY_USERNAME: string | null;
+      }[] = result.rows ?? [];
       return rows.map((row) => ({
         activityName: row.ACTIVITY_NAME,
         setAt: row.SET_AT ?? null,
@@ -152,7 +163,7 @@ export async function setPresenceFromInteraction(
 }
 
 export async function updateBotPresence(bot: Client): Promise<void> {
-  const activityName = await readLatestPresenceFromDatabase();
+  const activityName: string | null = await readLatestPresenceFromDatabase();
   if (activityName) {
     bot.user!.setPresence({
       activities: [
@@ -178,7 +189,7 @@ export async function restorePresenceIfMissing(bot: Client): Promise<void> {
     return;
   }
 
-  const activityName = await readLatestPresenceFromDatabase();
+  const activityName: string | null = await readLatestPresenceFromDatabase();
   if (!activityName) {
     console.log("No presence data found in database to restore.");
     return;

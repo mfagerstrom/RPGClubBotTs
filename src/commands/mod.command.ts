@@ -105,7 +105,7 @@ export class Mod {
       type: ApplicationCommandOptionType.String,
     })
     text: string,
-    interaction: CommandInteraction
+    interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction);
 
@@ -114,10 +114,10 @@ export class Mod {
     if (okToUseCommand) {
       await setPresence(
         interaction,
-        text
+        text,
       );
       await safeReply(interaction, {
-        content: `I'm now playing: ${text}!`
+        content: `I'm now playing: ${text}!`,
       });
     }
   }

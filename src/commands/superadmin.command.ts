@@ -20,7 +20,7 @@ import {
   getPresenceHistory,
   setPresence,
   setPresenceFromInteraction,
-  type PresenceHistoryEntry,
+  type IPresenceHistoryEntry,
 } from "../functions/SetPresence.js";
 import { AnyRepliable, safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
@@ -2839,7 +2839,7 @@ export function buildSuperAdminHelpResponse(
   };
 }
 
-function buildPresenceHistoryEmbed(entries: PresenceHistoryEntry[]): EmbedBuilder {
+function buildPresenceHistoryEmbed(entries: IPresenceHistoryEntry[]): EmbedBuilder {
   const descriptionLines: string[] = entries.map((entry, index) => {
     const timestamp =
       entry.setAt instanceof Date
