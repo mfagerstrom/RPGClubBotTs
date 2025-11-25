@@ -32,6 +32,13 @@ export const SUPERADMIN_HELP_TOPICS = [
         parameters: "text (optional string) - new presence text; omit to see recent history and restore.",
     },
     {
+        id: "memberscan",
+        label: "/superadmin memberscan",
+        summary: "Scan guild members and upsert them into RPG_CLUB_USERS.",
+        syntax: "Syntax: /superadmin memberscan",
+        notes: "Runs in the current guild; requires appropriate environment role IDs for classification.",
+    },
+    {
         id: "add-gotm",
         label: "/superadmin add-gotm",
         summary: "Interactively add a new GOTM round.",

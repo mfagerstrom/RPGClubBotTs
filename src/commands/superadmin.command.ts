@@ -55,6 +55,7 @@ import { getOraclePool } from "../db/oracleClient.js";
 
 type SuperAdminHelpTopicId =
   | "presence"
+  | "memberscan"
   | "add-gotm"
   | "edit-gotm"
   | "delete-gotm"
@@ -85,6 +86,13 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
     summary: 'Set the bot\'s "Now Playing" text or browse/restore presence history.',
     syntax: "Syntax: /superadmin presence [text:<string>]",
     parameters: "text (optional string) - new presence text; omit to see recent history and restore.",
+  },
+  {
+    id: "memberscan",
+    label: "/superadmin memberscan",
+    summary: "Scan guild members and upsert them into RPG_CLUB_USERS.",
+    syntax: "Syntax: /superadmin memberscan",
+    notes: "Runs in the current guild; requires appropriate environment role IDs for classification.",
   },
   {
     id: "add-gotm",
