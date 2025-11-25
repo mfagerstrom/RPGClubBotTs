@@ -20,6 +20,7 @@ type HelpTopicId =
   | "hltb"
   | "coverart"
   | "remindme"
+  | "profile"
   | "admin"
   | "mod"
   | "superadmin";
@@ -117,6 +118,13 @@ const HELP_TOPICS: HelpTopic[] = [
       "Syntax: /remindme create when:<date/time> [note:<text>] | /remindme menu | /remindme snooze id:<int> until:<date/time> | /remindme delete id:<int>",
     notes:
       "Use natural inputs like 'in 45m' or absolute datetimes. Menu shows your reminders and ids.",
+  },
+  {
+    id: "profile",
+    label: "/profile",
+    summary: "Show a member profile from stored RPG_CLUB_USERS data (ephemeral by default).",
+    syntax: "Syntax: /profile [member:<user>] [showinchat:<boolean>]",
+    notes: "Omit member to view your own profile. Use showinchat:true to post publicly.",
   },
   {
     id: "admin",

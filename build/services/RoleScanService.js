@@ -87,6 +87,7 @@ export async function memberScanTick(client, opts) {
                         USERNAME: row.USERNAME ?? null,
                         GLOBAL_NAME: row.GLOBAL_NAME ?? null,
                         AVATAR_BLOB: row.AVATAR_BLOB ?? null,
+                        MESSAGE_COUNT: row.MESSAGE_COUNT ?? null,
                     };
                 }
             }
@@ -128,6 +129,7 @@ export async function memberScanTick(client, opts) {
                 roleRegular: regularFlag,
                 roleMember: memberFlag,
                 roleNewcomer: newcomerFlag,
+                messageCount: existingRow?.MESSAGE_COUNT ?? null,
             };
             const execUpsert = async (avatarData) => {
                 const record = { ...baseRecord, avatarBlob: avatarData };

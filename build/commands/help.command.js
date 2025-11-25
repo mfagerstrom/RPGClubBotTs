@@ -68,6 +68,13 @@ const HELP_TOPICS = [
         notes: "Use natural inputs like 'in 45m' or absolute datetimes. Menu shows your reminders and ids.",
     },
     {
+        id: "profile",
+        label: "/profile",
+        summary: "Show a member profile from stored RPG_CLUB_USERS data (ephemeral by default).",
+        syntax: "Syntax: /profile [member:<user>] [showinchat:<boolean>]",
+        notes: "Omit member to view your own profile. Use showinchat:true to post publicly.",
+    },
+    {
         id: "admin",
         label: "/admin",
         summary: "Admin-only commands for managing bot presence and GOTM/NR-GOTM data.",

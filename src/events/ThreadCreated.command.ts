@@ -1,6 +1,7 @@
 import { EmbedBuilder, ChannelType, type ForumChannel, type TextChannel } from "discord.js";
 import type { ArgsOf, Client } from "discordx";
 import { Discord, On } from "discordx";
+import { joinThreadIfTarget } from "../services/ForumThreadJoinService.js";
 
 const NOW_PLAYING_FORUM_ID: string = '1059875931356938240';
 const WHATCHA_PLAYING_CHANNEL_ID: string = '360819470836695042';
@@ -12,7 +13,7 @@ export class ThreadCreated {
     [thread]: ArgsOf<"threadCreate">,
     client: Client,
   ): Promise<void> {
-    console.log(thread);    
+    await joinThreadIfTarget(thread);
 
     // New Threads in Now Playing forum channel get announced in the Whatcha Playing channel
     if (thread.parentId === NOW_PLAYING_FORUM_ID) {
@@ -175,5 +176,7 @@ export class ThreadCreated {
         }
       }
     }
+
+    // Join Live Event forum threads as well
   }
 }

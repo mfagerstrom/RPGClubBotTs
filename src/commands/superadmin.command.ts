@@ -6,6 +6,9 @@ import {
   ButtonStyle,
   EmbedBuilder,
   MessageFlags,
+  ChannelType,
+  type TextBasedChannel,
+  type ThreadChannel,
 } from "discord.js";
 import type { ButtonInteraction, CommandInteraction, Message } from "discord.js";
 import axios from "axios";
@@ -66,7 +69,8 @@ type SuperAdminHelpTopicId =
   | "delete-nr-gotm-nomination"
   | "set-nextvote"
   | "gotm-data-audit"
-  | "nr-gotm-data-audit";
+  | "nr-gotm-data-audit"
+  | "message-count-backfill";
 
 type SuperAdminHelpTopic = {
   id: SuperAdminHelpTopicId;
@@ -182,6 +186,14 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
     notes:
       "By default all checks run. Provide specific flags to limit prompts. You can stop or skip prompts during the audit.",
   },
+  {
+    id: "message-count-backfill",
+    label: "/superadmin message-count-backfill",
+    summary: "Scan guild text channels and forums to backfill MESSAGE_COUNT totals.",
+    syntax: "Syntax: /superadmin message-count-backfill [maxperchannel:<int>]",
+    notes:
+      "Counts non-bot messages across text channels and forum threads. maxperchannel limits messages fetched per channel (default unlimited).",
+  },
 ];
 
 function buildSuperAdminHelpButtons(
@@ -239,6 +251,70 @@ function chunkArray<T>(items: T[], chunkSize: number): T[][] {
     chunks.push(items.slice(i, i + chunkSize));
   }
   return chunks;
+}
+
+const delay = (ms: number): Promise<void> =>
+  new Promise<void>((resolve): void => {
+    setTimeout(resolve, ms);
+  });
+
+function isTextBasedGuildChannel(channel: any): channel is TextBasedChannel {
+  return Boolean(channel && typeof channel.isTextBased === "function" && channel.isTextBased());
+}
+
+async function collectMessageCounts(
+  channel: any,
+  maxPerChannel: number | null,
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  let lastId: string | undefined;
+  let processed = 0;
+
+  while (true) {
+    const options: any = { limit: 100 };
+    if (lastId) options.before = lastId;
+
+    const batch: any = await (channel as any).messages?.fetch(options).catch(() => null);
+    if (!batch || batch.size === 0) break;
+
+    for (const msg of batch.values()) {
+      const authorId = msg.author?.id;
+      if (!authorId || msg.author.bot) continue;
+      counts.set(authorId, (counts.get(authorId) ?? 0) + 1);
+      processed++;
+      if (maxPerChannel && processed >= maxPerChannel) break;
+    }
+
+    if (maxPerChannel && processed >= maxPerChannel) break;
+
+    lastId = batch.last()?.id;
+    if (!lastId) break;
+    await delay(300);
+  }
+
+  return counts;
+}
+
+async function getAllTextChannelsWithThreads(guild: any): Promise<any[]> {
+  const results: any[] = [];
+  for (const channel of guild.channels.cache.values()) {
+    if (channel.type === ChannelType.GuildForum) {
+      try {
+        const active = await channel.threads.fetchActive();
+        active.threads.forEach((t: ThreadChannel) => results.push(t));
+        const archived = await channel.threads.fetchArchived();
+        archived.threads.forEach((t: ThreadChannel) => results.push(t));
+      } catch (err) {
+        console.error("Failed to fetch threads for forum", channel.id, err);
+      }
+      continue;
+    }
+
+    if (isTextBasedGuildChannel(channel)) {
+      results.push(channel);
+    }
+  }
+  return results;
 }
 
 async function showSuperAdminPresenceHistory(interaction: CommandInteraction): Promise<void> {
@@ -1019,6 +1095,7 @@ export class SuperAdmin {
           roleRegular: regularFlag,
           roleMember: memberFlag,
           roleNewcomer: newcomerFlag,
+          messageCount: null,
         };
 
         const execUpsert = async (avatarData: Buffer | null) => {
@@ -2636,6 +2713,79 @@ export class SuperAdmin {
         ephemeral: true,
       });
     }
+  }
+
+  @Slash({
+    description: "Scan guild history to backfill MESSAGE_COUNT totals",
+    name: "message-count-backfill",
+  })
+  async messageCountBackfill(
+    @SlashOption({
+      description: "Maximum messages to fetch per channel (optional cap)",
+      name: "maxperchannel",
+      required: false,
+      type: ApplicationCommandOptionType.Integer,
+    })
+    maxPerChannelOpt: number | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction, { ephemeral: true });
+
+    const okToUseCommand: boolean = await isSuperAdmin(interaction);
+    if (!okToUseCommand) return;
+
+    const maxPerChannel =
+      typeof maxPerChannelOpt === "number" && Number.isFinite(maxPerChannelOpt)
+        ? Math.max(0, Math.trunc(maxPerChannelOpt))
+        : null;
+
+    const guild = interaction.guild;
+    if (!guild) {
+      await safeReply(interaction, {
+        content: "This command must be run in a guild.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const channels = await getAllTextChannelsWithThreads(guild);
+    const counts = new Map<string, number>();
+
+    for (const channel of channels) {
+      try {
+        const label =
+          (channel as any).name ??
+          (channel as any).id ??
+          "unknown";
+        await safeReply(interaction, {
+          content: `Scanning ${label}... (${counts.size} users tallied so far)`,
+          ephemeral: true,
+        });
+      } catch {
+        // ignore progress update errors
+      }
+      const channelCounts = await collectMessageCounts(channel, maxPerChannel);
+      for (const [userId, count] of channelCounts) {
+        counts.set(userId, (counts.get(userId) ?? 0) + count);
+      }
+    }
+
+    let updated = 0;
+    for (const [userId, total] of counts.entries()) {
+      await Member.setMessageCount(userId, total);
+      updated++;
+    }
+
+    await safeReply(interaction, {
+      content:
+        `Backfill complete.\n` +
+        `Channels scanned: ${channels.length}\n` +
+        `Users updated: ${updated}\n` +
+        `Message counts populated from historical messages${
+          maxPerChannel ? ` (capped at ${maxPerChannel} per channel)` : ""
+        }.`,
+      ephemeral: true,
+    });
   }
 }
 

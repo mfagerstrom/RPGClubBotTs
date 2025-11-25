@@ -7,7 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ActionRowBuilder, ApplicationCommandOptionType, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, } from "discord.js";
+import { ActionRowBuilder, ApplicationCommandOptionType, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ChannelType, } from "discord.js";
 import axios from "axios";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { searchHltb } from "../functions/SearchHltb.js";
@@ -115,6 +115,13 @@ export const SUPERADMIN_HELP_TOPICS = [
         syntax: "Syntax: /superadmin nr-gotm-data-audit [threadid:<boolean>] [redditurl:<boolean>] [votingresults:<boolean>]",
         notes: "By default all checks run. Provide specific flags to limit prompts. You can stop or skip prompts during the audit.",
     },
+    {
+        id: "message-count-backfill",
+        label: "/superadmin message-count-backfill",
+        summary: "Scan guild text channels and forums to backfill MESSAGE_COUNT totals.",
+        syntax: "Syntax: /superadmin message-count-backfill [maxperchannel:<int>]",
+        notes: "Counts non-bot messages across text channels and forum threads. maxperchannel limits messages fetched per channel (default unlimited).",
+    },
 ];
 function buildSuperAdminHelpButtons(activeId) {
     const rows = [];
@@ -153,6 +160,62 @@ function chunkArray(items, chunkSize) {
         chunks.push(items.slice(i, i + chunkSize));
     }
     return chunks;
+}
+const delay = (ms) => new Promise((resolve) => {
+    setTimeout(resolve, ms);
+});
+function isTextBasedGuildChannel(channel) {
+    return Boolean(channel && typeof channel.isTextBased === "function" && channel.isTextBased());
+}
+async function collectMessageCounts(channel, maxPerChannel) {
+    const counts = new Map();
+    let lastId;
+    let processed = 0;
+    while (true) {
+        const options = { limit: 100 };
+        if (lastId)
+            options.before = lastId;
+        const batch = await channel.messages?.fetch(options).catch(() => null);
+        if (!batch || batch.size === 0)
+            break;
+        for (const msg of batch.values()) {
+            const authorId = msg.author?.id;
+            if (!authorId || msg.author.bot)
+                continue;
+            counts.set(authorId, (counts.get(authorId) ?? 0) + 1);
+            processed++;
+            if (maxPerChannel && processed >= maxPerChannel)
+                break;
+        }
+        if (maxPerChannel && processed >= maxPerChannel)
+            break;
+        lastId = batch.last()?.id;
+        if (!lastId)
+            break;
+        await delay(300);
+    }
+    return counts;
+}
+async function getAllTextChannelsWithThreads(guild) {
+    const results = [];
+    for (const channel of guild.channels.cache.values()) {
+        if (channel.type === ChannelType.GuildForum) {
+            try {
+                const active = await channel.threads.fetchActive();
+                active.threads.forEach((t) => results.push(t));
+                const archived = await channel.threads.fetchArchived();
+                archived.threads.forEach((t) => results.push(t));
+            }
+            catch (err) {
+                console.error("Failed to fetch threads for forum", channel.id, err);
+            }
+            continue;
+        }
+        if (isTextBasedGuildChannel(channel)) {
+            results.push(channel);
+        }
+    }
+    return results;
 }
 async function showSuperAdminPresenceHistory(interaction) {
     const limit = 5;
@@ -794,6 +857,7 @@ let SuperAdmin = class SuperAdmin {
                     roleRegular: regularFlag,
                     roleMember: memberFlag,
                     roleNewcomer: newcomerFlag,
+                    messageCount: null,
                 };
                 const execUpsert = async (avatarData) => {
                     const record = { ...baseRecord, avatarBlob: avatarData };
@@ -2024,6 +2088,55 @@ let SuperAdmin = class SuperAdmin {
             });
         }
     }
+    async messageCountBackfill(maxPerChannelOpt, interaction) {
+        await safeDeferReply(interaction, { ephemeral: true });
+        const okToUseCommand = await isSuperAdmin(interaction);
+        if (!okToUseCommand)
+            return;
+        const maxPerChannel = typeof maxPerChannelOpt === "number" && Number.isFinite(maxPerChannelOpt)
+            ? Math.max(0, Math.trunc(maxPerChannelOpt))
+            : null;
+        const guild = interaction.guild;
+        if (!guild) {
+            await safeReply(interaction, {
+                content: "This command must be run in a guild.",
+                ephemeral: true,
+            });
+            return;
+        }
+        const channels = await getAllTextChannelsWithThreads(guild);
+        const counts = new Map();
+        for (const channel of channels) {
+            try {
+                const label = channel.name ??
+                    channel.id ??
+                    "unknown";
+                await safeReply(interaction, {
+                    content: `Scanning ${label}... (${counts.size} users tallied so far)`,
+                    ephemeral: true,
+                });
+            }
+            catch {
+                // ignore progress update errors
+            }
+            const channelCounts = await collectMessageCounts(channel, maxPerChannel);
+            for (const [userId, count] of channelCounts) {
+                counts.set(userId, (counts.get(userId) ?? 0) + count);
+            }
+        }
+        let updated = 0;
+        for (const [userId, total] of counts.entries()) {
+            await Member.setMessageCount(userId, total);
+            updated++;
+        }
+        await safeReply(interaction, {
+            content: `Backfill complete.\n` +
+                `Channels scanned: ${channels.length}\n` +
+                `Users updated: ${updated}\n` +
+                `Message counts populated from historical messages${maxPerChannel ? ` (capped at ${maxPerChannel} per channel)` : ""}.`,
+            ephemeral: true,
+        });
+    }
 };
 __decorate([
     Slash({ description: "Set Presence", name: "presence" }),
@@ -2220,6 +2333,18 @@ __decorate([
         type: ApplicationCommandOptionType.String,
     }))
 ], SuperAdmin.prototype, "deleteNrGotmNomination", null);
+__decorate([
+    Slash({
+        description: "Scan guild history to backfill MESSAGE_COUNT totals",
+        name: "message-count-backfill",
+    }),
+    __param(0, SlashOption({
+        description: "Maximum messages to fetch per channel (optional cap)",
+        name: "maxperchannel",
+        required: false,
+        type: ApplicationCommandOptionType.Integer,
+    }))
+], SuperAdmin.prototype, "messageCountBackfill", null);
 SuperAdmin = __decorate([
     Discord(),
     SlashGroup({ description: "Server Owner Commands", name: "superadmin" }),

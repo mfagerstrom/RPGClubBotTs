@@ -94,6 +94,7 @@ export async function memberScanTick(
             USERNAME: string | null;
             GLOBAL_NAME: string | null;
             AVATAR_BLOB: Buffer | null;
+            MESSAGE_COUNT: number | null;
           }
         | null = null;
       try {
@@ -101,6 +102,7 @@ export async function memberScanTick(
           USERNAME: string | null;
           GLOBAL_NAME: string | null;
           AVATAR_BLOB: Buffer | null;
+          MESSAGE_COUNT: number | null;
         }>(
           `SELECT USERNAME, GLOBAL_NAME, AVATAR_BLOB
              FROM RPG_CLUB_USERS
@@ -119,6 +121,7 @@ export async function memberScanTick(
             USERNAME: row.USERNAME ?? null,
             GLOBAL_NAME: row.GLOBAL_NAME ?? null,
             AVATAR_BLOB: row.AVATAR_BLOB ?? null,
+            MESSAGE_COUNT: row.MESSAGE_COUNT ?? null,
           };
         }
       } catch (err) {
@@ -161,6 +164,7 @@ export async function memberScanTick(
         roleRegular: regularFlag,
         roleMember: memberFlag,
         roleNewcomer: newcomerFlag,
+        messageCount: existingRow?.MESSAGE_COUNT ?? null,
       };
 
       const execUpsert = async (avatarData: Buffer | null) => {

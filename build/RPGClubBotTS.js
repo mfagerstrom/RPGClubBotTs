@@ -9,6 +9,8 @@ import { loadNrGotmFromDb } from "./classes/NrGotm.js";
 import { installConsoleLogging, setConsoleLoggingClient, } from "./utilities/DiscordConsoleLogger.js";
 import { startNominationReminderService } from "./services/NominationReminderService.js";
 import { startReminderService } from "./services/ReminderService.js";
+import Member from "./classes/Member.js";
+import { joinAllTargetForumThreads } from "./services/ForumThreadJoinService.js";
 dotenv.config();
 installConsoleLogging();
 const PRESENCE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
@@ -69,6 +71,7 @@ bot.once("clientReady", async () => {
     //  );
     startNominationReminderService(bot);
     startReminderService(bot);
+    await joinAllTargetForumThreads(bot);
     console.log("Startup sequence completed.");
 });
 bot.on("interactionCreate", async (interaction) => {
@@ -77,6 +80,9 @@ bot.on("interactionCreate", async (interaction) => {
         const channel = interaction.channel;
         const channelName = getChannelName(channel);
         console.log(`[SlashCommand] /${interaction.commandName} by ${userTag} in ${channelName}`);
+        if (interaction.user?.id) {
+            void Member.touchLastSeen(interaction.user.id);
+        }
     }
     await bot.executeInteraction(interaction);
 });
@@ -90,6 +96,9 @@ bot.on("messageCreate", async (message) => {
         const channel = message.channel;
         const channelName = getChannelName(channel);
         console.log(`[MessageCommand] ${prefix}${commandName} by ${userTag} in ${channelName} args=${args.join(" ")}`);
+    }
+    if (message.author?.id && !message.author.bot) {
+        void Member.recordMessageActivity(message.author.id);
     }
     await bot.executeCommand(message);
 });

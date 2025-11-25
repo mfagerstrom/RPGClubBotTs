@@ -6,11 +6,12 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 };
 import { EmbedBuilder, ChannelType } from "discord.js";
 import { Discord, On } from "discordx";
+import { joinThreadIfTarget } from "../services/ForumThreadJoinService.js";
 const NOW_PLAYING_FORUM_ID = '1059875931356938240';
 const WHATCHA_PLAYING_CHANNEL_ID = '360819470836695042';
 let ThreadCreated = class ThreadCreated {
     async threadCreate([thread], client) {
-        console.log(thread);
+        await joinThreadIfTarget(thread);
         // New Threads in Now Playing forum channel get announced in the Whatcha Playing channel
         if (thread.parentId === NOW_PLAYING_FORUM_ID) {
             // Always wait 10 seconds before fetching the starter message
@@ -160,6 +161,7 @@ let ThreadCreated = class ThreadCreated {
                 }
             }
         }
+        // Join Live Event forum threads as well
     }
 };
 __decorate([
