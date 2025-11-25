@@ -71,6 +71,11 @@ bot.once("clientReady", async () => {
   // Set presence state from stored value
   await updateBotPresence(bot);
 
+  // Periodically refresh presence from the database to stay in sync
+  setInterval(() => {
+    void updateBotPresence(bot);
+  }, PRESENCE_CHECK_INTERVAL_MS);
+
   // Periodically ensure presence is restored if Discord drops it
   setInterval(() => {
     void restorePresenceIfMissing(bot);
