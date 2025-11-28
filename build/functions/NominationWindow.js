@@ -19,7 +19,7 @@ export async function getUpcomingNominationWindow() {
         throw new Error("No current round found. Set next vote date first.");
     }
     const nextVoteAt = normalizeDate(currentRound.nextVoteAt);
-    const closesAt = DateTime.fromJSDate(nextVoteAt).minus({ days: 1 }).toJSDate();
+    const closesAt = DateTime.fromJSDate(nextVoteAt).toJSDate();
     return {
         targetRound: currentRound.roundNumber + 1,
         nextVoteAt,

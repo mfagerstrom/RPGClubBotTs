@@ -55,6 +55,7 @@ import {
   listNominationsForRound,
 } from "../classes/Nomination.js";
 import { getOraclePool } from "../db/oracleClient.js";
+import UserChannelMessageCount from "../classes/UserChannelMessageCount.js";
 
 type SuperAdminHelpTopicId =
   | "presence"
@@ -190,9 +191,10 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
     id: "message-count-backfill",
     label: "/superadmin message-count-backfill",
     summary: "Scan guild text channels and forums to backfill MESSAGE_COUNT totals.",
-    syntax: "Syntax: /superadmin message-count-backfill [maxperchannel:<int>]",
+    syntax:
+      "Syntax: /superadmin message-count-backfill [channelname:<string>] [maxperchannel:<int>] [force:<boolean>]",
     notes:
-      "Counts non-bot messages across text channels and forum threads. maxperchannel limits messages fetched per channel (default unlimited).",
+      "Counts non-bot messages across text channels and forum threads. maxperchannel limits messages fetched per channel (default unlimited). channelname restricts the scan to a specific channel/thread by name or id. force:true rescans channels even if already scanned.",
   },
 ];
 
@@ -265,10 +267,13 @@ function isTextBasedGuildChannel(channel: any): channel is TextBasedChannel {
 async function collectMessageCounts(
   channel: any,
   maxPerChannel: number | null,
+  onProgress?: () => void,
+  since?: Date | null,
 ): Promise<Map<string, number>> {
   const counts = new Map<string, number>();
   let lastId: string | undefined;
   let processed = 0;
+  let lastProgress = Date.now();
 
   while (true) {
     const options: any = { limit: 100 };
@@ -280,6 +285,10 @@ async function collectMessageCounts(
     for (const msg of batch.values()) {
       const authorId = msg.author?.id;
       if (!authorId || msg.author.bot) continue;
+      if (since && msg.createdAt && msg.createdAt < since) {
+        lastId = undefined;
+        break;
+      }
       counts.set(authorId, (counts.get(authorId) ?? 0) + 1);
       processed++;
       if (maxPerChannel && processed >= maxPerChannel) break;
@@ -290,6 +299,14 @@ async function collectMessageCounts(
     lastId = batch.last()?.id;
     if (!lastId) break;
     await delay(300);
+
+    if (onProgress) {
+      const now = Date.now();
+      if (now - lastProgress >= 15_000) {
+        onProgress();
+        lastProgress = now;
+      }
+    }
   }
 
   return counts;
@@ -2721,6 +2738,13 @@ export class SuperAdmin {
   })
   async messageCountBackfill(
     @SlashOption({
+      description: "Restrict scan to a single channel/thread by name or id",
+    name: "channelname",
+    required: false,
+    type: ApplicationCommandOptionType.String,
+  })
+    channelNameFilter: string | undefined,
+    @SlashOption({
       description: "Maximum messages to fetch per channel (optional cap)",
       name: "maxperchannel",
       required: false,
@@ -2749,25 +2773,71 @@ export class SuperAdmin {
     }
 
     const channels = await getAllTextChannelsWithThreads(guild);
+    const scanMeta = await UserChannelMessageCount.getChannelScanMeta();
+
+    const filteredChannels = channels.filter((ch: any) => {
+      const id = (ch as any).id ?? "";
+      const name = ((ch as any).name ?? "").toLowerCase();
+      const filter = (channelNameFilter ?? "").toLowerCase().trim();
+
+      const matchesFilter =
+        !filter || name === filter || id === filter || name.includes(filter);
+      return matchesFilter;
+    });
+
+    if (!filteredChannels.length) {
+      await safeReply(interaction, {
+        content:
+          "No channels matched the filter or all have already been scanned. Use force:true to rescan.",
+        ephemeral: true,
+      });
+      return;
+    }
     const counts = new Map<string, number>();
 
-    for (const channel of channels) {
+    const replyUpdater = async (text: string) => {
       try {
-        const label =
-          (channel as any).name ??
-          (channel as any).id ??
-          "unknown";
-        await safeReply(interaction, {
-          content: `Scanning ${label}... (${counts.size} users tallied so far)`,
-          ephemeral: true,
-        });
+        await safeReply(interaction, { content: text, ephemeral: true });
       } catch {
-        // ignore progress update errors
+        // ignore
       }
-      const channelCounts = await collectMessageCounts(channel, maxPerChannel);
+    };
+
+    const startTime = Date.now();
+    let lastLog = startTime;
+    let channelsProcessed = 0;
+    const logStatus = (label: string) => {
+      const now = Date.now();
+      if (now - lastLog < 15_000) return;
+      console.log(
+        `[MessageCountBackfill] Scanning ${label} (channels processed: ${channelsProcessed}/${channels.length}, users tallied: ${counts.size}, elapsed: ${Math.round((now - startTime) / 1000)}s)`,
+      );
+      lastLog = now;
+    };
+
+    for (const channel of filteredChannels) {
+      const label = (channel as any).name ?? (channel as any).id ?? "unknown";
+      await replyUpdater(`Scanning ${label}... (${counts.size} users tallied so far)`);
+
+      logStatus(label);
+
+      const lastScan = scanMeta.get((channel as any).id ?? "") ?? null;
+
+      const channelCounts = await collectMessageCounts(
+        channel,
+        maxPerChannel,
+        () => logStatus(label),
+        lastScan,
+      );
       for (const [userId, count] of channelCounts) {
         counts.set(userId, (counts.get(userId) ?? 0) + count);
       }
+      await UserChannelMessageCount.upsertChannelCounts(
+        (channel as any).id ?? "",
+        channelCounts,
+        new Date(),
+      );
+      channelsProcessed++;
     }
 
     let updated = 0;
@@ -2779,7 +2849,7 @@ export class SuperAdmin {
     await safeReply(interaction, {
       content:
         `Backfill complete.\n` +
-        `Channels scanned: ${channels.length}\n` +
+        `Channels scanned: ${filteredChannels.length}\n` +
         `Users updated: ${updated}\n` +
         `Message counts populated from historical messages${
           maxPerChannel ? ` (capped at ${maxPerChannel} per channel)` : ""

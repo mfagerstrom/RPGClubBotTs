@@ -22,6 +22,7 @@ import { buildNominationDeleteViewEmbed, announceNominationChange, } from "../fu
 import { getUpcomingNominationWindow } from "../functions/NominationWindow.js";
 import { deleteNominationForUser, getNominationForUser, listNominationsForRound, } from "../classes/Nomination.js";
 import { getOraclePool } from "../db/oracleClient.js";
+import UserChannelMessageCount from "../classes/UserChannelMessageCount.js";
 const SUPERADMIN_PRESENCE_CHOICES = new Map();
 export const SUPERADMIN_HELP_TOPICS = [
     {
@@ -119,8 +120,8 @@ export const SUPERADMIN_HELP_TOPICS = [
         id: "message-count-backfill",
         label: "/superadmin message-count-backfill",
         summary: "Scan guild text channels and forums to backfill MESSAGE_COUNT totals.",
-        syntax: "Syntax: /superadmin message-count-backfill [maxperchannel:<int>]",
-        notes: "Counts non-bot messages across text channels and forum threads. maxperchannel limits messages fetched per channel (default unlimited).",
+        syntax: "Syntax: /superadmin message-count-backfill [channelname:<string>] [maxperchannel:<int>] [force:<boolean>]",
+        notes: "Counts non-bot messages across text channels and forum threads. maxperchannel limits messages fetched per channel (default unlimited). channelname restricts the scan to a specific channel/thread by name or id. force:true rescans channels even if already scanned.",
     },
 ];
 function buildSuperAdminHelpButtons(activeId) {
@@ -167,10 +168,11 @@ const delay = (ms) => new Promise((resolve) => {
 function isTextBasedGuildChannel(channel) {
     return Boolean(channel && typeof channel.isTextBased === "function" && channel.isTextBased());
 }
-async function collectMessageCounts(channel, maxPerChannel) {
+async function collectMessageCounts(channel, maxPerChannel, onProgress, since) {
     const counts = new Map();
     let lastId;
     let processed = 0;
+    let lastProgress = Date.now();
     while (true) {
         const options = { limit: 100 };
         if (lastId)
@@ -182,6 +184,10 @@ async function collectMessageCounts(channel, maxPerChannel) {
             const authorId = msg.author?.id;
             if (!authorId || msg.author.bot)
                 continue;
+            if (since && msg.createdAt && msg.createdAt < since) {
+                lastId = undefined;
+                break;
+            }
             counts.set(authorId, (counts.get(authorId) ?? 0) + 1);
             processed++;
             if (maxPerChannel && processed >= maxPerChannel)
@@ -193,6 +199,13 @@ async function collectMessageCounts(channel, maxPerChannel) {
         if (!lastId)
             break;
         await delay(300);
+        if (onProgress) {
+            const now = Date.now();
+            if (now - lastProgress >= 15_000) {
+                onProgress();
+                lastProgress = now;
+            }
+        }
     }
     return counts;
 }
@@ -2088,7 +2101,7 @@ let SuperAdmin = class SuperAdmin {
             });
         }
     }
-    async messageCountBackfill(maxPerChannelOpt, interaction) {
+    async messageCountBackfill(channelNameFilter, maxPerChannelOpt, interaction) {
         await safeDeferReply(interaction, { ephemeral: true });
         const okToUseCommand = await isSuperAdmin(interaction);
         if (!okToUseCommand)
@@ -2105,24 +2118,51 @@ let SuperAdmin = class SuperAdmin {
             return;
         }
         const channels = await getAllTextChannelsWithThreads(guild);
+        const scanMeta = await UserChannelMessageCount.getChannelScanMeta();
+        const filteredChannels = channels.filter((ch) => {
+            const id = ch.id ?? "";
+            const name = (ch.name ?? "").toLowerCase();
+            const filter = (channelNameFilter ?? "").toLowerCase().trim();
+            const matchesFilter = !filter || name === filter || id === filter || name.includes(filter);
+            return matchesFilter;
+        });
+        if (!filteredChannels.length) {
+            await safeReply(interaction, {
+                content: "No channels matched the filter or all have already been scanned. Use force:true to rescan.",
+                ephemeral: true,
+            });
+            return;
+        }
         const counts = new Map();
-        for (const channel of channels) {
+        const replyUpdater = async (text) => {
             try {
-                const label = channel.name ??
-                    channel.id ??
-                    "unknown";
-                await safeReply(interaction, {
-                    content: `Scanning ${label}... (${counts.size} users tallied so far)`,
-                    ephemeral: true,
-                });
+                await safeReply(interaction, { content: text, ephemeral: true });
             }
             catch {
-                // ignore progress update errors
+                // ignore
             }
-            const channelCounts = await collectMessageCounts(channel, maxPerChannel);
+        };
+        const startTime = Date.now();
+        let lastLog = startTime;
+        let channelsProcessed = 0;
+        const logStatus = (label) => {
+            const now = Date.now();
+            if (now - lastLog < 15_000)
+                return;
+            console.log(`[MessageCountBackfill] Scanning ${label} (channels processed: ${channelsProcessed}/${channels.length}, users tallied: ${counts.size}, elapsed: ${Math.round((now - startTime) / 1000)}s)`);
+            lastLog = now;
+        };
+        for (const channel of filteredChannels) {
+            const label = channel.name ?? channel.id ?? "unknown";
+            await replyUpdater(`Scanning ${label}... (${counts.size} users tallied so far)`);
+            logStatus(label);
+            const lastScan = scanMeta.get(channel.id ?? "") ?? null;
+            const channelCounts = await collectMessageCounts(channel, maxPerChannel, () => logStatus(label), lastScan);
             for (const [userId, count] of channelCounts) {
                 counts.set(userId, (counts.get(userId) ?? 0) + count);
             }
+            await UserChannelMessageCount.upsertChannelCounts(channel.id ?? "", channelCounts, new Date());
+            channelsProcessed++;
         }
         let updated = 0;
         for (const [userId, total] of counts.entries()) {
@@ -2131,7 +2171,7 @@ let SuperAdmin = class SuperAdmin {
         }
         await safeReply(interaction, {
             content: `Backfill complete.\n` +
-                `Channels scanned: ${channels.length}\n` +
+                `Channels scanned: ${filteredChannels.length}\n` +
                 `Users updated: ${updated}\n` +
                 `Message counts populated from historical messages${maxPerChannel ? ` (capped at ${maxPerChannel} per channel)` : ""}.`,
             ephemeral: true,
@@ -2339,6 +2379,12 @@ __decorate([
         name: "message-count-backfill",
     }),
     __param(0, SlashOption({
+        description: "Restrict scan to a single channel/thread by name or id",
+        name: "channelname",
+        required: false,
+        type: ApplicationCommandOptionType.String,
+    })),
+    __param(1, SlashOption({
         description: "Maximum messages to fetch per channel (optional cap)",
         name: "maxperchannel",
         required: false,

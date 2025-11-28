@@ -42,13 +42,6 @@ function buildProfileFields(record) {
             .join(", ")
             .replace(/, $/, "") || "None",
     });
-    if (record.messageCount !== null && record.messageCount !== undefined) {
-        fields.push({
-            label: "Messages Sent",
-            value: record.messageCount.toString(),
-            inline: true,
-        });
-    }
     if (record.isBot) {
         fields.push({ label: "Bot", value: "Yes", inline: true });
     }

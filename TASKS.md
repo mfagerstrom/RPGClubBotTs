@@ -12,3 +12,9 @@
 - Check the TODO.md file for development goals.  Don't do these automatically but ask me if I would like you to tackle one of them when you set up a new task context.
 - Do not keep making this mistake: [ERROR] (node:30760) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
 - Do not delete the build directory.
+- Table docs live in db/rpg_club_users.md (RPG_CLUB_USERS), db/bot_presence_history.md
+  (BOT_PRESENCE_HISTORY), db/bot_voting_info.md (BOT_VOTING_INFO), db/gotm_entries.md
+  (GOTM_ENTRIES), db/gotm_nominations.md (GOTM_NOMINATIONS), db/nr_gotm_entries.md
+  (NR_GOTM_ENTRIES), db/nr_gotm_nominations.md (NR_GOTM_NOMINATIONS),
+  db/rpg_club_user_avatar_history.md (RPG_CLUB_USER_AVATAR_HISTORY),
+  db/rpg_club_user_nick_history.md (RPG_CLUB_USER_NICK_HISTORY), and db/help.md (HELP).

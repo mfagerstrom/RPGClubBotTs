@@ -28,7 +28,7 @@ export async function getUpcomingNominationWindow(): Promise<INominationWindow> 
   }
 
   const nextVoteAt = normalizeDate(currentRound.nextVoteAt);
-  const closesAt = DateTime.fromJSDate(nextVoteAt).minus({ days: 1 }).toJSDate();
+  const closesAt = DateTime.fromJSDate(nextVoteAt).toJSDate();
 
   return {
     targetRound: currentRound.roundNumber + 1,
