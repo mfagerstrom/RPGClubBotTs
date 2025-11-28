@@ -174,7 +174,6 @@ export async function updateBotPresence(bot: Client): Promise<void> {
       ],
       status: "online",
     });
-    console.log("Bot presence updated from database.");
   } else {
     console.log("No presence data found in database.");
   }

@@ -122,9 +122,13 @@ const HELP_TOPICS: HelpTopic[] = [
   {
     id: "profile",
     label: "/profile",
-    summary: "Show a member profile from stored RPG_CLUB_USERS data (ephemeral by default).",
-    syntax: "Syntax: /profile [member:<user>] [showinchat:<boolean>]",
-    notes: "Omit member to view your own profile. Use showinchat:true to post publicly.",
+    summary: "View or edit stored RPG_CLUB_USERS profiles (view is ephemeral by default).",
+    syntax:
+      "Syntax: /profile view [member:<user>] [showinchat:<boolean>] | " +
+      "/profile edit [member:<user>] [completionator:<url>] [psn:<string>] " +
+      "[xbl:<string>] [nsw:<string>] [steam:<url>]",
+    notes:
+      "View: omit member to view your own profile; set showinchat:true to post publicly. Edit: users may edit their own fields; admins may edit any user.",
   },
   {
     id: "admin",

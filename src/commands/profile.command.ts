@@ -4,8 +4,10 @@ import {
   ApplicationCommandOptionType,
   EmbedBuilder,
   type User,
+  MessageFlags,
+  PermissionsBitField,
 } from "discord.js";
-import { Discord, Slash, SlashOption } from "discordx";
+import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import axios from "axios";
 import Member, { type IMemberRecord } from "../classes/Member.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
@@ -57,6 +59,26 @@ function buildProfileFields(
     fields.push({ label: "Bot", value: "Yes", inline: true });
   }
 
+  if (record.completionatorUrl) {
+    fields.push({ label: "Completionator", value: record.completionatorUrl });
+  }
+
+  if (record.steamUrl) {
+    fields.push({ label: "Steam", value: record.steamUrl });
+  }
+
+  if (record.psnUsername) {
+    fields.push({ label: "PSN", value: record.psnUsername, inline: true });
+  }
+
+  if (record.xblUsername) {
+    fields.push({ label: "Xbox", value: record.xblUsername, inline: true });
+  }
+
+  if (record.nswFriendCode) {
+    fields.push({ label: "Switch", value: record.nswFriendCode, inline: true });
+  }
+
   return fields;
 }
 
@@ -84,10 +106,35 @@ async function downloadAvatar(url: string): Promise<Buffer | null> {
   }
 }
 
+function buildBaseMemberRecord(user: User): IMemberRecord {
+  return {
+    userId: user.id,
+    isBot: user.bot ? 1 : 0,
+    username: user.username ?? null,
+    globalName: (user as any).globalName ?? null,
+    avatarBlob: null,
+    serverJoinedAt: null,
+    lastSeenAt: null,
+    roleAdmin: 0,
+    roleModerator: 0,
+    roleRegular: 0,
+    roleMember: 0,
+    roleNewcomer: 0,
+    messageCount: null,
+    completionatorUrl: null,
+    psnUsername: null,
+    xblUsername: null,
+    nswFriendCode: null,
+    steamUrl: null,
+  };
+}
+
+@SlashGroup({ description: "Profile commands", name: "profile" })
 @Discord()
 export class ProfileCommand {
-  @Slash({ description: "Show a member profile", name: "profile" })
-  async profile(
+  @Slash({ description: "Show a member profile", name: "view" })
+  @SlashGroup("profile")
+  async profileView(
     @SlashOption({
       description: "Member to view; leave blank to view your own profile.",
       name: "member",
@@ -118,28 +165,7 @@ export class ProfileCommand {
 
       if (avatarUrl) {
         const newAvatar = await downloadAvatar(avatarUrl);
-        const baseRecord: IMemberRecord =
-          record ??
-          ({
-            userId: target.id,
-            isBot: target.bot ? 1 : 0,
-            username: target.username ?? null,
-            globalName: (target as any).globalName ?? null,
-            avatarBlob: null,
-            serverJoinedAt: null,
-            lastSeenAt: null,
-            roleAdmin: 0,
-            roleModerator: 0,
-            roleRegular: 0,
-            roleMember: 0,
-            roleNewcomer: 0,
-            messageCount: null,
-            completionatorUrl: null,
-            psnUsername: null,
-            xblUsername: null,
-            nswFriendCode: null,
-            steamUrl: null,
-          } satisfies IMemberRecord);
+        const baseRecord: IMemberRecord = record ?? buildBaseMemberRecord(target);
 
         if (newAvatar && avatarBuffersDifferent(baseRecord.avatarBlob, newAvatar)) {
           record = {
@@ -190,6 +216,119 @@ export class ProfileCommand {
       await safeReply(interaction, {
         content: `Error loading profile: ${msg}`,
         ephemeral,
+      });
+    }
+  }
+
+  @Slash({ description: "Edit profile links (self, or any user if admin)", name: "edit" })
+  @SlashGroup("profile")
+  async profileEdit(
+    @SlashOption({
+      description: "Member to edit; admin only.",
+      name: "member",
+      required: false,
+      type: ApplicationCommandOptionType.User,
+    })
+    member: User | undefined,
+    @SlashOption({
+      description: "Completionator profile URL.",
+      name: "completionator",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    completionator: string | undefined,
+    @SlashOption({
+      description: "PlayStation Network username.",
+      name: "psn",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    psn: string | undefined,
+    @SlashOption({
+      description: "Xbox Live username.",
+      name: "xbl",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    xbl: string | undefined,
+    @SlashOption({
+      description: "Nintendo Switch friend code.",
+      name: "nsw",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    nsw: string | undefined,
+    @SlashOption({
+      description: "Steam profile URL.",
+      name: "steam",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    steam: string | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    const target = member ?? interaction.user;
+    const isAdmin =
+      interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator) ?? false;
+    const isSelf = target.id === interaction.user.id;
+    const ephemeral = true;
+    await safeDeferReply(interaction, { ephemeral });
+
+    if (!isSelf && !isAdmin) {
+      await safeReply(interaction, {
+        content: "You can only edit your own profile.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (
+      completionator === undefined &&
+      psn === undefined &&
+      xbl === undefined &&
+      nsw === undefined &&
+      steam === undefined
+    ) {
+      await safeReply(interaction, {
+        content: "Provide at least one field to update.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    try {
+      const existing = (await Member.getByUserId(target.id)) ?? buildBaseMemberRecord(target);
+
+      const updated: IMemberRecord = {
+        ...existing,
+        username: existing.username ?? target.username ?? null,
+        globalName: existing.globalName ?? (target as any).globalName ?? null,
+        completionatorUrl:
+          completionator !== undefined ? completionator || null : existing.completionatorUrl,
+        psnUsername: psn !== undefined ? psn || null : existing.psnUsername,
+        xblUsername: xbl !== undefined ? xbl || null : existing.xblUsername,
+        nswFriendCode: nsw !== undefined ? nsw || null : existing.nswFriendCode,
+        steamUrl: steam !== undefined ? steam || null : existing.steamUrl,
+      };
+
+      await Member.upsert(updated);
+
+      const changedFields: string[] = [];
+      if (completionator !== undefined) changedFields.push("Completionator");
+      if (psn !== undefined) changedFields.push("PSN");
+      if (xbl !== undefined) changedFields.push("Xbox");
+      if (nsw !== undefined) changedFields.push("Switch");
+      if (steam !== undefined) changedFields.push("Steam");
+
+      await safeReply(interaction, {
+        content: `Updated profile for <@${target.id}> (${changedFields.join(", ")}).`,
+        flags: MessageFlags.Ephemeral,
+      });
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      await safeReply(interaction, {
+        content: `Error updating profile: ${msg}`,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }
