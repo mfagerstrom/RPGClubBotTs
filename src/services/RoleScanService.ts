@@ -165,6 +165,11 @@ export async function memberScanTick(
         roleMember: memberFlag,
         roleNewcomer: newcomerFlag,
         messageCount: existingRow?.MESSAGE_COUNT ?? null,
+        completionatorUrl: null,
+        psnUsername: null,
+        xblUsername: null,
+        nswFriendCode: null,
+        steamUrl: null,
       };
 
       const execUpsert = async (avatarData: Buffer | null) => {

@@ -1113,6 +1113,11 @@ export class SuperAdmin {
           roleMember: memberFlag,
           roleNewcomer: newcomerFlag,
           messageCount: null,
+          completionatorUrl: null,
+          psnUsername: null,
+          xblUsername: null,
+          nswFriendCode: null,
+          steamUrl: null,
         };
 
         const execUpsert = async (avatarData: Buffer | null) => {

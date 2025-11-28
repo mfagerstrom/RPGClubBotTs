@@ -30,8 +30,6 @@ function buildProfileFields(
 
   const fields: ProfileField[] = [];
 
-  fields.push({ label: "Username", value: record.username ?? "Unknown", inline: true });
-
   const globalName = record.globalName ?? "Unknown";
   if (globalName !== "Unknown") {
     fields.push({ label: "Global Name", value: globalName, inline: true });
@@ -136,6 +134,11 @@ export class ProfileCommand {
             roleMember: 0,
             roleNewcomer: 0,
             messageCount: null,
+            completionatorUrl: null,
+            psnUsername: null,
+            xblUsername: null,
+            nswFriendCode: null,
+            steamUrl: null,
           } satisfies IMemberRecord);
 
         if (newAvatar && avatarBuffersDifferent(baseRecord.avatarBlob, newAvatar)) {

@@ -29,3 +29,8 @@ Oracle table for storing RPG Club Discord user snapshots and role flags.
 | CREATED_AT | TIMESTAMP(6) WITH TIME ZONE | No | SYSTIMESTAMP | Record creation timestamp. |
 | UPDATED_AT | TIMESTAMP(6) WITH TIME ZONE | No | SYSTIMESTAMP | Last update timestamp. |
 | MESSAGE_COUNT | NUMBER(10,0) | Yes | 0 | Cached message count, nullable. |
+| COMPLETIONATOR_URL | VARCHAR2(512) | Yes | — | Link to Completionator profile. |
+| PSN_USERNAME | VARCHAR2(100) | Yes | — | PlayStation Network username. |
+| XBL_USERNAME | VARCHAR2(100) | Yes | — | Xbox Live username. |
+| NSW_FRIEND_CODE | VARCHAR2(50) | Yes | — | Nintendo Switch friend code. |
+| STEAM_URL | VARCHAR2(512) | Yes | — | Link to Steam profile. |

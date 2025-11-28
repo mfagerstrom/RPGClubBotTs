@@ -15,6 +15,11 @@ export interface IMemberRecord {
   roleMember: number;
   roleNewcomer: number;
   messageCount: number | null;
+  completionatorUrl: string | null;
+  psnUsername: string | null;
+  xblUsername: string | null;
+  nswFriendCode: string | null;
+  steamUrl: string | null;
 }
 
 type Connection = oracledb.Connection;
@@ -34,6 +39,11 @@ function buildParams(record: IMemberRecord) {
     roleMember: record.roleMember ? 1 : 0,
     roleNewcomer: record.roleNewcomer ? 1 : 0,
     messageCount: record.messageCount ?? null,
+    completionatorUrl: record.completionatorUrl,
+    psnUsername: record.psnUsername,
+    xblUsername: record.xblUsername,
+    nswFriendCode: record.nswFriendCode,
+    steamUrl: record.steamUrl,
   };
 }
 
@@ -163,6 +173,11 @@ export default class Member {
         ROLE_MEMBER: number;
         ROLE_NEWCOMER: number;
         MESSAGE_COUNT: number | null;
+        COMPLETIONATOR_URL: string | null;
+        PSN_USERNAME: string | null;
+        XBL_USERNAME: string | null;
+        NSW_FRIEND_CODE: string | null;
+        STEAM_URL: string | null;
       }>(
         `SELECT USER_ID,
                 IS_BOT,
@@ -176,7 +191,12 @@ export default class Member {
                 ROLE_REGULAR,
                 ROLE_MEMBER,
                 ROLE_NEWCOMER,
-                MESSAGE_COUNT
+                MESSAGE_COUNT,
+                COMPLETIONATOR_URL,
+                PSN_USERNAME,
+                XBL_USERNAME,
+                NSW_FRIEND_CODE,
+                STEAM_URL
            FROM RPG_CLUB_USERS
           WHERE USER_ID = :userId`,
         { userId },
@@ -207,6 +227,11 @@ export default class Member {
         roleMember: row.ROLE_MEMBER,
         roleNewcomer: row.ROLE_NEWCOMER,
         messageCount: row.MESSAGE_COUNT ?? null,
+        completionatorUrl: row.COMPLETIONATOR_URL ?? null,
+        psnUsername: row.PSN_USERNAME ?? null,
+        xblUsername: row.XBL_USERNAME ?? null,
+        nswFriendCode: row.NSW_FRIEND_CODE ?? null,
+        steamUrl: row.STEAM_URL ?? null,
       };
     } finally {
       await connection.close();
@@ -238,6 +263,11 @@ export default class Member {
                 ROLE_MEMBER = :roleMember,
                 ROLE_NEWCOMER = :roleNewcomer,
                 MESSAGE_COUNT = COALESCE(:messageCount, MESSAGE_COUNT),
+                COMPLETIONATOR_URL = :completionatorUrl,
+                PSN_USERNAME = :psnUsername,
+                XBL_USERNAME = :xblUsername,
+                NSW_FRIEND_CODE = :nswFriendCode,
+                STEAM_URL = :steamUrl,
                 UPDATED_AT = SYSTIMESTAMP
           WHERE USER_ID = :userId`,
         params,
@@ -253,13 +283,15 @@ export default class Member {
              USER_ID, IS_BOT, USERNAME, GLOBAL_NAME, AVATAR_BLOB,
              SERVER_JOINED_AT, LAST_SEEN_AT, LAST_FETCHED_AT,
              ROLE_ADMIN, ROLE_MODERATOR, ROLE_REGULAR, ROLE_MEMBER, ROLE_NEWCOMER,
-             MESSAGE_COUNT,
+             MESSAGE_COUNT, COMPLETIONATOR_URL, PSN_USERNAME, XBL_USERNAME, NSW_FRIEND_CODE,
+             STEAM_URL,
              CREATED_AT, UPDATED_AT
            ) VALUES (
              :userId, :isBot, :username, :globalName, :avatarBlob,
              :joinedAt, :lastSeenAt, SYSTIMESTAMP,
              :roleAdmin, :roleModerator, :roleRegular, :roleMember, :roleNewcomer,
-             COALESCE(:messageCount, 0),
+             COALESCE(:messageCount, 0), :completionatorUrl, :psnUsername, :xblUsername,
+             :nswFriendCode, :steamUrl,
              SYSTIMESTAMP, SYSTIMESTAMP
            )`,
           params,
@@ -283,6 +315,11 @@ export default class Member {
                     ROLE_MEMBER = :roleMember,
                     ROLE_NEWCOMER = :roleNewcomer,
                     MESSAGE_COUNT = COALESCE(:messageCount, MESSAGE_COUNT),
+                    COMPLETIONATOR_URL = :completionatorUrl,
+                    PSN_USERNAME = :psnUsername,
+                    XBL_USERNAME = :xblUsername,
+                    NSW_FRIEND_CODE = :nswFriendCode,
+                    STEAM_URL = :steamUrl,
                     UPDATED_AT = SYSTIMESTAMP
               WHERE USER_ID = :userId`,
             params,
