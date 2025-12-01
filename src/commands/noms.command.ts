@@ -16,7 +16,6 @@ export class CombinedNoms {
 
     try {
       const window = await getUpcomingNominationWindow();
-      const closesLabel = formatCloseLabel(window.closesAt);
       const voteLabel = formatDate(window.nextVoteAt);
 
       const [gotm, nrGotm] = await Promise.all([
@@ -30,7 +29,6 @@ export class CombinedNoms {
         buildListEmbed({
           title: `GOTM Nominations - Round ${window.targetRound}`,
           nominations: gotm,
-          closesLabel,
           voteDate: voteLabel,
           command: "/gotm nominate",
         }),
@@ -40,7 +38,6 @@ export class CombinedNoms {
         buildListEmbed({
           title: `NR-GOTM Nominations - Round ${window.targetRound}`,
           nominations: nrGotm,
-          closesLabel,
           voteDate: voteLabel,
           command: "/nr-gotm nominate",
         }),
@@ -59,7 +56,6 @@ export class CombinedNoms {
 function buildListEmbed(opts: {
   title: string;
   nominations: Awaited<ReturnType<typeof listNominationsForRound>>;
-  closesLabel: string;
   voteDate: string;
   command: string;
 }): EmbedBuilder {
@@ -74,7 +70,7 @@ function buildListEmbed(opts: {
     .setDescription(lines.join("\n"))
     .setFooter({
       text:
-        `Closes ${opts.closesLabel} • Vote on ${opts.voteDate}\n` +
+        `Vote on ${opts.voteDate}\n` +
         `Do you want to nominate a game? Use ${opts.command}`,
     });
 }
@@ -97,9 +93,4 @@ function numberEmoji(n: number): string {
 
 function formatDate(date: Date): string {
   return date.toLocaleDateString("en-US", { timeZone: "America/New_York" });
-}
-
-function formatCloseLabel(date: Date): string {
-  const datePart = formatDate(date);
-  return `${datePart} 11:00 PM ET`;
 }

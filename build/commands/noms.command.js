@@ -14,7 +14,6 @@ let CombinedNoms = class CombinedNoms {
         await safeDeferReply(interaction);
         try {
             const window = await getUpcomingNominationWindow();
-            const closesLabel = formatCloseLabel(window.closesAt);
             const voteLabel = formatDate(window.nextVoteAt);
             const [gotm, nrGotm] = await Promise.all([
                 listNominationsForRound("gotm", window.targetRound),
@@ -24,14 +23,12 @@ let CombinedNoms = class CombinedNoms {
             embeds.push(buildListEmbed({
                 title: `GOTM Nominations - Round ${window.targetRound}`,
                 nominations: gotm,
-                closesLabel,
                 voteDate: voteLabel,
                 command: "/gotm nominate",
             }));
             embeds.push(buildListEmbed({
                 title: `NR-GOTM Nominations - Round ${window.targetRound}`,
                 nominations: nrGotm,
-                closesLabel,
                 voteDate: voteLabel,
                 command: "/nr-gotm nominate",
             }));
@@ -64,7 +61,7 @@ function buildListEmbed(opts) {
         .setTitle(opts.title)
         .setDescription(lines.join("\n"))
         .setFooter({
-        text: `Closes ${opts.closesLabel} • Vote on ${opts.voteDate}\n` +
+        text: `Vote on ${opts.voteDate}\n` +
             `Do you want to nominate a game? Use ${opts.command}`,
     });
 }
@@ -85,8 +82,4 @@ function numberEmoji(n) {
 }
 function formatDate(date) {
     return date.toLocaleDateString("en-US", { timeZone: "America/New_York" });
-}
-function formatCloseLabel(date) {
-    const datePart = formatDate(date);
-    return `${datePart} 11:00 PM ET`;
 }

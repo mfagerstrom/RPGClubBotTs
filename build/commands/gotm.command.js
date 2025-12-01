@@ -315,14 +315,13 @@ function buildNominationEmbed(kindLabel, commandLabel, window, nominations) {
     const lines = nominations.length > 0
         ? nominations.map((n, idx) => `${numberEmoji(idx + 1)} ${n.gameTitle} — <@${n.userId}>`)
         : ["No nominations yet."];
-    const closesLabel = formatCloseLabel(window.closesAt);
     const voteLabel = formatDate(window.nextVoteAt);
     return new EmbedBuilder()
         .setColor(0x0099ff)
         .setTitle(`${kindLabel} Nominations - Round ${window.targetRound}`)
         .setDescription(lines.join("\n"))
         .setFooter({
-        text: `Closes ${closesLabel} • Vote on ${voteLabel}\n` +
+        text: `Vote on ${voteLabel}\n` +
             `Do you want to nominate a game? Use ${commandLabel}`,
     });
 }
@@ -361,11 +360,6 @@ function numberEmoji(n) {
 }
 function formatDate(date) {
     return date.toLocaleDateString("en-US", { timeZone: "America/New_York" });
-}
-function formatCloseLabel(date) {
-    // Show close date (day before vote) at 11 PM ET.
-    const datePart = formatDate(date);
-    return `${datePart} 11:00 PM ET`;
 }
 function parseMonthValue(input) {
     const trimmed = input.trim();
