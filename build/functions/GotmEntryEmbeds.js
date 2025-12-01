@@ -168,17 +168,6 @@ export async function buildNrGotmEntryEmbed(entry, guildId, client) {
     const jumpLink = buildResultsJumpLink(entry, guildId);
     if (jumpLink)
         embed.setURL(jumpLink);
-    const winners = Array.isArray(entry.gameOfTheMonth)
-        ? entry.gameOfTheMonth.filter((g) => !!g.threadId)
-        : [];
-    if (winners.length) {
-        for (const w of winners) {
-            const threadId = displayAuditValue(w.threadId);
-            if (threadId) {
-                embed.addFields({ name: "Winner", value: `<#${threadId}> — ${w.title}`, inline: false });
-            }
-        }
-    }
     // Prefer stored images first; fall back to thread images
     const { thumbnailUrl, files } = await resolveEntryImage("nr", entry, entry.gameOfTheMonth, client);
     if (thumbnailUrl) {
