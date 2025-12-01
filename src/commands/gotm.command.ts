@@ -376,7 +376,7 @@ function buildNominationEmbed(
     .setDescription(lines.join("\n"))
     .setFooter({
       text:
-        `Closes ${closesLabel} • Vote on ${voteLabel}\n` +
+        `Vote on ${voteLabel}\n` +
         `Do you want to nominate a game? Use ${commandLabel}`,
     });
 }
