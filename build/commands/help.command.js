@@ -61,6 +61,15 @@ const HELP_TOPICS = [
         parameters: "title (required string) - game title and optional descriptors. showinchat (optional boolean) - post publicly if true.",
     },
     {
+        id: "mp-info",
+        label: "/mp-info",
+        summary: "List members who have shared multiplayer platform info with quick profile buttons (ephemeral by default).",
+        syntax: "Syntax: /mp-info [showinchat:<boolean>] [steam:<boolean>] [xbl:<boolean>] [psn:<boolean>] [switch:<boolean>]",
+        notes: "Platform filters default to true; if any flag is true, unspecified platforms default to " +
+            "false. Set showinchat:true to post publicly. Pick a member from the dropdown to open " +
+            "their profile.",
+    },
+    {
         id: "remindme",
         label: "/remindme",
         summary: "Personal reminders with quick snooze buttons (DM delivery).",
@@ -70,11 +79,16 @@ const HELP_TOPICS = [
     {
         id: "profile",
         label: "/profile",
-        summary: "View or edit stored RPG_CLUB_USERS profiles (view is ephemeral by default).",
+        summary: "View, edit, or search stored RPG_CLUB_USERS profiles (view/search are ephemeral by default).",
         syntax: "Syntax: /profile view [member:<user>] [showinchat:<boolean>] | " +
             "/profile edit [member:<user>] [completionator:<url>] [psn:<string>] " +
-            "[xbl:<string>] [nsw:<string>] [steam:<url>]",
-        notes: "View: omit member to view your own profile; set showinchat:true to post publicly. Edit: users may edit their own fields; admins may edit any user.",
+            "[xbl:<string>] [nsw:<string>] [steam:<url>] | " +
+            "/profile search [filters...] [limit:<int>] [include-departed-members:<boolean>] [showinchat:<boolean>]",
+        notes: "View: omit member to view your own profile; set showinchat:true to post publicly. Edit: " +
+            "users may edit their own fields; admins may edit any user. Search: filter by any profile " +
+            "field (ids, names, URLs, platforms, role flags, bot flag, join/last seen ranges). Filters " +
+            "default to partial matches; date/times use ISO formats; limit max 100. Departed members " +
+            "are excluded unless include-departed-members is true.",
     },
     {
         id: "admin",

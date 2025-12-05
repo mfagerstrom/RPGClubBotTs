@@ -123,6 +123,7 @@ export async function memberScanTick(client, opts) {
                 globalName: user.globalName ?? null,
                 avatarBlob: null,
                 serverJoinedAt: member.joinedAt ?? null,
+                serverLeftAt: null,
                 lastSeenAt: null,
                 roleAdmin: adminFlag,
                 roleModerator: moderatorFlag,

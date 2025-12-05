@@ -9,9 +9,6 @@ let GuildMemberRemove = class GuildMemberRemove {
     async guildMemberRemove([_member], _client) {
         void _member;
         void _client;
-        // record member part date when member leaves
-        // TODO: Connect to database
-        // TODO: Update members table with part date
     }
 };
 __decorate([

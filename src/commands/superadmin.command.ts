@@ -1106,6 +1106,7 @@ export class SuperAdmin {
           globalName: (user as any).globalName ?? null,
           avatarBlob: null,
           serverJoinedAt: member.joinedAt ?? null,
+          serverLeftAt: null,
           lastSeenAt: null,
           roleAdmin: adminFlag,
           roleModerator: moderatorFlag,

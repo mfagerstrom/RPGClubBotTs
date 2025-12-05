@@ -10,9 +10,5 @@ export class GuildMemberRemove {
   ): Promise<void> {
     void _member;
     void _client;
-
-    // record member part date when member leaves
-    // TODO: Connect to database
-    // TODO: Update members table with part date
   }
 }

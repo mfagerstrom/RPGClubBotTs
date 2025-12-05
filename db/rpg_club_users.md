@@ -28,6 +28,7 @@ Oracle table for storing RPG Club Discord user snapshots and role flags.
 | ROLE_NEWCOMER | NUMBER(1,0) | No | 0 | Newcomer role flag. |
 | CREATED_AT | TIMESTAMP(6) WITH TIME ZONE | No | SYSTIMESTAMP | Record creation timestamp. |
 | UPDATED_AT | TIMESTAMP(6) WITH TIME ZONE | No | SYSTIMESTAMP | Last update timestamp. |
+| SERVER_LEFT_AT | TIMESTAMP(6) WITH TIME ZONE | Yes | — | When the user left the server (null if active). |
 | MESSAGE_COUNT | NUMBER(10,0) | Yes | 0 | Cached message count, nullable. |
 | COMPLETIONATOR_URL | VARCHAR2(512) | Yes | — | Link to Completionator profile. |
 | PSN_USERNAME | VARCHAR2(100) | Yes | — | PlayStation Network username. |

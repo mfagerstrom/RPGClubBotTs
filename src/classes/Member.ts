@@ -8,6 +8,7 @@ export interface IMemberRecord {
   globalName: string | null;
   avatarBlob: Buffer | null;
   serverJoinedAt: Date | null;
+  serverLeftAt: Date | null;
   lastSeenAt: Date | null;
   roleAdmin: number;
   roleModerator: number;
@@ -22,6 +23,59 @@ export interface IMemberRecord {
   steamUrl: string | null;
 }
 
+export interface IMemberPlatformRecord {
+  userId: string;
+  username: string | null;
+  globalName: string | null;
+  steamUrl: string | null;
+  psnUsername: string | null;
+  xblUsername: string | null;
+  nswFriendCode: string | null;
+}
+
+export interface IMemberSearchFilters {
+  userId?: string;
+  username?: string;
+  globalName?: string;
+  completionatorUrl?: string;
+  steamUrl?: string;
+  psnUsername?: string;
+  xblUsername?: string;
+  nswFriendCode?: string;
+  roleAdmin?: boolean;
+  roleModerator?: boolean;
+  roleRegular?: boolean;
+  roleMember?: boolean;
+  roleNewcomer?: boolean;
+  isBot?: boolean;
+  includeDeparted?: boolean;
+  joinedAfter?: Date;
+  joinedBefore?: Date;
+  lastSeenAfter?: Date;
+  lastSeenBefore?: Date;
+  limit?: number;
+}
+
+export interface IMemberSearchResult {
+  userId: string;
+  username: string | null;
+  globalName: string | null;
+  isBot: number;
+  completionatorUrl: string | null;
+  steamUrl: string | null;
+  psnUsername: string | null;
+  xblUsername: string | null;
+  nswFriendCode: string | null;
+  roleAdmin: number;
+  roleModerator: number;
+  roleRegular: number;
+  roleMember: number;
+  roleNewcomer: number;
+  serverJoinedAt: Date | null;
+  serverLeftAt: Date | null;
+  lastSeenAt: Date | null;
+}
+
 type Connection = oracledb.Connection;
 
 function buildParams(record: IMemberRecord) {
@@ -32,13 +86,13 @@ function buildParams(record: IMemberRecord) {
     globalName: record.globalName,
     avatarBlob: record.avatarBlob,
     joinedAt: record.serverJoinedAt,
+    leftAt: record.serverLeftAt,
     lastSeenAt: record.lastSeenAt,
     roleAdmin: record.roleAdmin ? 1 : 0,
     roleModerator: record.roleModerator ? 1 : 0,
     roleRegular: record.roleRegular ? 1 : 0,
     roleMember: record.roleMember ? 1 : 0,
     roleNewcomer: record.roleNewcomer ? 1 : 0,
-    messageCount: record.messageCount ?? null,
     completionatorUrl: record.completionatorUrl,
     psnUsername: record.psnUsername,
     xblUsername: record.xblUsername,
@@ -67,92 +121,152 @@ export default class Member {
     }
   }
 
-  static async setMessageCount(userId: string, count: number): Promise<void> {
+  static async search(filters: IMemberSearchFilters): Promise<IMemberSearchResult[]> {
     const connection = await getOraclePool().getConnection();
+
+    const safeLimit = Math.min(Math.max(filters.limit ?? 50, 1), 100);
+    const clauses: string[] = [];
+    const params: Record<string, any> = { limit: safeLimit };
+
+    const addLike = (column: string, param: string, value?: string): void => {
+      if (!value) return;
+      clauses.push(`UPPER(${column}) LIKE '%' || UPPER(:${param}) || '%'`);
+      params[param] = value;
+    };
+
+    const addBool = (column: string, param: string, value?: boolean): void => {
+      if (value === undefined) return;
+      clauses.push(`${column} = :${param}`);
+      params[param] = value ? 1 : 0;
+    };
+
+    addLike("USER_ID", "userId", filters.userId);
+    addLike("USERNAME", "username", filters.username);
+    addLike("GLOBAL_NAME", "globalName", filters.globalName);
+    addLike("COMPLETIONATOR_URL", "completionatorUrl", filters.completionatorUrl);
+    addLike("STEAM_URL", "steamUrl", filters.steamUrl);
+    addLike("PSN_USERNAME", "psnUsername", filters.psnUsername);
+    addLike("XBL_USERNAME", "xblUsername", filters.xblUsername);
+    addLike("NSW_FRIEND_CODE", "nswFriendCode", filters.nswFriendCode);
+
+    addBool("ROLE_ADMIN", "roleAdmin", filters.roleAdmin);
+    addBool("ROLE_MODERATOR", "roleModerator", filters.roleModerator);
+    addBool("ROLE_REGULAR", "roleRegular", filters.roleRegular);
+    addBool("ROLE_MEMBER", "roleMember", filters.roleMember);
+    addBool("ROLE_NEWCOMER", "roleNewcomer", filters.roleNewcomer);
+    addBool("IS_BOT", "isBot", filters.isBot);
+
+    if (!filters.includeDeparted) {
+      clauses.push("SERVER_LEFT_AT IS NULL");
+    }
+
+    if (filters.joinedAfter) {
+      clauses.push("SERVER_JOINED_AT >= :joinedAfter");
+      params.joinedAfter = filters.joinedAfter;
+    }
+
+    if (filters.joinedBefore) {
+      clauses.push("SERVER_JOINED_AT <= :joinedBefore");
+      params.joinedBefore = filters.joinedBefore;
+    }
+
+    if (filters.lastSeenAfter) {
+      clauses.push("LAST_SEEN_AT >= :lastSeenAfter");
+      params.lastSeenAfter = filters.lastSeenAfter;
+    }
+
+    if (filters.lastSeenBefore) {
+      clauses.push("LAST_SEEN_AT <= :lastSeenBefore");
+      params.lastSeenBefore = filters.lastSeenBefore;
+    }
+
+    const where = clauses.length ? clauses.join(" AND ") : "1=1";
+
     try {
-      const result = await connection.execute(
-        `UPDATE RPG_CLUB_USERS
-            SET MESSAGE_COUNT = :count,
-                UPDATED_AT = SYSTIMESTAMP
-          WHERE USER_ID = :userId`,
-        { userId, count },
-        { autoCommit: true },
+      const result = await connection.execute<{
+        USER_ID: string;
+        USERNAME: string | null;
+        GLOBAL_NAME: string | null;
+        IS_BOT: number;
+        COMPLETIONATOR_URL: string | null;
+        STEAM_URL: string | null;
+        PSN_USERNAME: string | null;
+        XBL_USERNAME: string | null;
+        NSW_FRIEND_CODE: string | null;
+        ROLE_ADMIN: number;
+        ROLE_MODERATOR: number;
+        ROLE_REGULAR: number;
+        ROLE_MEMBER: number;
+        ROLE_NEWCOMER: number;
+        SERVER_LEFT_AT: Date | null;
+        SERVER_JOINED_AT: Date | null;
+        LAST_SEEN_AT: Date | null;
+      }>(
+        `SELECT USER_ID,
+                USERNAME,
+                GLOBAL_NAME,
+                IS_BOT,
+                COMPLETIONATOR_URL,
+                STEAM_URL,
+                PSN_USERNAME,
+                XBL_USERNAME,
+                NSW_FRIEND_CODE,
+                ROLE_ADMIN,
+                ROLE_MODERATOR,
+                ROLE_REGULAR,
+                ROLE_MEMBER,
+                ROLE_NEWCOMER,
+                SERVER_LEFT_AT,
+                SERVER_JOINED_AT,
+                LAST_SEEN_AT
+           FROM RPG_CLUB_USERS
+          WHERE ${where}
+          ORDER BY COALESCE(UPPER(GLOBAL_NAME), UPPER(USERNAME), USER_ID)
+          FETCH FIRST :limit ROWS ONLY`,
+        params,
+        {
+          outFormat: oracledb.OUT_FORMAT_OBJECT,
+        },
       );
 
-      const rows = result.rowsAffected ?? 0;
-      if (rows > 0) {
-        return;
-      }
-
-      await connection.execute(
-        `INSERT INTO RPG_CLUB_USERS (
-           USER_ID, IS_BOT, USERNAME, GLOBAL_NAME, AVATAR_BLOB,
-           SERVER_JOINED_AT, LAST_SEEN_AT, LAST_FETCHED_AT,
-           ROLE_ADMIN, ROLE_MODERATOR, ROLE_REGULAR, ROLE_MEMBER, ROLE_NEWCOMER,
-           MESSAGE_COUNT,
-           CREATED_AT, UPDATED_AT
-         ) VALUES (
-           :userId, 0, NULL, NULL, NULL,
-           NULL, NULL, SYSTIMESTAMP,
-           0, 0, 0, 0, 0,
-           :count,
-           SYSTIMESTAMP, SYSTIMESTAMP
-         )`,
-        { userId, count },
-        { autoCommit: true },
-      );
-    } catch (err: any) {
-      const msg = err?.message ?? String(err);
-      console.error(`[Member] Failed to set message count for ${userId}: ${msg}`);
+      const rows = result.rows ?? [];
+      return rows.map<IMemberSearchResult>((row) => ({
+        userId: row.USER_ID,
+        username: row.USERNAME ?? null,
+        globalName: row.GLOBAL_NAME ?? null,
+        isBot: row.IS_BOT,
+        completionatorUrl: row.COMPLETIONATOR_URL ?? null,
+        steamUrl: row.STEAM_URL ?? null,
+        psnUsername: row.PSN_USERNAME ?? null,
+        xblUsername: row.XBL_USERNAME ?? null,
+        nswFriendCode: row.NSW_FRIEND_CODE ?? null,
+        roleAdmin: row.ROLE_ADMIN,
+        roleModerator: row.ROLE_MODERATOR,
+        roleRegular: row.ROLE_REGULAR,
+        roleMember: row.ROLE_MEMBER,
+        roleNewcomer: row.ROLE_NEWCOMER,
+        serverLeftAt: row.SERVER_LEFT_AT ?? null,
+        serverJoinedAt: row.SERVER_JOINED_AT ?? null,
+        lastSeenAt: row.LAST_SEEN_AT ?? null,
+      }));
     } finally {
       await connection.close();
     }
+  }
+
+  static async setMessageCount(userId: string, count: number): Promise<void> {
+    void userId;
+    void count;
+    return;
   }
 
   static async recordMessageActivity(
     userId: string,
     when: Date = new Date(),
   ): Promise<void> {
-    const connection = await getOraclePool().getConnection();
-    try {
-      const result = await connection.execute(
-        `UPDATE RPG_CLUB_USERS
-            SET LAST_SEEN_AT = :lastSeen,
-                MESSAGE_COUNT = COALESCE(MESSAGE_COUNT, 0) + 1,
-                UPDATED_AT = SYSTIMESTAMP
-          WHERE USER_ID = :userId`,
-        { userId, lastSeen: when },
-        { autoCommit: true },
-      );
-
-      const rowsUpdated = result.rowsAffected ?? 0;
-      if (rowsUpdated > 0) {
-        return;
-      }
-
-      await connection.execute(
-        `INSERT INTO RPG_CLUB_USERS (
-           USER_ID, IS_BOT, USERNAME, GLOBAL_NAME, AVATAR_BLOB,
-           SERVER_JOINED_AT, LAST_SEEN_AT, LAST_FETCHED_AT,
-           ROLE_ADMIN, ROLE_MODERATOR, ROLE_REGULAR, ROLE_MEMBER, ROLE_NEWCOMER,
-           MESSAGE_COUNT,
-           CREATED_AT, UPDATED_AT
-         ) VALUES (
-           :userId, 0, NULL, NULL, NULL,
-           NULL, :lastSeen, SYSTIMESTAMP,
-           0, 0, 0, 0, 0,
-           1,
-           SYSTIMESTAMP, SYSTIMESTAMP
-         )`,
-        { userId, lastSeen: when },
-        { autoCommit: true },
-      );
-    } catch (err: any) {
-      const msg = err?.message ?? String(err);
-      console.error(`[Member] Failed to record message activity for ${userId}: ${msg}`);
-    } finally {
-      await connection.close();
-    }
+    void userId;
+    void when;
+    return;
   }
 
   static async getByUserId(userId: string): Promise<IMemberRecord | null> {
@@ -166,6 +280,7 @@ export default class Member {
         GLOBAL_NAME: string | null;
         AVATAR_BLOB: Buffer | null;
         SERVER_JOINED_AT: Date | null;
+        SERVER_LEFT_AT: Date | null;
         LAST_SEEN_AT: Date | null;
         ROLE_ADMIN: number;
         ROLE_MODERATOR: number;
@@ -183,8 +298,9 @@ export default class Member {
                 IS_BOT,
                 USERNAME,
                 GLOBAL_NAME,
-                AVATAR_BLOB,
-                SERVER_JOINED_AT,
+               AVATAR_BLOB,
+               SERVER_JOINED_AT,
+                SERVER_LEFT_AT,
                 LAST_SEEN_AT,
                 ROLE_ADMIN,
                 ROLE_MODERATOR,
@@ -220,6 +336,7 @@ export default class Member {
         globalName: row.GLOBAL_NAME ?? null,
         avatarBlob: row.AVATAR_BLOB ?? null,
         serverJoinedAt: row.SERVER_JOINED_AT ?? null,
+        serverLeftAt: row.SERVER_LEFT_AT ?? null,
         lastSeenAt: row.LAST_SEEN_AT ?? null,
         roleAdmin: row.ROLE_ADMIN,
         roleModerator: row.ROLE_MODERATOR,
@@ -233,6 +350,62 @@ export default class Member {
         nswFriendCode: row.NSW_FRIEND_CODE ?? null,
         steamUrl: row.STEAM_URL ?? null,
       };
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async getMembersWithPlatforms(): Promise<IMemberPlatformRecord[]> {
+    const connection = await getOraclePool().getConnection();
+
+    try {
+      const result = await connection.execute<{
+        USER_ID: string;
+        USERNAME: string | null;
+        GLOBAL_NAME: string | null;
+        STEAM_URL: string | null;
+        PSN_USERNAME: string | null;
+        XBL_USERNAME: string | null;
+        NSW_FRIEND_CODE: string | null;
+        SERVER_LEFT_AT: Date | null;
+      }>(
+        `SELECT USER_ID,
+                USERNAME,
+                GLOBAL_NAME,
+                STEAM_URL,
+                PSN_USERNAME,
+                XBL_USERNAME,
+                NSW_FRIEND_CODE,
+                SERVER_LEFT_AT
+           FROM RPG_CLUB_USERS
+          WHERE (STEAM_URL IS NOT NULL
+                 OR PSN_USERNAME IS NOT NULL
+                 OR XBL_USERNAME IS NOT NULL
+                 OR NSW_FRIEND_CODE IS NOT NULL)
+            AND NVL(IS_BOT, 0) = 0
+            AND SERVER_LEFT_AT IS NULL`,
+        {},
+        {
+          outFormat: oracledb.OUT_FORMAT_OBJECT,
+        },
+      );
+
+      const rows = result.rows ?? [];
+      const members = rows.map<IMemberPlatformRecord>((row) => ({
+        userId: row.USER_ID,
+        username: row.USERNAME ?? null,
+        globalName: row.GLOBAL_NAME ?? null,
+        steamUrl: row.STEAM_URL ?? null,
+        psnUsername: row.PSN_USERNAME ?? null,
+        xblUsername: row.XBL_USERNAME ?? null,
+        nswFriendCode: row.NSW_FRIEND_CODE ?? null,
+      }));
+
+      return members.sort((a, b) => {
+        const aName = (a.globalName ?? a.username ?? a.userId).toLowerCase();
+        const bName = (b.globalName ?? b.username ?? b.userId).toLowerCase();
+        return aName.localeCompare(bName);
+      });
     } finally {
       await connection.close();
     }
@@ -255,6 +428,7 @@ export default class Member {
                 GLOBAL_NAME = :globalName,
                 AVATAR_BLOB = :avatarBlob,
                 SERVER_JOINED_AT = :joinedAt,
+                SERVER_LEFT_AT = :leftAt,
                 LAST_SEEN_AT = :lastSeenAt,
                 LAST_FETCHED_AT = SYSTIMESTAMP,
                 ROLE_ADMIN = :roleAdmin,
@@ -262,7 +436,6 @@ export default class Member {
                 ROLE_REGULAR = :roleRegular,
                 ROLE_MEMBER = :roleMember,
                 ROLE_NEWCOMER = :roleNewcomer,
-                MESSAGE_COUNT = COALESCE(:messageCount, MESSAGE_COUNT),
                 COMPLETIONATOR_URL = :completionatorUrl,
                 PSN_USERNAME = :psnUsername,
                 XBL_USERNAME = :xblUsername,
@@ -281,16 +454,16 @@ export default class Member {
         await connection.execute(
           `INSERT INTO RPG_CLUB_USERS (
              USER_ID, IS_BOT, USERNAME, GLOBAL_NAME, AVATAR_BLOB,
-             SERVER_JOINED_AT, LAST_SEEN_AT, LAST_FETCHED_AT,
+             SERVER_JOINED_AT, SERVER_LEFT_AT, LAST_SEEN_AT, LAST_FETCHED_AT,
              ROLE_ADMIN, ROLE_MODERATOR, ROLE_REGULAR, ROLE_MEMBER, ROLE_NEWCOMER,
-             MESSAGE_COUNT, COMPLETIONATOR_URL, PSN_USERNAME, XBL_USERNAME, NSW_FRIEND_CODE,
+             COMPLETIONATOR_URL, PSN_USERNAME, XBL_USERNAME, NSW_FRIEND_CODE,
              STEAM_URL,
              CREATED_AT, UPDATED_AT
            ) VALUES (
              :userId, :isBot, :username, :globalName, :avatarBlob,
-             :joinedAt, :lastSeenAt, SYSTIMESTAMP,
+             :joinedAt, :leftAt, :lastSeenAt, SYSTIMESTAMP,
              :roleAdmin, :roleModerator, :roleRegular, :roleMember, :roleNewcomer,
-             COALESCE(:messageCount, 0), :completionatorUrl, :psnUsername, :xblUsername,
+             :completionatorUrl, :psnUsername, :xblUsername,
              :nswFriendCode, :steamUrl,
              SYSTIMESTAMP, SYSTIMESTAMP
            )`,
@@ -307,6 +480,7 @@ export default class Member {
                     GLOBAL_NAME = :globalName,
                     AVATAR_BLOB = :avatarBlob,
                     SERVER_JOINED_AT = :joinedAt,
+                    SERVER_LEFT_AT = :leftAt,
                     LAST_SEEN_AT = :lastSeenAt,
                     LAST_FETCHED_AT = SYSTIMESTAMP,
                     ROLE_ADMIN = :roleAdmin,
@@ -314,7 +488,6 @@ export default class Member {
                     ROLE_REGULAR = :roleRegular,
                     ROLE_MEMBER = :roleMember,
                     ROLE_NEWCOMER = :roleNewcomer,
-                    MESSAGE_COUNT = COALESCE(:messageCount, MESSAGE_COUNT),
                     COMPLETIONATOR_URL = :completionatorUrl,
                     PSN_USERNAME = :psnUsername,
                     XBL_USERNAME = :xblUsername,
