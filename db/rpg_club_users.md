@@ -35,3 +35,15 @@ Oracle table for storing RPG Club Discord user snapshots and role flags.
 | XBL_USERNAME | VARCHAR2(100) | Yes | — | Xbox Live username. |
 | NSW_FRIEND_CODE | VARCHAR2(50) | Yes | — | Nintendo Switch friend code. |
 | STEAM_URL | VARCHAR2(512) | Yes | — | Link to Steam profile. |
+| PROFILE_IMAGE | BLOB | Yes | — | Cached rendered profile image. |
+| PROFILE_IMAGE_AT | TIMESTAMP(6) WITH TIME ZONE | Yes | — | When the cached profile image was rendered. |
+
+## History / Audit
+
+- Table: `RPG_CLUB_USERS_HIST` (created by `scripts/sql/20251207_create_rpg_club_users_history.sql`)
+- Captures INSERT/UPDATE/DELETE on `RPG_CLUB_USERS` via trigger `TRG_RPG_CLUB_USERS_AUD`.
+- Columns mirror `RPG_CLUB_USERS` plus:
+  - `HISTORY_ID` identity PK
+  - `ACTION_TYPE` (I/U/D)
+  - `ACTIONED_AT` (defaults SYSTIMESTAMP)
+- Use this table to recover prior values (avatars, platform links, profile images, role flags, etc.).

@@ -1044,6 +1044,7 @@ export class SuperAdmin {
     await safeReply(interaction, { content: "Fetching all guild members... this may take a moment.", ephemeral: true });
 
     const members = await guild.members.fetch();
+    const departedCount = await Member.markDepartedNotIn(Array.from(members.keys()));
     const pool = getOraclePool();
     let connection = await pool.getConnection();
     const isRecoverableOracleError = (err: any): boolean => {
@@ -1070,10 +1071,18 @@ export class SuperAdmin {
     let failCount = 0;
 
     const delay = async (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const avatarBuffersDifferent = (a: Buffer | null, b: Buffer | null): boolean => {
+      if (!a && !b) return false;
+      if (!!a !== !!b) return true;
+      if (!a || !b) return true;
+      if (a.length !== b.length) return true;
+      return !a.equals(b);
+    };
 
     try {
       for (const member of members.values()) {
         const user = member.user;
+        const existing = await Member.getByUserId(user.id);
 
         // Build avatar blob (throttled per-user)
         let avatarBlob: Buffer | null = null;
@@ -1105,21 +1114,32 @@ export class SuperAdmin {
           username: user.username,
           globalName: (user as any).globalName ?? null,
           avatarBlob: null,
-          serverJoinedAt: member.joinedAt ?? null,
+          serverJoinedAt: member.joinedAt ?? existing?.serverJoinedAt ?? null,
           serverLeftAt: null,
-          lastSeenAt: null,
+          lastSeenAt: existing?.lastSeenAt ?? null,
           roleAdmin: adminFlag,
           roleModerator: moderatorFlag,
           roleRegular: regularFlag,
           roleMember: memberFlag,
           roleNewcomer: newcomerFlag,
-          messageCount: null,
-          completionatorUrl: null,
-          psnUsername: null,
-          xblUsername: null,
-          nswFriendCode: null,
-          steamUrl: null,
+          messageCount: existing?.messageCount ?? null,
+          completionatorUrl: existing?.completionatorUrl ?? null,
+          psnUsername: existing?.psnUsername ?? null,
+          xblUsername: existing?.xblUsername ?? null,
+          nswFriendCode: existing?.nswFriendCode ?? null,
+          steamUrl: existing?.steamUrl ?? null,
+          profileImage: existing?.profileImage ?? null,
+          profileImageAt: existing?.profileImageAt ?? null,
         };
+
+        let avatarToUse: Buffer | null = avatarBlob;
+        if (!avatarToUse && existing?.avatarBlob) {
+          avatarToUse = existing.avatarBlob;
+        } else if (avatarToUse && existing?.avatarBlob) {
+          if (!avatarBuffersDifferent(avatarToUse, existing.avatarBlob)) {
+            avatarToUse = existing.avatarBlob;
+          }
+        }
 
         const execUpsert = async (avatarData: Buffer | null) => {
           const record: IMemberRecord = { ...baseRecord, avatarBlob: avatarData };
@@ -1127,7 +1147,7 @@ export class SuperAdmin {
         };
 
         try {
-          await execUpsert(avatarBlob);
+          await execUpsert(avatarToUse);
           successCount++;
         } catch (err) {
           const code = (err as any)?.code ?? (err as any)?.errorNum;
@@ -1169,7 +1189,9 @@ export class SuperAdmin {
     }
 
     await safeReply(interaction, {
-      content: `Member scan complete. Upserts succeeded: ${successCount}. Failed: ${failCount}.`,
+      content:
+        `Member scan complete. Upserts succeeded: ${successCount}. Failed: ${failCount}. ` +
+        `Marked departed: ${departedCount}.`,
       ephemeral: true,
     });
   }

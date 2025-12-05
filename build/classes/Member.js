@@ -170,12 +170,15 @@ export default class Member {
                 PSN_USERNAME,
                 XBL_USERNAME,
                 NSW_FRIEND_CODE,
-                STEAM_URL
+                STEAM_URL,
+                PROFILE_IMAGE,
+                PROFILE_IMAGE_AT
            FROM RPG_CLUB_USERS
           WHERE USER_ID = :userId`, { userId }, {
                 outFormat: oracledb.OUT_FORMAT_OBJECT,
                 fetchInfo: {
                     AVATAR_BLOB: { type: oracledb.BUFFER },
+                    PROFILE_IMAGE: { type: oracledb.BUFFER },
                 },
             });
             const row = (result.rows ?? [])[0];
@@ -202,6 +205,8 @@ export default class Member {
                 xblUsername: row.XBL_USERNAME ?? null,
                 nswFriendCode: row.NSW_FRIEND_CODE ?? null,
                 steamUrl: row.STEAM_URL ?? null,
+                profileImage: row.PROFILE_IMAGE ?? null,
+                profileImageAt: row.PROFILE_IMAGE_AT ?? null,
             };
         }
         finally {
@@ -329,5 +334,36 @@ export default class Member {
                 await connection.close();
             }
         }
+    }
+    static async markDepartedNotIn(userIds) {
+        if (!userIds.length)
+            return 0;
+        const connection = await getOraclePool().getConnection();
+        const chunkSize = 999; // Oracle IN clause limit per statement (safe)
+        let totalUpdated = 0;
+        try {
+            for (let i = 0; i < userIds.length; i += chunkSize) {
+                const chunk = userIds.slice(i, i + chunkSize);
+                const binds = {};
+                const placeholders = chunk.map((id, idx) => {
+                    const key = `id${idx}`;
+                    binds[key] = id;
+                    return `:${key}`;
+                });
+                const sql = `
+          UPDATE RPG_CLUB_USERS
+             SET SERVER_LEFT_AT = SYSTIMESTAMP,
+                 UPDATED_AT = SYSTIMESTAMP
+           WHERE SERVER_LEFT_AT IS NULL
+             AND USER_ID NOT IN (${placeholders.join(", ")})
+        `;
+                const result = await connection.execute(sql, binds, { autoCommit: true });
+                totalUpdated += result.rowsAffected ?? 0;
+            }
+        }
+        finally {
+            await connection.close();
+        }
+        return totalUpdated;
     }
 }

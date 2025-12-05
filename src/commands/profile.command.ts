@@ -187,6 +187,8 @@ function buildBaseMemberRecord(user: User): IMemberRecord {
     xblUsername: null,
     nswFriendCode: null,
     steamUrl: null,
+    profileImage: null,
+    profileImageAt: null,
   };
 }
 

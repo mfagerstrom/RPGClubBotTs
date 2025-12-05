@@ -95,6 +95,14 @@ export async function memberScanTick(
             GLOBAL_NAME: string | null;
             AVATAR_BLOB: Buffer | null;
             MESSAGE_COUNT: number | null;
+            STEAM_URL: string | null;
+            PSN_USERNAME: string | null;
+            XBL_USERNAME: string | null;
+            NSW_FRIEND_CODE: string | null;
+            COMPLETIONATOR_URL: string | null;
+            SERVER_LEFT_AT: Date | null;
+            PROFILE_IMAGE: Buffer | null;
+            PROFILE_IMAGE_AT: Date | null;
           }
         | null = null;
       try {
@@ -103,8 +111,18 @@ export async function memberScanTick(
           GLOBAL_NAME: string | null;
           AVATAR_BLOB: Buffer | null;
           MESSAGE_COUNT: number | null;
+          STEAM_URL: string | null;
+          PSN_USERNAME: string | null;
+          XBL_USERNAME: string | null;
+          NSW_FRIEND_CODE: string | null;
+          COMPLETIONATOR_URL: string | null;
+          SERVER_LEFT_AT: Date | null;
+          PROFILE_IMAGE: Buffer | null;
+          PROFILE_IMAGE_AT: Date | null;
         }>(
-          `SELECT USERNAME, GLOBAL_NAME, AVATAR_BLOB
+          `SELECT USERNAME, GLOBAL_NAME, AVATAR_BLOB,
+                  MESSAGE_COUNT, STEAM_URL, PSN_USERNAME, XBL_USERNAME, NSW_FRIEND_CODE,
+                  COMPLETIONATOR_URL, SERVER_LEFT_AT, PROFILE_IMAGE, PROFILE_IMAGE_AT
              FROM RPG_CLUB_USERS
             WHERE USER_ID = :userId`,
           { userId: user.id },
@@ -112,6 +130,7 @@ export async function memberScanTick(
             outFormat: oracledb.OUT_FORMAT_OBJECT,
             fetchInfo: {
               AVATAR_BLOB: { type: oracledb.BUFFER },
+              PROFILE_IMAGE: { type: oracledb.BUFFER },
             },
           },
         );
@@ -122,6 +141,14 @@ export async function memberScanTick(
             GLOBAL_NAME: row.GLOBAL_NAME ?? null,
             AVATAR_BLOB: row.AVATAR_BLOB ?? null,
             MESSAGE_COUNT: row.MESSAGE_COUNT ?? null,
+            STEAM_URL: row.STEAM_URL ?? null,
+            PSN_USERNAME: row.PSN_USERNAME ?? null,
+            XBL_USERNAME: row.XBL_USERNAME ?? null,
+            NSW_FRIEND_CODE: row.NSW_FRIEND_CODE ?? null,
+            COMPLETIONATOR_URL: row.COMPLETIONATOR_URL ?? null,
+            SERVER_LEFT_AT: row.SERVER_LEFT_AT ?? null,
+            PROFILE_IMAGE: row.PROFILE_IMAGE ?? null,
+            PROFILE_IMAGE_AT: row.PROFILE_IMAGE_AT ?? null,
           };
         }
       } catch (err) {
@@ -166,11 +193,13 @@ export async function memberScanTick(
         roleMember: memberFlag,
         roleNewcomer: newcomerFlag,
         messageCount: existingRow?.MESSAGE_COUNT ?? null,
-        completionatorUrl: null,
-        psnUsername: null,
-        xblUsername: null,
-        nswFriendCode: null,
-        steamUrl: null,
+        completionatorUrl: existingRow?.COMPLETIONATOR_URL ?? null,
+        psnUsername: existingRow?.PSN_USERNAME ?? null,
+        xblUsername: existingRow?.XBL_USERNAME ?? null,
+        nswFriendCode: existingRow?.NSW_FRIEND_CODE ?? null,
+        steamUrl: existingRow?.STEAM_URL ?? null,
+        profileImage: existingRow?.PROFILE_IMAGE ?? null,
+        profileImageAt: existingRow?.PROFILE_IMAGE_AT ?? null,
       };
 
       const execUpsert = async (avatarData: Buffer | null) => {

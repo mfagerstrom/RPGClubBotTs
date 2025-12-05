@@ -809,6 +809,7 @@ let SuperAdmin = class SuperAdmin {
         };
         await safeReply(interaction, { content: "Fetching all guild members... this may take a moment.", ephemeral: true });
         const members = await guild.members.fetch();
+        const departedCount = await Member.markDepartedNotIn(Array.from(members.keys()));
         const pool = getOraclePool();
         let connection = await pool.getConnection();
         const isRecoverableOracleError = (err) => {
@@ -832,9 +833,21 @@ let SuperAdmin = class SuperAdmin {
         let successCount = 0;
         let failCount = 0;
         const delay = async (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const avatarBuffersDifferent = (a, b) => {
+            if (!a && !b)
+                return false;
+            if (!!a !== !!b)
+                return true;
+            if (!a || !b)
+                return true;
+            if (a.length !== b.length)
+                return true;
+            return !a.equals(b);
+        };
         try {
             for (const member of members.values()) {
                 const user = member.user;
+                const existing = await Member.getByUserId(user.id);
                 // Build avatar blob (throttled per-user)
                 let avatarBlob = null;
                 const avatarUrl = user.displayAvatarURL({ extension: "png", size: 512, forceStatic: true });
@@ -863,27 +876,38 @@ let SuperAdmin = class SuperAdmin {
                     username: user.username,
                     globalName: user.globalName ?? null,
                     avatarBlob: null,
-                    serverJoinedAt: member.joinedAt ?? null,
+                    serverJoinedAt: member.joinedAt ?? existing?.serverJoinedAt ?? null,
                     serverLeftAt: null,
-                    lastSeenAt: null,
+                    lastSeenAt: existing?.lastSeenAt ?? null,
                     roleAdmin: adminFlag,
                     roleModerator: moderatorFlag,
                     roleRegular: regularFlag,
                     roleMember: memberFlag,
                     roleNewcomer: newcomerFlag,
-                    messageCount: null,
-                    completionatorUrl: null,
-                    psnUsername: null,
-                    xblUsername: null,
-                    nswFriendCode: null,
-                    steamUrl: null,
+                    messageCount: existing?.messageCount ?? null,
+                    completionatorUrl: existing?.completionatorUrl ?? null,
+                    psnUsername: existing?.psnUsername ?? null,
+                    xblUsername: existing?.xblUsername ?? null,
+                    nswFriendCode: existing?.nswFriendCode ?? null,
+                    steamUrl: existing?.steamUrl ?? null,
+                    profileImage: existing?.profileImage ?? null,
+                    profileImageAt: existing?.profileImageAt ?? null,
                 };
+                let avatarToUse = avatarBlob;
+                if (!avatarToUse && existing?.avatarBlob) {
+                    avatarToUse = existing.avatarBlob;
+                }
+                else if (avatarToUse && existing?.avatarBlob) {
+                    if (!avatarBuffersDifferent(avatarToUse, existing.avatarBlob)) {
+                        avatarToUse = existing.avatarBlob;
+                    }
+                }
                 const execUpsert = async (avatarData) => {
                     const record = { ...baseRecord, avatarBlob: avatarData };
                     await Member.upsert(record, { connection });
                 };
                 try {
-                    await execUpsert(avatarBlob);
+                    await execUpsert(avatarToUse);
                     successCount++;
                 }
                 catch (err) {
@@ -925,7 +949,8 @@ let SuperAdmin = class SuperAdmin {
             await connection.close();
         }
         await safeReply(interaction, {
-            content: `Member scan complete. Upserts succeeded: ${successCount}. Failed: ${failCount}.`,
+            content: `Member scan complete. Upserts succeeded: ${successCount}. Failed: ${failCount}. ` +
+                `Marked departed: ${departedCount}.`,
             ephemeral: true,
         });
     }

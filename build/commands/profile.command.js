@@ -168,6 +168,8 @@ function buildBaseMemberRecord(user) {
         xblUsername: null,
         nswFriendCode: null,
         steamUrl: null,
+        profileImage: null,
+        profileImageAt: null,
     };
 }
 export async function buildProfileViewPayload(target) {
