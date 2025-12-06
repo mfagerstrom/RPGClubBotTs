@@ -106,7 +106,7 @@ function buildProfileFields(record) {
         fields.push({ label: "Bot", value: "Yes", inline: true });
     }
     if (record.completionatorUrl) {
-        fields.push({ label: "Completionator", value: record.completionatorUrl });
+        fields.push({ label: "Game Collection Tracker URL", value: record.completionatorUrl });
     }
     if (record.steamUrl) {
         fields.push({ label: "Steam", value: record.steamUrl });
@@ -507,7 +507,7 @@ __decorate([
         type: ApplicationCommandOptionType.String,
     })),
     __param(4, SlashOption({
-        description: "Filter by Completionator URL (contains).",
+        description: "Filter by Game Collection Tracker URL (contains).",
         name: "completionator",
         required: false,
         type: ApplicationCommandOptionType.String,
@@ -619,7 +619,7 @@ __decorate([
         type: ApplicationCommandOptionType.User,
     })),
     __param(1, SlashOption({
-        description: "Completionator profile URL.",
+        description: "Game Collection Tracker URL.",
         name: "completionator",
         required: false,
         type: ApplicationCommandOptionType.String,

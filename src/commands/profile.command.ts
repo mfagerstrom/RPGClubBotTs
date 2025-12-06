@@ -120,7 +120,7 @@ function buildProfileFields(
   }
 
   if (record.completionatorUrl) {
-    fields.push({ label: "Completionator", value: record.completionatorUrl });
+    fields.push({ label: "Game Collection Tracker URL", value: record.completionatorUrl });
   }
 
   if (record.steamUrl) {
@@ -386,7 +386,7 @@ export class ProfileCommand {
     })
     globalName: string | undefined,
     @SlashOption({
-      description: "Filter by Completionator URL (contains).",
+      description: "Filter by Game Collection Tracker URL (contains).",
       name: "completionator",
       required: false,
       type: ApplicationCommandOptionType.String,
@@ -641,7 +641,7 @@ export class ProfileCommand {
     })
     member: User | undefined,
     @SlashOption({
-      description: "Completionator profile URL.",
+      description: "Game Collection Tracker URL.",
       name: "completionator",
       required: false,
       type: ApplicationCommandOptionType.String,
