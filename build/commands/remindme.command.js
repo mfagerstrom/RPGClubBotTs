@@ -14,13 +14,14 @@ import Reminder from "../classes/Reminder.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import { buildReminderButtons, formatReminderTime, parseReminderButton, } from "../functions/ReminderUi.js";
 let RemindMeCommand = class RemindMeCommand {
-    async create(when, note, interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+    async create(when, note, showInChat, interaction) {
+        const ephemeral = !showInChat;
+        await safeDeferReply(interaction, { ephemeral });
         const parsedDate = parseUserDate(when);
         if (!parsedDate) {
             await safeReply(interaction, {
                 content: formatDateHelpText("Sorry, I could not understand that time."),
-                ephemeral: true,
+                ephemeral,
             });
             return;
         }
@@ -29,20 +30,20 @@ let RemindMeCommand = class RemindMeCommand {
         if (remindAt <= now.plus({ minutes: 1 })) {
             await safeReply(interaction, {
                 content: "Reminders must be at least one minute in the future.",
-                ephemeral: true,
+                ephemeral,
             });
             return;
         }
         const reminder = await Reminder.create(interaction.user.id, remindAt.toJSDate(), note ?? "Reminder");
         await safeReply(interaction, {
-            content: `Saved reminder #${reminder.reminderId} for ${formatReminderTime(remindAt.toJSDate())}.\n` +
-                "I will DM you at that time with snooze options.",
-            ephemeral: true,
+            content: `Saved reminder #${reminder.reminderId} for ${formatReminderTime(remindAt.toJSDate())}.\n` + "I will DM you at that time with snooze options.",
+            ephemeral,
             components: buildReminderButtons(reminder.reminderId),
         });
     }
-    async menu(interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+    async menu(showInChat, interaction) {
+        const ephemeral = !showInChat;
+        await safeDeferReply(interaction, { ephemeral });
         const reminders = await Reminder.listByUser(interaction.user.id);
         const header = "**Your reminders**";
         const body = reminders.length
@@ -51,16 +52,17 @@ let RemindMeCommand = class RemindMeCommand {
         const help = buildHelpText();
         await safeReply(interaction, {
             content: `${header}\n${body}\n\n${help}`,
-            ephemeral: true,
+            ephemeral,
         });
     }
-    async snooze(reminderId, until, interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+    async snooze(reminderId, until, showInChat, interaction) {
+        const ephemeral = !showInChat;
+        await safeDeferReply(interaction, { ephemeral });
         const parsedDate = parseUserDate(until);
         if (!parsedDate) {
             await safeReply(interaction, {
                 content: formatDateHelpText("Sorry, I could not understand that time."),
-                ephemeral: true,
+                ephemeral,
             });
             return;
         }
@@ -68,7 +70,7 @@ let RemindMeCommand = class RemindMeCommand {
         if (remindAt <= DateTime.utc().plus({ minutes: 1 })) {
             await safeReply(interaction, {
                 content: "Snoozed time must be at least one minute in the future.",
-                ephemeral: true,
+                ephemeral,
             });
             return;
         }
@@ -76,28 +78,29 @@ let RemindMeCommand = class RemindMeCommand {
         if (!updated) {
             await safeReply(interaction, {
                 content: "I could not find that reminder for you.",
-                ephemeral: true,
+                ephemeral,
             });
             return;
         }
         await safeReply(interaction, {
             content: `Reminder #${updated.reminderId} snoozed to ${formatReminderTime(remindAt.toJSDate())}.`,
-            ephemeral: true,
+            ephemeral,
         });
     }
-    async delete(reminderId, interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+    async delete(reminderId, showInChat, interaction) {
+        const ephemeral = !showInChat;
+        await safeDeferReply(interaction, { ephemeral });
         const removed = await Reminder.delete(reminderId, interaction.user.id);
         if (!removed) {
             await safeReply(interaction, {
                 content: "I could not find that reminder for you.",
-                ephemeral: true,
+                ephemeral,
             });
             return;
         }
         await safeReply(interaction, {
             content: `Reminder #${reminderId} deleted.`,
-            ephemeral: true,
+            ephemeral,
         });
     }
 };
@@ -114,10 +117,22 @@ __decorate([
         name: "note",
         required: false,
         type: ApplicationCommandOptionType.String,
+    })),
+    __param(2, SlashOption({
+        description: "If true, post in channel instead of ephemerally.",
+        name: "showinchat",
+        required: false,
+        type: ApplicationCommandOptionType.Boolean,
     }))
 ], RemindMeCommand.prototype, "create", null);
 __decorate([
-    Slash({ description: "Show your reminders and usage help", name: "menu" })
+    Slash({ description: "Show your reminders and usage help", name: "menu" }),
+    __param(0, SlashOption({
+        description: "If true, post in channel instead of ephemerally.",
+        name: "showinchat",
+        required: false,
+        type: ApplicationCommandOptionType.Boolean,
+    }))
 ], RemindMeCommand.prototype, "menu", null);
 __decorate([
     Slash({ description: "Snooze a reminder to another time", name: "snooze" }),
@@ -132,6 +147,12 @@ __decorate([
         name: "until",
         required: true,
         type: ApplicationCommandOptionType.String,
+    })),
+    __param(2, SlashOption({
+        description: "If true, post in channel instead of ephemerally.",
+        name: "showinchat",
+        required: false,
+        type: ApplicationCommandOptionType.Boolean,
     }))
 ], RemindMeCommand.prototype, "snooze", null);
 __decorate([
@@ -141,6 +162,12 @@ __decorate([
         name: "id",
         required: true,
         type: ApplicationCommandOptionType.Integer,
+    })),
+    __param(1, SlashOption({
+        description: "If true, post in channel instead of ephemerally.",
+        name: "showinchat",
+        required: false,
+        type: ApplicationCommandOptionType.Boolean,
     }))
 ], RemindMeCommand.prototype, "delete", null);
 RemindMeCommand = __decorate([

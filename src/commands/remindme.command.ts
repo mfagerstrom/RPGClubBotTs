@@ -33,15 +33,23 @@ export class RemindMeCommand {
       type: ApplicationCommandOptionType.String,
     })
     note: string | undefined,
+    @SlashOption({
+      description: "If true, post in channel instead of ephemerally.",
+      name: "showinchat",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    showInChat: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    const ephemeral = !showInChat;
+    await safeDeferReply(interaction, { ephemeral });
 
     const parsedDate = parseUserDate(when);
     if (!parsedDate) {
       await safeReply(interaction, {
         content: formatDateHelpText("Sorry, I could not understand that time."),
-        ephemeral: true,
+        ephemeral,
       });
       return;
     }
@@ -51,7 +59,7 @@ export class RemindMeCommand {
     if (remindAt <= now.plus({ minutes: 1 })) {
       await safeReply(interaction, {
         content: "Reminders must be at least one minute in the future.",
-        ephemeral: true,
+        ephemeral,
       });
       return;
     }
@@ -66,16 +74,25 @@ export class RemindMeCommand {
       content:
         `Saved reminder #${reminder.reminderId} for ${formatReminderTime(
           remindAt.toJSDate(),
-        )}.\n` +
-        "I will DM you at that time with snooze options.",
-      ephemeral: true,
+        )}.\n` + "I will DM you at that time with snooze options.",
+      ephemeral,
       components: buildReminderButtons(reminder.reminderId),
     });
   }
 
   @Slash({ description: "Show your reminders and usage help", name: "menu" })
-  async menu(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+  async menu(
+    @SlashOption({
+      description: "If true, post in channel instead of ephemerally.",
+      name: "showinchat",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    showInChat: boolean | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    const ephemeral = !showInChat;
+    await safeDeferReply(interaction, { ephemeral });
 
     const reminders = await Reminder.listByUser(interaction.user.id);
     const header = "**Your reminders**";
@@ -87,7 +104,7 @@ export class RemindMeCommand {
 
     await safeReply(interaction, {
       content: `${header}\n${body}\n\n${help}`,
-      ephemeral: true,
+      ephemeral,
     });
   }
 
@@ -107,15 +124,23 @@ export class RemindMeCommand {
       type: ApplicationCommandOptionType.String,
     })
     until: string,
+    @SlashOption({
+      description: "If true, post in channel instead of ephemerally.",
+      name: "showinchat",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    showInChat: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    const ephemeral = !showInChat;
+    await safeDeferReply(interaction, { ephemeral });
 
     const parsedDate = parseUserDate(until);
     if (!parsedDate) {
       await safeReply(interaction, {
         content: formatDateHelpText("Sorry, I could not understand that time."),
-        ephemeral: true,
+        ephemeral,
       });
       return;
     }
@@ -124,7 +149,7 @@ export class RemindMeCommand {
     if (remindAt <= DateTime.utc().plus({ minutes: 1 })) {
       await safeReply(interaction, {
         content: "Snoozed time must be at least one minute in the future.",
-        ephemeral: true,
+        ephemeral,
       });
       return;
     }
@@ -138,17 +163,17 @@ export class RemindMeCommand {
     if (!updated) {
       await safeReply(interaction, {
         content: "I could not find that reminder for you.",
-        ephemeral: true,
+        ephemeral,
       });
       return;
     }
 
-    await safeReply(interaction, {
-      content: `Reminder #${updated.reminderId} snoozed to ${formatReminderTime(
-        remindAt.toJSDate(),
-      )}.`,
-      ephemeral: true,
-    });
+      await safeReply(interaction, {
+        content: `Reminder #${updated.reminderId} snoozed to ${formatReminderTime(
+          remindAt.toJSDate(),
+        )}.`,
+        ephemeral,
+      });
   }
 
   @Slash({ description: "Delete a reminder", name: "delete" })
@@ -160,22 +185,30 @@ export class RemindMeCommand {
       type: ApplicationCommandOptionType.Integer,
     })
     reminderId: number,
+    @SlashOption({
+      description: "If true, post in channel instead of ephemerally.",
+      name: "showinchat",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    showInChat: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    const ephemeral = !showInChat;
+    await safeDeferReply(interaction, { ephemeral });
 
     const removed = await Reminder.delete(reminderId, interaction.user.id);
     if (!removed) {
       await safeReply(interaction, {
         content: "I could not find that reminder for you.",
-        ephemeral: true,
+        ephemeral,
       });
       return;
     }
 
     await safeReply(interaction, {
       content: `Reminder #${reminderId} deleted.`,
-      ephemeral: true,
+      ephemeral,
     });
   }
 }
