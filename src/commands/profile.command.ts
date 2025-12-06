@@ -33,11 +33,6 @@ export type ProfileViewPayload = {
   errorMessage?: string;
 };
 
-function formatDate(value: Date | null): string {
-  if (!value) return "Unknown";
-  return value.toLocaleString();
-}
-
 function parseDateInput(value: string | undefined): Date | null {
   if (!value) return null;
   const parsed = new Date(value);
@@ -83,6 +78,12 @@ function chunkOptions<T>(items: T[], size: number): T[][] {
   return chunks;
 }
 
+function formatDiscordTimestamp(value: Date | null): string {
+  if (!value) return "Unknown";
+  const seconds = Math.floor(value.getTime() / 1000);
+  return `<t:${seconds}:F>`;
+}
+
 function buildProfileFields(
   record: Awaited<ReturnType<typeof Member.getByUserId>>,
 ): ProfileField[] {
@@ -97,8 +98,16 @@ function buildProfileFields(
     fields.push({ label: "Global Name", value: globalName, inline: true });
   }
 
-  fields.push({ label: "Last Seen", value: formatDate(record.lastSeenAt), inline: true });
-  fields.push({ label: "Joined Server", value: formatDate(record.serverJoinedAt), inline: true });
+  fields.push({
+    label: "Last Seen",
+    value: formatDiscordTimestamp(record.lastSeenAt),
+    inline: true,
+  });
+  fields.push({
+    label: "Joined Server",
+    value: formatDiscordTimestamp(record.serverJoinedAt),
+    inline: true,
+  });
 
   fields.push({
     label: "Roles",

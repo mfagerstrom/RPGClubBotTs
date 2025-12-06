@@ -12,11 +12,6 @@ import { Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption } from "di
 import axios from "axios";
 import Member from "../classes/Member.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
-function formatDate(value) {
-    if (!value)
-        return "Unknown";
-    return value.toLocaleString();
-}
 function parseDateInput(value) {
     if (!value)
         return null;
@@ -78,6 +73,12 @@ function chunkOptions(items, size) {
     }
     return chunks;
 }
+function formatDiscordTimestamp(value) {
+    if (!value)
+        return "Unknown";
+    const seconds = Math.floor(value.getTime() / 1000);
+    return `<t:${seconds}:F>`;
+}
 function buildProfileFields(record) {
     if (!record) {
         return [];
@@ -87,8 +88,16 @@ function buildProfileFields(record) {
     if (globalName !== "Unknown") {
         fields.push({ label: "Global Name", value: globalName, inline: true });
     }
-    fields.push({ label: "Last Seen", value: formatDate(record.lastSeenAt), inline: true });
-    fields.push({ label: "Joined Server", value: formatDate(record.serverJoinedAt), inline: true });
+    fields.push({
+        label: "Last Seen",
+        value: formatDiscordTimestamp(record.lastSeenAt),
+        inline: true,
+    });
+    fields.push({
+        label: "Joined Server",
+        value: formatDiscordTimestamp(record.serverJoinedAt),
+        inline: true,
+    });
     fields.push({
         label: "Roles",
         value: [
