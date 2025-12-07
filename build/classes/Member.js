@@ -39,6 +39,30 @@ export default class Member {
             await connection.close();
         }
     }
+    static async getRecentNickHistory(userId, limit = 5) {
+        const connection = await getOraclePool().getConnection();
+        const safeLimit = Math.min(Math.max(limit, 1), 20);
+        try {
+            const result = await connection.execute(`SELECT OLD_NICK, NEW_NICK, CHANGED_AT
+           FROM RPG_CLUB_USER_NICK_HISTORY
+          WHERE USER_ID = :userId
+          ORDER BY CHANGED_AT DESC
+          FETCH FIRST :limit ROWS ONLY`, { userId, limit: safeLimit }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+            return (result.rows ?? []).map((row) => ({
+                oldNick: row.OLD_NICK ?? null,
+                newNick: row.NEW_NICK ?? null,
+                changedAt: row.CHANGED_AT,
+            }));
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            console.error(`[Member] Failed to load nick history for ${userId}: ${msg}`);
+            return [];
+        }
+        finally {
+            await connection.close();
+        }
+    }
     static async search(filters) {
         const connection = await getOraclePool().getConnection();
         const safeLimit = Math.min(Math.max(filters.limit ?? 50, 1), 100);

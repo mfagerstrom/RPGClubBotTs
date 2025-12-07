@@ -79,7 +79,7 @@ function formatDiscordTimestamp(value) {
     const seconds = Math.floor(value.getTime() / 1000);
     return `<t:${seconds}:F>`;
 }
-function buildProfileFields(record) {
+function buildProfileFields(record, nickHistory) {
     if (!record) {
         return [];
     }
@@ -88,16 +88,16 @@ function buildProfileFields(record) {
     if (globalName !== "Unknown") {
         fields.push({ label: "Global Name", value: globalName, inline: true });
     }
-    fields.push({
-        label: "Last Seen",
-        value: formatDiscordTimestamp(record.lastSeenAt),
-        inline: true,
-    });
-    fields.push({
-        label: "Joined Server",
-        value: formatDiscordTimestamp(record.serverJoinedAt),
-        inline: true,
-    });
+    if (record.isBot) {
+        fields.push({ label: "Bot", value: "Yes", inline: true });
+    }
+    if (nickHistory.length > 0) {
+        fields.push({
+            label: "AKA",
+            value: nickHistory.join(", "),
+            inline: true,
+        });
+    }
     fields.push({
         label: "Roles",
         value: [
@@ -110,10 +110,16 @@ function buildProfileFields(record) {
             .filter(Boolean)
             .join(", ")
             .replace(/, $/, "") || "None",
+        inline: true,
     });
-    if (record.isBot) {
-        fields.push({ label: "Bot", value: "Yes", inline: true });
-    }
+    fields.push({
+        label: "Last Seen",
+        value: formatDiscordTimestamp(record.lastSeenAt),
+    });
+    fields.push({
+        label: "Joined Server",
+        value: formatDiscordTimestamp(record.serverJoinedAt),
+    });
     if (record.completionatorUrl) {
         fields.push({ label: "Game Collection Tracker URL", value: record.completionatorUrl });
     }
@@ -184,6 +190,7 @@ function buildBaseMemberRecord(user) {
 export async function buildProfileViewPayload(target) {
     try {
         let record = await Member.getByUserId(target.id);
+        const nickHistoryEntries = await Member.getRecentNickHistory(target.id, 6);
         const avatarUrl = target.displayAvatarURL({
             extension: "png",
             size: 512,
@@ -209,7 +216,21 @@ export async function buildProfileViewPayload(target) {
         if (!record) {
             return { notFoundMessage: `No profile data found for <@${target.id}>.` };
         }
-        const fields = buildProfileFields(record).map((f) => ({
+        const nickHistory = [];
+        for (const entry of nickHistoryEntries) {
+            const candidateRaw = entry.oldNick ?? entry.newNick;
+            const candidate = candidateRaw?.trim();
+            if (!candidate)
+                continue;
+            if (candidate === record.globalName || candidate === record.username)
+                continue;
+            if (nickHistory.includes(candidate))
+                continue;
+            nickHistory.push(candidate);
+            if (nickHistory.length >= 5)
+                break;
+        }
+        const fields = buildProfileFields(record, nickHistory).map((f) => ({
             name: f.label,
             value: f.value,
             inline: f.inline ?? false,

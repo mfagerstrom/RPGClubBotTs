@@ -78,6 +78,12 @@ export interface IMemberSearchResult {
   lastSeenAt: Date | null;
 }
 
+export interface IMemberNickHistory {
+  oldNick: string | null;
+  newNick: string | null;
+  changedAt: Date;
+}
+
 type Connection = oracledb.Connection;
 
 function buildParams(record: IMemberRecord) {
@@ -118,6 +124,41 @@ export default class Member {
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       console.error(`[Member] Failed to update last seen for ${userId}: ${msg}`);
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async getRecentNickHistory(
+    userId: string,
+    limit: number = 5,
+  ): Promise<IMemberNickHistory[]> {
+    const connection = await getOraclePool().getConnection();
+    const safeLimit = Math.min(Math.max(limit, 1), 20);
+    try {
+      const result = await connection.execute<{
+        OLD_NICK: string | null;
+        NEW_NICK: string | null;
+        CHANGED_AT: Date;
+      }>(
+        `SELECT OLD_NICK, NEW_NICK, CHANGED_AT
+           FROM RPG_CLUB_USER_NICK_HISTORY
+          WHERE USER_ID = :userId
+          ORDER BY CHANGED_AT DESC
+          FETCH FIRST :limit ROWS ONLY`,
+        { userId, limit: safeLimit },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      return (result.rows ?? []).map((row) => ({
+        oldNick: row.OLD_NICK ?? null,
+        newNick: row.NEW_NICK ?? null,
+        changedAt: row.CHANGED_AT,
+      }));
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      console.error(`[Member] Failed to load nick history for ${userId}: ${msg}`);
+      return [];
     } finally {
       await connection.close();
     }
