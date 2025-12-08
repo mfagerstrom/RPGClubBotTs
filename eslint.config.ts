@@ -9,8 +9,8 @@ export default [
   pluginJs.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ["src/**/*.{js,ts}"],
-    ignores: ["**/*.config.{js,ts}", "*.reference.ts"],
+    files: ["src/**/*.{ts}"],
+    ignores: ["**/*.config.{ts}", "*.reference.ts"],
     plugins: {
       "@stylistic/js": stylisticJs,
     },
