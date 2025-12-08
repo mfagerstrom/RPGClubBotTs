@@ -20,6 +20,7 @@ type HelpTopicId =
   | "hltb"
   | "coverart"
   | "remindme"
+  | "rss"
   | "mp-info"
   | "profile"
   | "admin"
@@ -49,6 +50,26 @@ type NrGotmHelpTopicId = "search" | "noms" | "nominate" | "delete-nomination";
 
 type NrGotmHelpTopic = {
   id: NrGotmHelpTopicId;
+  label: string;
+  summary: string;
+  syntax: string;
+  notes?: string;
+};
+
+type RemindMeHelpTopicId = "create" | "menu" | "snooze" | "delete";
+
+type RemindMeHelpTopic = {
+  id: RemindMeHelpTopicId;
+  label: string;
+  summary: string;
+  syntax: string;
+  notes?: string;
+};
+
+type ProfileHelpTopicId = "view" | "edit" | "search";
+
+type ProfileHelpTopic = {
+  id: ProfileHelpTopicId;
   label: string;
   summary: string;
   syntax: string;
@@ -127,27 +148,20 @@ const HELP_TOPICS: HelpTopic[] = [
     id: "remindme",
     label: "/remindme",
     summary: "Personal reminders with quick snooze buttons (DM delivery).",
-    syntax:
-      "Syntax: /remindme create when:<date/time> [note:<text>] | /remindme menu | /remindme snooze id:<int> until:<date/time> | /remindme delete id:<int>",
-    notes:
-      "Use natural inputs like 'in 45m' or absolute datetimes. Menu shows your reminders and ids.",
+    syntax: "Use /remindme help for a list of reminder subcommands, syntax, and notes.",
   },
   {
     id: "profile",
     label: "/profile",
     summary:
       "View, edit, or search stored RPG_CLUB_USERS profiles (view/search are ephemeral by default).",
-    syntax:
-      "Syntax: /profile view [member:<user>] [showinchat:<boolean>] | " +
-      "/profile edit [member:<user>] [completionator:<url>] [psn:<string>] " +
-      "[xbl:<string>] [nsw:<string>] [steam:<url>] | " +
-      "/profile search [filters...] [limit:<int>] [include-departed-members:<boolean>] [showinchat:<boolean>]",
-    notes:
-      "View: omit member to view your own profile; set showinchat:true to post publicly. Edit: " +
-      "users may edit their own fields; admins may edit any user. Search: filter by any profile " +
-      "field (ids, names, URLs, platforms, role flags, bot flag, join/last seen ranges). Filters " +
-      "default to partial matches; date/times use ISO formats; limit max 100. Departed members " +
-      "are excluded unless include-departed-members is true.",
+    syntax: "Use /profile help for subcommands (view/edit/search) and parameters.",
+  },
+  {
+    id: "rss",
+    label: "/rss",
+    summary: "Admin-only RSS relays with include/exclude keyword filters per channel.",
+    syntax: "Use /rss help for subcommands: add, remove, edit, list.",
   },
   {
     id: "admin",
@@ -277,6 +291,78 @@ function buildGotmHelpEmbed(topic: GotmHelpTopic): EmbedBuilder {
   return embed;
 }
 
+function buildRemindMeHelpButtons(activeId?: RemindMeHelpTopicId): ActionRowBuilder<ButtonBuilder>[] {
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      REMINDME_HELP_TOPICS.map((topic) =>
+        new ButtonBuilder()
+          .setCustomId(`remindme-help-${topic.id}`)
+          .setLabel(topic.label)
+          .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary),
+      ),
+    ),
+  );
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("help-main")
+        .setLabel("Back to Help Main Menu")
+        .setStyle(ButtonStyle.Secondary),
+    ),
+  );
+  return rows;
+}
+
+function buildRemindMeHelpEmbed(topic: RemindMeHelpTopic): EmbedBuilder {
+  const embed = new EmbedBuilder()
+    .setTitle(`${topic.label} help`)
+    .setDescription(topic.summary)
+    .addFields({ name: "Syntax", value: topic.syntax });
+
+  if (topic.notes) {
+    embed.addFields({ name: "Notes", value: topic.notes });
+  }
+
+  return embed;
+}
+
+function buildProfileHelpButtons(activeId?: ProfileHelpTopicId): ActionRowBuilder<ButtonBuilder>[] {
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      PROFILE_HELP_TOPICS.map((topic) =>
+        new ButtonBuilder()
+          .setCustomId(`profile-help-${topic.id}`)
+          .setLabel(topic.label)
+          .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary),
+      ),
+    ),
+  );
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("help-main")
+        .setLabel("Back to Help Main Menu")
+        .setStyle(ButtonStyle.Secondary),
+    ),
+  );
+  return rows;
+}
+
+function buildProfileHelpEmbed(topic: ProfileHelpTopic): EmbedBuilder {
+  const embed = new EmbedBuilder()
+    .setTitle(`${topic.label} help`)
+    .setDescription(topic.summary)
+    .addFields({ name: "Syntax", value: topic.syntax });
+
+  if (topic.notes) {
+    embed.addFields({ name: "Notes", value: topic.notes });
+  }
+
+  return embed;
+}
+
 const NR_GOTM_HELP_TOPICS: NrGotmHelpTopic[] = [
   {
     id: "search",
@@ -349,6 +435,141 @@ function buildNrGotmHelpEmbed(topic: NrGotmHelpTopic): EmbedBuilder {
   return embed;
 }
 
+type RssHelpTopicId = "add" | "remove" | "edit" | "list";
+
+type RssHelpTopic = {
+  id: RssHelpTopicId;
+  label: string;
+  summary: string;
+  syntax: string;
+};
+
+const RSS_HELP_TOPICS: RssHelpTopic[] = [
+  {
+    id: "add",
+    label: "/rss add",
+    summary: "Add an RSS feed relay with optional include/exclude keywords.",
+    syntax:
+      "Syntax: /rss add url:<string> channel:<channel> [name:<string>] [include:<csv>] [exclude:<csv>]",
+  },
+  {
+    id: "remove",
+    label: "/rss remove",
+    summary: "Remove an existing RSS relay by id.",
+    syntax: "Syntax: /rss remove id:<integer>",
+  },
+  {
+    id: "edit",
+    label: "/rss edit",
+    summary: "Update an existing RSS relay (url/channel/name/include/exclude).",
+    syntax:
+      "Syntax: /rss edit id:<integer> [url:<string>] [channel:<channel>] [name:<string>] [include:<csv>] [exclude:<csv>]",
+  },
+  {
+    id: "list",
+    label: "/rss list",
+    summary: "List configured RSS relays and their filters.",
+    syntax: "Syntax: /rss list",
+  },
+];
+
+const REMINDME_HELP_TOPICS: RemindMeHelpTopic[] = [
+  {
+    id: "create",
+    label: "/remindme create",
+    summary: "Create a reminder delivered by DM with quick snooze buttons.",
+    syntax: "Syntax: /remindme create when:<date/time> [note:<text>]",
+    notes: "Use natural inputs like 'in 45m' or absolute datetimes; must be at least 1 minute ahead.",
+  },
+  {
+    id: "menu",
+    label: "/remindme menu",
+    summary: "Show your reminders and usage help.",
+    syntax: "Syntax: /remindme menu",
+    notes: "Lists your reminders with ids and snooze/delete options.",
+  },
+  {
+    id: "snooze",
+    label: "/remindme snooze",
+    summary: "Snooze a reminder to a new time.",
+    syntax: "Syntax: /remindme snooze id:<int> until:<date/time>",
+  },
+  {
+    id: "delete",
+    label: "/remindme delete",
+    summary: "Delete a reminder by id.",
+    syntax: "Syntax: /remindme delete id:<int>",
+  },
+];
+
+const PROFILE_HELP_TOPICS: ProfileHelpTopic[] = [
+  {
+    id: "view",
+    label: "/profile view",
+    summary: "View a member profile (ephemeral by default).",
+    syntax: "Syntax: /profile view [member:<user>] [showinchat:<boolean>]",
+    notes: "Omit member to view your own profile; set showinchat:true to post publicly.",
+  },
+  {
+    id: "edit",
+    label: "/profile edit",
+    summary: "Edit a profile's platform links/handles (self or admin).",
+    syntax:
+      "Syntax: /profile edit [member:<user>] [completionator:<url>] [psn:<string>] [xbl:<string>] [nsw:<string>] [steam:<url>]",
+    notes: "Users may edit their own fields; admins may edit any user.",
+  },
+  {
+    id: "search",
+    label: "/profile search",
+    summary: "Search profiles by id/name/platform fields.",
+    syntax:
+      "Syntax: /profile search [userId:<string>] [username:<string>] [globalname:<string>] [completionator:<string>] [steam:<string>] [psn:<string>] [xbl:<string>] [nsw:<string>] [role flags...] [limit:<int>] [include-departed-members:<boolean>] [showinchat:<boolean>]",
+    notes:
+      "Filters default to partial matches; date/times use ISO formats; limit max 100; departed members are excluded unless include-departed-members is true.",
+  },
+];
+
+function buildRssHelpButtons(activeId?: RssHelpTopicId): ActionRowBuilder<ButtonBuilder>[] {
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      RSS_HELP_TOPICS.map((topic) =>
+        new ButtonBuilder()
+          .setCustomId(`rss-help-${topic.id}`)
+          .setLabel(topic.label)
+          .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary),
+      ),
+    ),
+  );
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("help-main")
+        .setLabel("Back to Help Main Menu")
+        .setStyle(ButtonStyle.Secondary),
+    ),
+  );
+  return rows;
+}
+
+function buildRssHelpEmbed(topic: RssHelpTopic): EmbedBuilder {
+  return new EmbedBuilder()
+    .setTitle(`${topic.label} help`)
+    .setDescription(topic.summary)
+    .addFields({ name: "Syntax", value: topic.syntax });
+}
+
+export function buildRssHelpResponse(
+  activeTopicId?: RssHelpTopicId,
+): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
+  const embed = new EmbedBuilder()
+    .setTitle("/rss commands")
+    .setDescription("Choose an RSS subcommand button to view details.");
+
+  const components = buildRssHelpButtons(activeTopicId);
+  return { embeds: [embed], components };
+}
+
 export function buildMainHelpResponse(
   activeTopicId?: HelpTopicId,
 ): {
@@ -384,6 +605,28 @@ export function buildNrGotmHelpResponse(
     .setDescription("Choose an NR-GOTM subcommand button to view details.");
 
   const components = buildNrGotmHelpButtons(activeTopicId);
+  return { embeds: [embed], components };
+}
+
+export function buildRemindMeHelpResponse(
+  activeTopicId?: RemindMeHelpTopicId,
+): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
+  const embed = new EmbedBuilder()
+    .setTitle("/remindme commands")
+    .setDescription("Choose a remindme subcommand button to view details.");
+
+  const components = buildRemindMeHelpButtons(activeTopicId);
+  return { embeds: [embed], components };
+}
+
+export function buildProfileHelpResponse(
+  activeTopicId?: ProfileHelpTopicId,
+): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
+  const embed = new EmbedBuilder()
+    .setTitle("/profile commands")
+    .setDescription("Choose a profile subcommand button to view details.");
+
+  const components = buildProfileHelpButtons(activeTopicId);
   return { embeds: [embed], components };
 }
 
@@ -473,6 +716,24 @@ export class BotHelp {
       return;
     }
 
+    if (topicId === "remindme") {
+      const response = buildRemindMeHelpResponse();
+      await safeUpdate(interaction, response);
+      return;
+    }
+
+    if (topicId === "profile") {
+      const response = buildProfileHelpResponse();
+      await safeUpdate(interaction, response);
+      return;
+    }
+
+    if (topicId === "rss") {
+      const response = buildRssHelpResponse();
+      await safeUpdate(interaction, response);
+      return;
+    }
+
     if (!topic) {
       const response = buildMainHelpResponse();
       await safeUpdate(interaction, {
@@ -529,6 +790,70 @@ export class BotHelp {
     await safeUpdate(interaction, {
       embeds: [embed],
       components: buildNrGotmHelpButtons(topic.id),
+    });
+  }
+
+  @ButtonComponent({ id: /^rss-help-.+/ })
+  async handleRssHelpButton(interaction: ButtonInteraction): Promise<void> {
+    const topicId = interaction.customId.replace("rss-help-", "") as RssHelpTopicId;
+    const topic = RSS_HELP_TOPICS.find((entry) => entry.id === topicId);
+
+    if (!topic) {
+      const response = buildRssHelpResponse();
+      await safeUpdate(interaction, {
+        ...response,
+        content: "Sorry, I don't recognize that RSS help topic. Showing the RSS help menu.",
+      });
+      return;
+    }
+
+    const embed = buildRssHelpEmbed(topic);
+    await safeUpdate(interaction, {
+      embeds: [embed],
+      components: buildRssHelpButtons(topic.id),
+    });
+  }
+
+  @ButtonComponent({ id: /^remindme-help-.+/ })
+  async handleRemindMeHelpButton(interaction: ButtonInteraction): Promise<void> {
+    const topicId = interaction.customId.replace("remindme-help-", "") as RemindMeHelpTopicId;
+    const topic = REMINDME_HELP_TOPICS.find((entry) => entry.id === topicId);
+
+    if (!topic) {
+      const response = buildRemindMeHelpResponse();
+      await safeUpdate(interaction, {
+        ...response,
+        content:
+          "Sorry, I don't recognize that remindme help topic. Showing the remindme help menu.",
+      });
+      return;
+    }
+
+    const embed = buildRemindMeHelpEmbed(topic);
+    await safeUpdate(interaction, {
+      embeds: [embed],
+      components: buildRemindMeHelpButtons(topic.id),
+    });
+  }
+
+  @ButtonComponent({ id: /^profile-help-.+/ })
+  async handleProfileHelpButton(interaction: ButtonInteraction): Promise<void> {
+    const topicId = interaction.customId.replace("profile-help-", "") as ProfileHelpTopicId;
+    const topic = PROFILE_HELP_TOPICS.find((entry) => entry.id === topicId);
+
+    if (!topic) {
+      const response = buildProfileHelpResponse();
+      await safeUpdate(interaction, {
+        ...response,
+        content: "Sorry, I don't recognize that profile help topic. Showing the profile help menu.",
+      });
+      return;
+    }
+
+    const embed = buildProfileHelpEmbed(topic);
+    await safeUpdate(interaction, {
+      embeds: [embed],
+      components: buildProfileHelpButtons(topic.id),
     });
   }
 }

@@ -4,6 +4,7 @@ import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import { isAdmin } from "./admin.command.js";
 import { addFeed, listFeeds, removeFeed, updateFeed } from "../classes/RssFeed.js";
+import { buildRssHelpResponse } from "./help.command.js";
 
 function normalizeList(value: string | undefined): string[] {
   if (!value) return [];
@@ -17,6 +18,17 @@ function normalizeList(value: string | undefined): string[] {
 @SlashGroup({ description: "Manage RSS feed relays", name: "rss" })
 @SlashGroup("rss")
 export class RssCommand {
+  @Slash({ description: "Show help for RSS commands", name: "help" })
+  async help(interaction: CommandInteraction): Promise<void> {
+    await safeDeferReply(interaction, { ephemeral: true });
+
+    const ok = await isAdmin(interaction);
+    if (!ok) return;
+
+    const response = buildRssHelpResponse();
+    await safeReply(interaction, { ...response, ephemeral: true });
+  }
+
   @Slash({ description: "Add an RSS feed relay", name: "add" })
   async add(
     @SlashOption({
