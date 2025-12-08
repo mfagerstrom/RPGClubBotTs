@@ -9,6 +9,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 import { ActionRowBuilder, ApplicationCommandOptionType, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, PermissionsBitField, } from "discord.js";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
+import { DateTime } from "luxon";
 import { getPresenceHistory, setPresence, setPresenceFromInteraction, } from "../functions/SetPresence.js";
 import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
@@ -420,7 +421,25 @@ let Admin = class Admin {
                 const question = kindLabel === "GOTM"
                     ? `What Roleplaying Game(s) would you like to discuss in ${monthLabel}?`
                     : `What Non-Roleplaying Game(s) would you like to discuss in ${monthLabel}?`;
-                return `/poll question:${question} answers:${answersJoined} max_select:${maxSelect} start:0 time_limit:48h vote_change:Yes realtime_results:🙈 Hidden privacy:🤐 Semi-private role_required:@members channel:#announcements name:${pollName} final_reveal:Yes`;
+                // Calculate time until 8 PM Eastern
+                const nowInEastern = DateTime.now().setZone("America/New_York");
+                const today8pm = nowInEastern.set({ hour: 20, minute: 0, second: 0, millisecond: 0 });
+                let startOutput;
+                let timeLimitOutput;
+                if (nowInEastern < today8pm) {
+                    const diff = today8pm.diff(nowInEastern).shiftTo("hours", "minutes", "seconds");
+                    startOutput = diff.toFormat("h'h'm'm's's");
+                    timeLimitOutput = "48h";
+                }
+                else {
+                    startOutput = "1m";
+                    // End at 8 PM on (Today + 2 days)
+                    const targetEnd = today8pm.plus({ days: 2 });
+                    const actualStart = nowInEastern.plus({ minutes: 1 });
+                    const diff = targetEnd.diff(actualStart).shiftTo("hours", "minutes", "seconds");
+                    timeLimitOutput = diff.toFormat("h'h'm'm's's");
+                }
+                return `/poll question:${question} answers:${answersJoined} max_select:${maxSelect} start:${startOutput} time_limit:${timeLimitOutput} vote_change:Yes realtime_results:🙈 Hidden privacy:🤐 Semi-private role_required:@members channel:#announcements name:${pollName} final_reveal:Yes`;
             };
             const gotmAnswers = gotmNoms.map((n) => n.gameTitle).map((t) => t.trim()).filter(Boolean);
             const nrAnswers = nrNoms.map((n) => n.gameTitle).map((t) => t.trim()).filter(Boolean);
