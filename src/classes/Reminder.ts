@@ -6,6 +6,7 @@ export interface IReminderRecord {
   userId: string;
   remindAt: Date;
   content: string;
+  isNoisy: boolean;
   sentAt: Date | null;
   createdAt: Date | null;
   updatedAt: Date | null;
@@ -14,7 +15,7 @@ export interface IReminderRecord {
 type Connection = oracledb.Connection;
 
 const REMINDER_COLUMNS =
-  "REMINDER_ID, USER_ID, REMIND_AT, CONTENT, SENT_AT, CREATED_AT, UPDATED_AT";
+  "REMINDER_ID, USER_ID, REMIND_AT, CONTENT, IS_NOISY, SENT_AT, CREATED_AT, UPDATED_AT";
 
 function normalizeReminderId(value: number): number {
   const id = Number(value);
@@ -55,6 +56,7 @@ function mapRowToReminder(row: {
   USER_ID: string;
   REMIND_AT: Date | string;
   CONTENT: string;
+  IS_NOISY: number;
   SENT_AT: Date | string | null;
   CREATED_AT: Date | string | null;
   UPDATED_AT: Date | string | null;
@@ -62,6 +64,7 @@ function mapRowToReminder(row: {
   const reminderId = normalizeReminderId(row.REMINDER_ID);
   const remindAt = normalizeDate(row.REMIND_AT);
   const content = normalizeContent(row.CONTENT);
+  const isNoisy = Boolean(row.IS_NOISY);
 
   const sentAt =
     row.SENT_AT === null || row.SENT_AT === undefined
@@ -81,6 +84,7 @@ function mapRowToReminder(row: {
     userId: row.USER_ID,
     remindAt,
     content,
+    isNoisy,
     sentAt,
     createdAt,
     updatedAt,
@@ -92,9 +96,11 @@ export default class Reminder {
     userId: string,
     remindAt: Date | string,
     content: string,
+    isNoisy: boolean = false,
   ): Promise<IReminderRecord> {
     const normalizedDate = normalizeDate(remindAt);
     const normalizedContent = normalizeContent(content);
+    const noisyVal = isNoisy ? 1 : 0;
 
     const pool = getOraclePool();
     const connection = await pool.getConnection();
@@ -102,15 +108,16 @@ export default class Reminder {
     try {
       const result = await connection.execute(
         `INSERT INTO USER_REMINDERS (
-           USER_ID, REMIND_AT, CONTENT, SENT_AT, CREATED_AT, UPDATED_AT
+           USER_ID, REMIND_AT, CONTENT, IS_NOISY, SENT_AT, CREATED_AT, UPDATED_AT
          ) VALUES (
-           :userId, :remindAt, :content, NULL, SYSTIMESTAMP, SYSTIMESTAMP
+           :userId, :remindAt, :content, :noisyVal, NULL, SYSTIMESTAMP, SYSTIMESTAMP
          )
          RETURNING REMINDER_ID INTO :reminderId`,
         {
           userId,
           remindAt: normalizedDate,
           content: normalizedContent,
+          noisyVal,
           reminderId: {
             dir: oracledb.BIND_OUT,
             type: oracledb.NUMBER,
@@ -154,6 +161,7 @@ export default class Reminder {
             USER_ID: string;
             REMIND_AT: Date | string;
             CONTENT: string;
+            IS_NOISY: number;
             SENT_AT: Date | string | null;
             CREATED_AT: Date | string | null;
             UPDATED_AT: Date | string | null;
@@ -192,6 +200,7 @@ export default class Reminder {
         USER_ID: string;
         REMIND_AT: Date | string;
         CONTENT: string;
+        IS_NOISY: number;
         SENT_AT: Date | string | null;
         CREATED_AT: Date | string | null;
         UPDATED_AT: Date | string | null;
@@ -314,6 +323,7 @@ export default class Reminder {
             USER_ID: string;
             REMIND_AT: Date | string;
             CONTENT: string;
+            IS_NOISY: number;
             SENT_AT: Date | string | null;
             CREATED_AT: Date | string | null;
             UPDATED_AT: Date | string | null;

@@ -34,15 +34,15 @@ export class RemindMeCommand {
     })
     note: string | undefined,
     @SlashOption({
-      description: "If true, post in channel instead of ephemerally.",
-      name: "showinchat",
+      description: "Repeat every 15m until done? (default: false)",
+      name: "noisy",
       required: false,
       type: ApplicationCommandOptionType.Boolean,
     })
-    showInChat: boolean | undefined,
+    noisy: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    const ephemeral = !showInChat;
+    const ephemeral = true;
     await safeDeferReply(interaction, { ephemeral });
 
     const parsedDate = parseUserDate(when);
@@ -64,17 +64,20 @@ export class RemindMeCommand {
       return;
     }
 
+    const isNoisy = !!noisy;
     const reminder = await Reminder.create(
       interaction.user.id,
       remindAt.toJSDate(),
       note ?? "Reminder",
+      isNoisy,
     );
 
+    const noisyText = isNoisy ? " (noisy)" : "";
     await safeReply(interaction, {
       content:
         `Saved reminder #${reminder.reminderId} for ${formatReminderTime(
           remindAt.toJSDate(),
-        )}.\n` + "I will DM you at that time with snooze options.",
+        )}.${noisyText}\n` + "I will DM you at that time with snooze options.",
       ephemeral,
       components: buildReminderButtons(reminder.reminderId),
     });
@@ -82,16 +85,9 @@ export class RemindMeCommand {
 
   @Slash({ description: "Show your reminders and usage help", name: "menu" })
   async menu(
-    @SlashOption({
-      description: "If true, post in channel instead of ephemerally.",
-      name: "showinchat",
-      required: false,
-      type: ApplicationCommandOptionType.Boolean,
-    })
-    showInChat: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    const ephemeral = !showInChat;
+    const ephemeral = true;
     await safeDeferReply(interaction, { ephemeral });
 
     const reminders = await Reminder.listByUser(interaction.user.id);
@@ -124,16 +120,9 @@ export class RemindMeCommand {
       type: ApplicationCommandOptionType.String,
     })
     until: string,
-    @SlashOption({
-      description: "If true, post in channel instead of ephemerally.",
-      name: "showinchat",
-      required: false,
-      type: ApplicationCommandOptionType.Boolean,
-    })
-    showInChat: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    const ephemeral = !showInChat;
+    const ephemeral = true;
     await safeDeferReply(interaction, { ephemeral });
 
     const parsedDate = parseUserDate(until);
@@ -185,16 +174,9 @@ export class RemindMeCommand {
       type: ApplicationCommandOptionType.Integer,
     })
     reminderId: number,
-    @SlashOption({
-      description: "If true, post in channel instead of ephemerally.",
-      name: "showinchat",
-      required: false,
-      type: ApplicationCommandOptionType.Boolean,
-    })
-    showInChat: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    const ephemeral = !showInChat;
+    const ephemeral = true;
     await safeDeferReply(interaction, { ephemeral });
 
     const removed = await Reminder.delete(reminderId, interaction.user.id);
@@ -237,6 +219,33 @@ export class RemindMeButtons {
 
     if (parsed.kind === "done") {
       await Reminder.delete(reminder.reminderId, interaction.user.id);
+
+      try {
+        if (interaction.message?.deletable) {
+          await interaction.message.delete();
+          await safeReply(interaction, {
+            content: `Reminder #${reminder.reminderId} marked done.`,
+            ephemeral: true,
+          });
+          return;
+        }
+      } catch (err) {
+        console.warn("Could not delete reminder message:", err);
+      }
+
+      // Fallback: Remove buttons from the message
+      if ((interaction as any).update) {
+        try {
+          await (interaction as any).update({
+            content: `Reminder #${reminder.reminderId} marked done.`,
+            components: [],
+          });
+          return;
+        } catch (err) {
+          console.warn("Could not update reminder message:", err);
+        }
+      }
+
       await safeReply(interaction, {
         content: `Got it. Reminder #${reminder.reminderId} is removed.`,
         ephemeral: true,
@@ -324,15 +333,16 @@ function parseUserDate(input: string): Date | null {
 
 function formatReminderLine(reminder: IReminderRecord): string {
   const status = reminder.sentAt ? "sent" : "pending";
+  const noisy = reminder.isNoisy ? " (noisy)" : "";
   return `• #${reminder.reminderId} — ${reminder.content} — ${formatReminderTime(
     reminder.remindAt,
-  )} (${status})`;
+  )}${noisy} (${status})`;
 }
 
 function buildHelpText(): string {
   return (
     "**Managing reminders**\n" +
-    "• Add: /remindme create when:<time> note:<text>\n" +
+    "• Add: /remindme create when:<time> note:<text> [noisy:true]\n" +
     "• Snooze: /remindme snooze id:<id> until:<time>\n" +
     "• Delete: /remindme delete id:<id>\n" +
     "Reminders arrive in DMs with quick snooze buttons."

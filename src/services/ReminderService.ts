@@ -58,7 +58,17 @@ async function deliverReminder(
       components: buildReminderButtons(reminder.reminderId),
     });
 
-    await Reminder.markSent(reminder.reminderId);
+    if (reminder.isNoisy) {
+      // If noisy, auto-snooze for 15 minutes instead of marking as done.
+      const fifteenMinutesFromNow = new Date(Date.now() + 15 * 60 * 1000);
+      await Reminder.snooze(
+        reminder.reminderId,
+        reminder.userId,
+        fifteenMinutesFromNow,
+      );
+    } else {
+      await Reminder.markSent(reminder.reminderId);
+    }
   } catch (err) {
     console.error(`Failed to deliver reminder ${reminder.reminderId}:`, err);
   }

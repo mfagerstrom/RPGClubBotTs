@@ -1,6 +1,6 @@
 import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
-const REMINDER_COLUMNS = "REMINDER_ID, USER_ID, REMIND_AT, CONTENT, SENT_AT, CREATED_AT, UPDATED_AT";
+const REMINDER_COLUMNS = "REMINDER_ID, USER_ID, REMIND_AT, CONTENT, IS_NOISY, SENT_AT, CREATED_AT, UPDATED_AT";
 function normalizeReminderId(value) {
     const id = Number(value);
     if (!Number.isFinite(id) || id <= 0) {
@@ -35,6 +35,7 @@ function mapRowToReminder(row) {
     const reminderId = normalizeReminderId(row.REMINDER_ID);
     const remindAt = normalizeDate(row.REMIND_AT);
     const content = normalizeContent(row.CONTENT);
+    const isNoisy = Boolean(row.IS_NOISY);
     const sentAt = row.SENT_AT === null || row.SENT_AT === undefined
         ? null
         : normalizeDate(row.SENT_AT);
@@ -49,27 +50,30 @@ function mapRowToReminder(row) {
         userId: row.USER_ID,
         remindAt,
         content,
+        isNoisy,
         sentAt,
         createdAt,
         updatedAt,
     };
 }
 export default class Reminder {
-    static async create(userId, remindAt, content) {
+    static async create(userId, remindAt, content, isNoisy = false) {
         const normalizedDate = normalizeDate(remindAt);
         const normalizedContent = normalizeContent(content);
+        const noisyVal = isNoisy ? 1 : 0;
         const pool = getOraclePool();
         const connection = await pool.getConnection();
         try {
             const result = await connection.execute(`INSERT INTO USER_REMINDERS (
-           USER_ID, REMIND_AT, CONTENT, SENT_AT, CREATED_AT, UPDATED_AT
+           USER_ID, REMIND_AT, CONTENT, IS_NOISY, SENT_AT, CREATED_AT, UPDATED_AT
          ) VALUES (
-           :userId, :remindAt, :content, NULL, SYSTIMESTAMP, SYSTIMESTAMP
+           :userId, :remindAt, :content, :noisyVal, NULL, SYSTIMESTAMP, SYSTIMESTAMP
          )
          RETURNING REMINDER_ID INTO :reminderId`, {
                 userId,
                 remindAt: normalizedDate,
                 content: normalizedContent,
+                noisyVal,
                 reminderId: {
                     dir: oracledb.BIND_OUT,
                     type: oracledb.NUMBER,

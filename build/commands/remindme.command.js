@@ -14,8 +14,8 @@ import Reminder from "../classes/Reminder.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import { buildReminderButtons, formatReminderTime, parseReminderButton, } from "../functions/ReminderUi.js";
 let RemindMeCommand = class RemindMeCommand {
-    async create(when, note, showInChat, interaction) {
-        const ephemeral = !showInChat;
+    async create(when, note, noisy, interaction) {
+        const ephemeral = true;
         await safeDeferReply(interaction, { ephemeral });
         const parsedDate = parseUserDate(when);
         if (!parsedDate) {
@@ -34,15 +34,17 @@ let RemindMeCommand = class RemindMeCommand {
             });
             return;
         }
-        const reminder = await Reminder.create(interaction.user.id, remindAt.toJSDate(), note ?? "Reminder");
+        const isNoisy = !!noisy;
+        const reminder = await Reminder.create(interaction.user.id, remindAt.toJSDate(), note ?? "Reminder", isNoisy);
+        const noisyText = isNoisy ? " (noisy)" : "";
         await safeReply(interaction, {
-            content: `Saved reminder #${reminder.reminderId} for ${formatReminderTime(remindAt.toJSDate())}.\n` + "I will DM you at that time with snooze options.",
+            content: `Saved reminder #${reminder.reminderId} for ${formatReminderTime(remindAt.toJSDate())}.${noisyText}\n` + "I will DM you at that time with snooze options.",
             ephemeral,
             components: buildReminderButtons(reminder.reminderId),
         });
     }
-    async menu(showInChat, interaction) {
-        const ephemeral = !showInChat;
+    async menu(interaction) {
+        const ephemeral = true;
         await safeDeferReply(interaction, { ephemeral });
         const reminders = await Reminder.listByUser(interaction.user.id);
         const header = "**Your reminders**";
@@ -55,8 +57,8 @@ let RemindMeCommand = class RemindMeCommand {
             ephemeral,
         });
     }
-    async snooze(reminderId, until, showInChat, interaction) {
-        const ephemeral = !showInChat;
+    async snooze(reminderId, until, interaction) {
+        const ephemeral = true;
         await safeDeferReply(interaction, { ephemeral });
         const parsedDate = parseUserDate(until);
         if (!parsedDate) {
@@ -87,8 +89,8 @@ let RemindMeCommand = class RemindMeCommand {
             ephemeral,
         });
     }
-    async delete(reminderId, showInChat, interaction) {
-        const ephemeral = !showInChat;
+    async delete(reminderId, interaction) {
+        const ephemeral = true;
         await safeDeferReply(interaction, { ephemeral });
         const removed = await Reminder.delete(reminderId, interaction.user.id);
         if (!removed) {
@@ -119,20 +121,14 @@ __decorate([
         type: ApplicationCommandOptionType.String,
     })),
     __param(2, SlashOption({
-        description: "If true, post in channel instead of ephemerally.",
-        name: "showinchat",
+        description: "Repeat every 15m until done? (default: false)",
+        name: "noisy",
         required: false,
         type: ApplicationCommandOptionType.Boolean,
     }))
 ], RemindMeCommand.prototype, "create", null);
 __decorate([
-    Slash({ description: "Show your reminders and usage help", name: "menu" }),
-    __param(0, SlashOption({
-        description: "If true, post in channel instead of ephemerally.",
-        name: "showinchat",
-        required: false,
-        type: ApplicationCommandOptionType.Boolean,
-    }))
+    Slash({ description: "Show your reminders and usage help", name: "menu" })
 ], RemindMeCommand.prototype, "menu", null);
 __decorate([
     Slash({ description: "Snooze a reminder to another time", name: "snooze" }),
@@ -147,12 +143,6 @@ __decorate([
         name: "until",
         required: true,
         type: ApplicationCommandOptionType.String,
-    })),
-    __param(2, SlashOption({
-        description: "If true, post in channel instead of ephemerally.",
-        name: "showinchat",
-        required: false,
-        type: ApplicationCommandOptionType.Boolean,
     }))
 ], RemindMeCommand.prototype, "snooze", null);
 __decorate([
@@ -162,12 +152,6 @@ __decorate([
         name: "id",
         required: true,
         type: ApplicationCommandOptionType.Integer,
-    })),
-    __param(1, SlashOption({
-        description: "If true, post in channel instead of ephemerally.",
-        name: "showinchat",
-        required: false,
-        type: ApplicationCommandOptionType.Boolean,
     }))
 ], RemindMeCommand.prototype, "delete", null);
 RemindMeCommand = __decorate([
@@ -196,6 +180,32 @@ let RemindMeButtons = class RemindMeButtons {
         }
         if (parsed.kind === "done") {
             await Reminder.delete(reminder.reminderId, interaction.user.id);
+            try {
+                if (interaction.message?.deletable) {
+                    await interaction.message.delete();
+                    await safeReply(interaction, {
+                        content: `Reminder #${reminder.reminderId} marked done.`,
+                        ephemeral: true,
+                    });
+                    return;
+                }
+            }
+            catch (err) {
+                console.warn("Could not delete reminder message:", err);
+            }
+            // Fallback: Remove buttons from the message
+            if (interaction.update) {
+                try {
+                    await interaction.update({
+                        content: `Reminder #${reminder.reminderId} marked done.`,
+                        components: [],
+                    });
+                    return;
+                }
+                catch (err) {
+                    console.warn("Could not update reminder message:", err);
+                }
+            }
             await safeReply(interaction, {
                 content: `Got it. Reminder #${reminder.reminderId} is removed.`,
                 ephemeral: true,
@@ -273,11 +283,12 @@ function parseUserDate(input) {
 }
 function formatReminderLine(reminder) {
     const status = reminder.sentAt ? "sent" : "pending";
-    return `• #${reminder.reminderId} — ${reminder.content} — ${formatReminderTime(reminder.remindAt)} (${status})`;
+    const noisy = reminder.isNoisy ? " (noisy)" : "";
+    return `• #${reminder.reminderId} — ${reminder.content} — ${formatReminderTime(reminder.remindAt)}${noisy} (${status})`;
 }
 function buildHelpText() {
     return ("**Managing reminders**\n" +
-        "• Add: /remindme create when:<time> note:<text>\n" +
+        "• Add: /remindme create when:<time> note:<text> [noisy:true]\n" +
         "• Snooze: /remindme snooze id:<id> until:<time>\n" +
         "• Delete: /remindme delete id:<id>\n" +
         "Reminders arrive in DMs with quick snooze buttons.");

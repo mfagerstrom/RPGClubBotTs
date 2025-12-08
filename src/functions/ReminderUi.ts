@@ -60,9 +60,13 @@ export function parseReminderButton(customId: string): ReminderButton | null {
 
 export function buildReminderMessage(reminder: IReminderRecord): string {
   const time = formatReminderTime(reminder.remindAt);
+  const extra = reminder.isNoisy
+    ? "\n\n**This is a noisy reminder.** It will repeat every 15 minutes until you click 'Mark done' or delete it."
+    : "";
+
   return (
     `You asked me to remind you: ${reminder.content}\n` +
-    `Scheduled for ${time}.\n` +
+    `Scheduled for ${time}.${extra}\n` +
     "Use the buttons below or /remindme commands to snooze or remove this reminder."
   );
 }

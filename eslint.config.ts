@@ -1,6 +1,6 @@
 import pluginJs from "@eslint/js";
 import tseslint from "typescript-eslint";
-import stylisticJs from "@stylistic/eslint-plugin-js";
+import stylistic from "@stylistic/eslint-plugin";
 import eslintConfigPrettier from "eslint-config-prettier";
 
 export default [
@@ -12,7 +12,7 @@ export default [
     files: ["src/**/*.{ts}"],
     ignores: ["**/*.config.{ts}", "*.reference.ts"],
     plugins: {
-      "@stylistic/js": stylisticJs,
+      "@stylistic": stylistic,
     },
     rules: {
       // all interfaces should be named starting with a capital I (ie. IUser, IAgency)
