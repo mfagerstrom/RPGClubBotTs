@@ -251,6 +251,13 @@ export class NrGotmSearch {
       type: ApplicationCommandOptionType.String,
     })
     title: string,
+    @SlashOption({
+      description: "Reason for your nomination (max 250 chars)",
+      name: "reason",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    reason: string | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction, { ephemeral: true });
@@ -259,6 +266,15 @@ export class NrGotmSearch {
     if (!cleaned) {
       await safeReply(interaction, {
         content: "Please provide a non-empty game title to nominate.",
+      });
+      return;
+    }
+
+    const trimmedReason = typeof reason === "string" ? reason.trim() : "";
+    if (trimmedReason.length > 250) {
+      await safeReply(interaction, {
+        content: "Reason must be 250 characters or fewer.",
+        ephemeral: true,
       });
       return;
     }
@@ -277,7 +293,13 @@ export class NrGotmSearch {
 
       const userId = interaction.user.id;
       const existing = await getNominationForUser("nr-gotm", window.targetRound, userId);
-      const saved = await upsertNomination("nr-gotm", window.targetRound, userId, cleaned);
+      const saved = await upsertNomination(
+        "nr-gotm",
+        window.targetRound,
+        userId,
+        cleaned,
+        trimmedReason || null,
+      );
 
       const replaced =
         existing && existing.gameTitle !== saved.gameTitle
@@ -399,7 +421,10 @@ function buildNominationEmbed(
 ): EmbedBuilder {
   const lines =
     nominations.length > 0
-      ? nominations.map((n, idx) => `${numberEmoji(idx + 1)} ${n.gameTitle} — <@${n.userId}>`)
+      ? nominations.map((n, idx) => {
+          const reason = n.reason ? `\n> Reason: ${n.reason}` : "";
+          return `${numberEmoji(idx + 1)} ${n.gameTitle} — <@${n.userId}>${reason}`;
+        })
       : ["No nominations yet."];
 
   const voteLabel = formatDate(window.nextVoteAt);

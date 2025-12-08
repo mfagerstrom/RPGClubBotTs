@@ -9,6 +9,7 @@ export interface INominationEntry {
   userId: string;
   gameTitle: string;
   nominatedAt: Date;
+  reason: string | null;
 }
 
 function tableName(kind: NominationKind): string {
@@ -21,6 +22,7 @@ function mapRow(row: {
   USER_ID: string;
   GAME_TITLE: string;
   NOMINATED_AT: Date | string;
+  REASON?: string | null;
 }): INominationEntry {
   const nominatedAt =
     row.NOMINATED_AT instanceof Date ? row.NOMINATED_AT : new Date(row.NOMINATED_AT);
@@ -31,6 +33,7 @@ function mapRow(row: {
     userId: String(row.USER_ID),
     gameTitle: String(row.GAME_TITLE),
     nominatedAt,
+    reason: row.REASON ?? null,
   };
 }
 
@@ -49,12 +52,14 @@ export async function getNominationForUser(
       USER_ID: string;
       GAME_TITLE: string;
       NOMINATED_AT: Date | string;
+      REASON?: string | null;
     }>(
       `SELECT NOMINATION_ID,
               ROUND_NUMBER,
               USER_ID,
               GAME_TITLE,
-              NOMINATED_AT
+              NOMINATED_AT,
+              REASON
          FROM ${tableName(kind)}
         WHERE ROUND_NUMBER = :roundNumber
           AND USER_ID = :userId`,
@@ -74,6 +79,7 @@ export async function upsertNomination(
   roundNumber: number,
   userId: string,
   gameTitle: string,
+  reason: string | null,
 ): Promise<INominationEntry> {
   const pool = getOraclePool();
   const connection = await pool.getConnection();
@@ -85,21 +91,24 @@ export async function upsertNomination(
           SELECT :roundNumber AS ROUND_NUMBER,
                  :userId AS USER_ID,
                  :gameTitle AS GAME_TITLE,
-                 CAST(:nominatedAt AS TIMESTAMP) AS NOMINATED_AT
+                 CAST(:nominatedAt AS TIMESTAMP) AS NOMINATED_AT,
+                 :reason AS REASON
             FROM dual
         ) src
            ON (t.ROUND_NUMBER = src.ROUND_NUMBER AND t.USER_ID = src.USER_ID)
       WHEN MATCHED THEN
         UPDATE SET t.GAME_TITLE = src.GAME_TITLE,
-                   t.NOMINATED_AT = src.NOMINATED_AT
+                   t.NOMINATED_AT = src.NOMINATED_AT,
+                   t.REASON = src.REASON
       WHEN NOT MATCHED THEN
-        INSERT (ROUND_NUMBER, USER_ID, GAME_TITLE, NOMINATED_AT)
-        VALUES (src.ROUND_NUMBER, src.USER_ID, src.GAME_TITLE, src.NOMINATED_AT)`,
+        INSERT (ROUND_NUMBER, USER_ID, GAME_TITLE, NOMINATED_AT, REASON)
+        VALUES (src.ROUND_NUMBER, src.USER_ID, src.GAME_TITLE, src.NOMINATED_AT, src.REASON)`,
       {
         roundNumber,
         userId,
         gameTitle,
         nominatedAt: new Date(),
+        reason,
       },
       { autoCommit: true },
     );
@@ -152,12 +161,14 @@ export async function listNominationsForRound(
       USER_ID: string;
       GAME_TITLE: string;
       NOMINATED_AT: Date | string;
+      REASON?: string | null;
     }>(
       `SELECT NOMINATION_ID,
               ROUND_NUMBER,
               USER_ID,
               GAME_TITLE,
-              NOMINATED_AT
+              NOMINATED_AT,
+              REASON
          FROM ${tableName(kind)}
         WHERE ROUND_NUMBER = :roundNumber
         ORDER BY GAME_TITLE ASC`,

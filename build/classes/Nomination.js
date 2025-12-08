@@ -11,6 +11,7 @@ function mapRow(row) {
         userId: String(row.USER_ID),
         gameTitle: String(row.GAME_TITLE),
         nominatedAt,
+        reason: row.REASON ?? null,
     };
 }
 export async function getNominationForUser(kind, roundNumber, userId) {
@@ -21,7 +22,8 @@ export async function getNominationForUser(kind, roundNumber, userId) {
               ROUND_NUMBER,
               USER_ID,
               GAME_TITLE,
-              NOMINATED_AT
+              NOMINATED_AT,
+              REASON
          FROM ${tableName(kind)}
         WHERE ROUND_NUMBER = :roundNumber
           AND USER_ID = :userId`, { roundNumber, userId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
@@ -32,7 +34,7 @@ export async function getNominationForUser(kind, roundNumber, userId) {
         await connection.close();
     }
 }
-export async function upsertNomination(kind, roundNumber, userId, gameTitle) {
+export async function upsertNomination(kind, roundNumber, userId, gameTitle, reason) {
     const pool = getOraclePool();
     const connection = await pool.getConnection();
     try {
@@ -41,20 +43,23 @@ export async function upsertNomination(kind, roundNumber, userId, gameTitle) {
           SELECT :roundNumber AS ROUND_NUMBER,
                  :userId AS USER_ID,
                  :gameTitle AS GAME_TITLE,
-                 CAST(:nominatedAt AS TIMESTAMP) AS NOMINATED_AT
+                 CAST(:nominatedAt AS TIMESTAMP) AS NOMINATED_AT,
+                 :reason AS REASON
             FROM dual
         ) src
            ON (t.ROUND_NUMBER = src.ROUND_NUMBER AND t.USER_ID = src.USER_ID)
       WHEN MATCHED THEN
         UPDATE SET t.GAME_TITLE = src.GAME_TITLE,
-                   t.NOMINATED_AT = src.NOMINATED_AT
+                   t.NOMINATED_AT = src.NOMINATED_AT,
+                   t.REASON = src.REASON
       WHEN NOT MATCHED THEN
-        INSERT (ROUND_NUMBER, USER_ID, GAME_TITLE, NOMINATED_AT)
-        VALUES (src.ROUND_NUMBER, src.USER_ID, src.GAME_TITLE, src.NOMINATED_AT)`, {
+        INSERT (ROUND_NUMBER, USER_ID, GAME_TITLE, NOMINATED_AT, REASON)
+        VALUES (src.ROUND_NUMBER, src.USER_ID, src.GAME_TITLE, src.NOMINATED_AT, src.REASON)`, {
             roundNumber,
             userId,
             gameTitle,
             nominatedAt: new Date(),
+            reason,
         }, { autoCommit: true });
     }
     finally {
@@ -88,7 +93,8 @@ export async function listNominationsForRound(kind, roundNumber) {
               ROUND_NUMBER,
               USER_ID,
               GAME_TITLE,
-              NOMINATED_AT
+              NOMINATED_AT,
+              REASON
          FROM ${tableName(kind)}
         WHERE ROUND_NUMBER = :roundNumber
         ORDER BY GAME_TITLE ASC`, { roundNumber }, { outFormat: oracledb.OUT_FORMAT_OBJECT });

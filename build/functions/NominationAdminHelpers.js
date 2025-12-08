@@ -21,7 +21,10 @@ export function buildNominationDeleteViewEmbed(kindLabel, commandLabel, targetRo
 }
 export function buildNominationEmbed(kindLabel, commandLabel, window, nominations) {
     const lines = nominations.length > 0
-        ? nominations.map((n, idx) => `${numberEmoji(idx + 1)} ${n.gameTitle} — <@${n.userId}>`)
+        ? nominations.map((n, idx) => {
+            const reason = n.reason ? `\n> Reason: ${n.reason}` : "";
+            return `${numberEmoji(idx + 1)} ${n.gameTitle} — <@${n.userId}>${reason}`;
+        })
         : ["No nominations yet."];
     const voteLabel = formatDate(window.nextVoteAt);
     return new EmbedBuilder()

@@ -143,12 +143,20 @@ let GotmSearch = class GotmSearch {
             await safeReply(interaction, { content: `Error processing request: ${msg}`, ephemeral: true });
         }
     }
-    async nominate(title, interaction) {
+    async nominate(title, reason, interaction) {
         await safeDeferReply(interaction, { ephemeral: true });
         const cleaned = title?.trim();
         if (!cleaned) {
             await safeReply(interaction, {
                 content: "Please provide a non-empty game title to nominate.",
+                ephemeral: true,
+            });
+            return;
+        }
+        const trimmedReason = typeof reason === "string" ? reason.trim() : "";
+        if (trimmedReason.length > 250) {
+            await safeReply(interaction, {
+                content: "Reason must be 250 characters or fewer.",
                 ephemeral: true,
             });
             return;
@@ -165,7 +173,7 @@ let GotmSearch = class GotmSearch {
             }
             const userId = interaction.user.id;
             const existing = await getNominationForUser("gotm", window.targetRound, userId);
-            const saved = await upsertNomination("gotm", window.targetRound, userId, cleaned);
+            const saved = await upsertNomination("gotm", window.targetRound, userId, cleaned, trimmedReason || null);
             const replaced = existing && existing.gameTitle !== saved.gameTitle
                 ? ` (replaced "${existing.gameTitle}")`
                 : existing
@@ -291,6 +299,12 @@ __decorate([
         name: "title",
         required: true,
         type: ApplicationCommandOptionType.String,
+    })),
+    __param(1, SlashOption({
+        description: "Reason for your nomination (max 250 chars)",
+        name: "reason",
+        required: false,
+        type: ApplicationCommandOptionType.String,
     }))
 ], GotmSearch.prototype, "nominate", null);
 __decorate([
@@ -313,7 +327,10 @@ GotmSearch = __decorate([
 export { GotmSearch };
 function buildNominationEmbed(kindLabel, commandLabel, window, nominations) {
     const lines = nominations.length > 0
-        ? nominations.map((n, idx) => `${numberEmoji(idx + 1)} ${n.gameTitle} — <@${n.userId}>`)
+        ? nominations.map((n, idx) => {
+            const reason = n.reason ? `\n> Reason: ${n.reason}` : "";
+            return `${numberEmoji(idx + 1)} ${n.gameTitle} — <@${n.userId}>${reason}`;
+        })
         : ["No nominations yet."];
     const voteLabel = formatDate(window.nextVoteAt);
     return new EmbedBuilder()

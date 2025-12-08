@@ -54,7 +54,10 @@ CombinedNoms = __decorate([
 export { CombinedNoms };
 function buildListEmbed(opts) {
     const lines = opts.nominations.length > 0
-        ? opts.nominations.map((n, idx) => `${numberEmoji(idx + 1)} ${n.gameTitle} — <@${n.userId}>`)
+        ? opts.nominations.map((n, idx) => {
+            const reason = n.reason ? `\n> Reason: ${n.reason}` : "";
+            return `${numberEmoji(idx + 1)} ${n.gameTitle} — <@${n.userId}>${reason}`;
+        })
         : ["No nominations yet."];
     return new EmbedBuilder()
         .setColor(0x0099ff)
