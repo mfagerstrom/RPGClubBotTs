@@ -8,77 +8,48 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
 import { ApplicationCommandOptionType } from "discord.js";
-import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
+import { Discord, Slash, SlashChoice, SlashGroup, SlashOption } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import { isAdmin } from "./admin.command.js";
 import { createReminder, deleteReminder, listUpcomingReminders, } from "../classes/PublicReminder.js";
 import { DateTime } from "luxon";
-function parseUserDate(input) {
-    const raw = (input ?? "").trim();
-    if (!raw.length) {
-        return null;
-    }
-    const relativeMatch = raw.match(/^in\s+(\d+)\s*(m|h|d|minutes?|hours?|days?)$/i);
-    if (relativeMatch) {
-        const amount = Number(relativeMatch[1]);
-        const unitRaw = relativeMatch[2].toLowerCase();
-        if (!Number.isFinite(amount) || amount <= 0) {
-            return null;
-        }
-        const unit = unitRaw.startsWith("d")
-            ? "days"
-            : unitRaw.startsWith("h")
-                ? "hours"
-                : "minutes";
-        const delta = {};
-        delta[unit] = amount;
-        const dt = DateTime.utc().plus(delta);
-        if (dt.isValid) {
-            return dt.toJSDate();
-        }
-    }
-    const iso = DateTime.fromISO(raw, { setZone: true });
-    if (iso.isValid) {
-        return iso.toUTC().toJSDate();
-    }
-    const rfc = DateTime.fromRFC2822(raw, { zone: "utc" });
-    if (rfc.isValid) {
-        return rfc.toJSDate();
-    }
-    const fallback = DateTime.fromFormat(raw, "yyyy-LL-dd HH:mm", { zone: "utc" });
-    if (fallback.isValid) {
-        return fallback.toJSDate();
-    }
-    const numeric = Number(raw);
-    if (Number.isFinite(numeric)) {
-        const millis = numeric > 10_000_000_000 ? numeric : numeric * 1000;
-        const dt = DateTime.fromMillis(millis, { zone: "utc" });
-        if (dt.isValid) {
-            return dt.toJSDate();
-        }
-    }
-    return null;
-}
 const RECURRENCE_CHOICES = [
+    { name: "Minutes", value: "minutes" },
+    { name: "Hours", value: "hours" },
     { name: "Days", value: "days" },
     { name: "Weeks", value: "weeks" },
     { name: "Months", value: "months" },
     { name: "Years", value: "years" },
 ];
 let PublicReminderCommand = class PublicReminderCommand {
-    async create(channel, when, message, recurEvery, recurUnit, interaction) {
+    async create(channel, date, time, message, recurEvery, recurUnit, interaction) {
         await safeDeferReply(interaction, { ephemeral: true });
         const ok = await isAdmin(interaction);
         if (!ok)
             return;
-        const parsedDate = parseUserDate(when);
-        if (!parsedDate) {
+        const dateTimeString = `${date} ${time}`;
+        const formatsToTry = [
+            "M/d/yyyy h:mm a",
+            "M/d/yyyy HH:mm",
+            "yyyy-M-d h:mm a",
+            "yyyy-M-d HH:mm",
+        ];
+        let parsedDateTime = null;
+        for (const format of formatsToTry) {
+            const dt = DateTime.fromFormat(dateTimeString, format, { zone: "America/New_York" });
+            if (dt.isValid) {
+                parsedDateTime = dt;
+                break;
+            }
+        }
+        if (!parsedDateTime) {
             await safeReply(interaction, {
-                content: "Could not parse the date/time. Use ISO, RFC2822, or 'in 30m', 'in 2h', etc.",
+                content: `Could not parse the date and time: "${dateTimeString}". Please use formats like "1/1/2026" for date and "9:00 AM" or "15:30" for time.`,
                 ephemeral: true,
             });
             return;
         }
+        const parsedDate = parsedDateTime.toJSDate();
         if (parsedDate.getTime() <= Date.now()) {
             await safeReply(interaction, {
                 content: "The reminder time must be in the future.",
@@ -106,9 +77,10 @@ let PublicReminderCommand = class PublicReminderCommand {
         }
         try {
             const reminder = await createReminder(channel.id, message, parsedDate, recurEvery ?? null, recurUnit ?? null, interaction.user.id);
+            const timestamp = Math.floor(parsedDate.getTime() / 1000);
             await safeReply(interaction, {
-                content: `Created reminder #${reminder.reminderId} for <#${channel.id}> at ` +
-                    `${parsedDate.toLocaleString()}${recurEvery && recurUnit ? ` (repeats every ${recurEvery} ${recurUnit})` : ""}`,
+                content: `Created reminder #${reminder.reminderId} for <#${channel.id}> at <t:${timestamp}:F>.` +
+                    `${recurEvery && recurUnit ? ` (repeats every ${recurEvery} ${recurUnit})` : ""}`,
                 ephemeral: true,
             });
         }
@@ -133,7 +105,8 @@ let PublicReminderCommand = class PublicReminderCommand {
             }
             const lines = reminders.map((r) => {
                 const recur = r.recurEvery && r.recurUnit ? ` (repeats every ${r.recurEvery} ${r.recurUnit})` : "";
-                return `#${r.reminderId}: <#${r.channelId}> at ${r.dueAt.toLocaleString()}${recur} — ${r.message}`;
+                const timestamp = Math.floor(r.dueAt.getTime() / 1000);
+                return `#${r.reminderId}: <#${r.channelId}> at <t:${timestamp}:F>${recur} — ${r.message}`;
             });
             await safeReply(interaction, {
                 content: lines.join("\n"),
@@ -178,29 +151,35 @@ __decorate([
         type: ApplicationCommandOptionType.Channel,
     })),
     __param(1, SlashOption({
-        description: "When to post (supports 'in 30m', ISO, or RFC2822)",
-        name: "when",
+        description: "Date of the reminder (e.g., 1/1/2026)",
+        name: "date",
         required: true,
         type: ApplicationCommandOptionType.String,
     })),
     __param(2, SlashOption({
+        description: "Time of the reminder (e.g., 9:00 AM or 15:30)",
+        name: "time",
+        required: true,
+        type: ApplicationCommandOptionType.String,
+    })),
+    __param(3, SlashOption({
         description: "Reminder message",
         name: "message",
         required: true,
         type: ApplicationCommandOptionType.String,
     })),
-    __param(3, SlashOption({
+    __param(4, SlashOption({
         description: "Repeat every N units (optional, positive integer)",
         name: "recur",
         required: false,
         type: ApplicationCommandOptionType.Integer,
     })),
-    __param(4, SlashOption({
-        description: "Recurrence unit (days, weeks, months, years)",
+    __param(5, SlashChoice(...RECURRENCE_CHOICES)),
+    __param(5, SlashOption({
+        description: "Recurrence unit (minutes, hours, days, weeks, months, years)",
         name: "recurunit",
         required: false,
         type: ApplicationCommandOptionType.String,
-        choices: RECURRENCE_CHOICES.map((c) => ({ name: c.name, value: c.value })),
     }))
 ], PublicReminderCommand.prototype, "create", null);
 __decorate([

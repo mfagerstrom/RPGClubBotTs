@@ -1,7 +1,7 @@
 import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
 
-export type RecurrenceUnit = "days" | "weeks" | "months" | "years";
+export type RecurrenceUnit = "minutes" | "hours" | "days" | "weeks" | "months" | "years";
 
 export interface IPublicReminder {
   reminderId: number;

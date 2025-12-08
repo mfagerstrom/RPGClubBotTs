@@ -69,7 +69,11 @@ function computeNextDue(reminder: IPublicReminder): Date | null {
   const current = reminder.dueAt;
   const n = reminder.recurEvery;
   const next = new Date(current);
-  if (reminder.recurUnit === "days") {
+  if (reminder.recurUnit === "minutes") {
+    next.setMinutes(next.getMinutes() + n);
+  } else if (reminder.recurUnit === "hours") {
+    next.setHours(next.getHours() + n);
+  } else if (reminder.recurUnit === "days") {
     next.setDate(next.getDate() + n);
   } else if (reminder.recurUnit === "weeks") {
     next.setDate(next.getDate() + n * 7);

@@ -31,7 +31,7 @@ export default [
       // turn off default rule - allow arrays/objects to be initialized empty ([], {})
       "@typescript-eslint/no-empty-interface": 0,
       "@typescript-eslint/typedef": 0,
-      "@typescript-eslint/no-explicit-any": 0,
+      "@typescript-eslint/no-explicit-any": "off",
 
       // enforce proper spacing in comments
       "spaced-comment": ["error", "always", {
@@ -73,6 +73,12 @@ export default [
         property: "waitForURL",
         message: "Please use gotoAndCheckUrl instead of page.waitForURL",
       }],
+    },
+  },
+  {
+    files: ["**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
     },
   },
 ];
