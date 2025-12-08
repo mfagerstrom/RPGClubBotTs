@@ -12,6 +12,7 @@ import { startReminderService } from "./services/ReminderService.js";
 import Member from "./classes/Member.js";
 import { joinAllTargetForumThreads } from "./services/ForumThreadJoinService.js";
 import { startRssFeedService } from "./services/RssFeedService.js";
+import { startPublicReminderService } from "./services/PublicReminderService.js";
 dotenv.config();
 installConsoleLogging();
 const PRESENCE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
@@ -72,6 +73,7 @@ bot.once("clientReady", async () => {
     //  );
     startNominationReminderService(bot);
     startReminderService(bot);
+    startPublicReminderService(bot);
     await joinAllTargetForumThreads(bot);
     startRssFeedService(bot);
     console.log("Startup sequence completed.");
