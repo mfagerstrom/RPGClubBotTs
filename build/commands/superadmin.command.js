@@ -7,27 +7,26 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ActionRowBuilder, ApplicationCommandOptionType, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ComponentType, StringSelectMenuBuilder, ChannelType, } from "discord.js";
+import { ActionRowBuilder, ApplicationCommandOptionType, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, StringSelectMenuBuilder, } from "discord.js";
 import axios from "axios";
-import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
-import { searchHltb } from "../functions/SearchHltb.js";
+import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption, SelectMenuComponent, } from "discordx";
 import { getPresenceHistory, setPresence, setPresenceFromInteraction, } from "../functions/SetPresence.js";
 import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
-import Gotm, { updateGotmGameFieldInDatabase, updateGotmGameImageInDatabase, insertGotmRoundInDatabase, deleteGotmRoundFromDatabase, updateGotmVotingResultsInDatabase, } from "../classes/Gotm.js";
-import NrGotm, { updateNrGotmGameFieldInDatabase, updateNrGotmGameImageInDatabase, insertNrGotmRoundInDatabase, deleteNrGotmRoundFromDatabase, updateNrGotmVotingResultsInDatabase, } from "../classes/NrGotm.js";
+import Gotm, { updateGotmGameFieldInDatabase, insertGotmRoundInDatabase, deleteGotmRoundFromDatabase, } from "../classes/Gotm.js";
+import NrGotm, { updateNrGotmGameFieldInDatabase, insertNrGotmRoundInDatabase, deleteNrGotmRoundFromDatabase, } from "../classes/NrGotm.js";
 import Member from "../classes/Member.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
 import { buildNominationDeleteViewEmbed, announceNominationChange, } from "../functions/NominationAdminHelpers.js";
 import { getUpcomingNominationWindow } from "../functions/NominationWindow.js";
 import { deleteNominationForUser, getNominationForUser, listNominationsForRound, } from "../classes/Nomination.js";
 import { getOraclePool } from "../db/oracleClient.js";
-import UserChannelMessageCount from "../classes/UserChannelMessageCount.js";
 import Game from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
 import { loadGotmFromDb } from "../classes/Gotm.js";
 import { loadNrGotmFromDb } from "../classes/NrGotm.js";
 const SUPERADMIN_PRESENCE_CHOICES = new Map();
+const GAMEDB_IMPORT_PROMPTS = new Map();
 export const SUPERADMIN_HELP_TOPICS = [
     {
         id: "presence",
@@ -107,27 +106,6 @@ export const SUPERADMIN_HELP_TOPICS = [
         notes: "Votes are typically held the last Friday of the month.",
     },
     {
-        id: "gotm-data-audit",
-        label: "/superadmin gotm-data-audit",
-        summary: "Audit GOTM data for missing thread IDs, Reddit URLs, and voting result IDs.",
-        syntax: "Syntax: /superadmin gotm-data-audit [threadid:<boolean>] [redditurl:<boolean>] [votingresults:<boolean>]",
-        notes: "By default all checks run. Provide specific flags to limit prompts. You can stop or skip prompts during the audit.",
-    },
-    {
-        id: "nr-gotm-data-audit",
-        label: "/superadmin nr-gotm-data-audit",
-        summary: "Audit NR-GOTM data for missing thread IDs, Reddit URLs, and voting result IDs.",
-        syntax: "Syntax: /superadmin nr-gotm-data-audit [threadid:<boolean>] [redditurl:<boolean>] [votingresults:<boolean>]",
-        notes: "By default all checks run. Provide specific flags to limit prompts. You can stop or skip prompts during the audit.",
-    },
-    {
-        id: "message-count-backfill",
-        label: "/superadmin message-count-backfill",
-        summary: "Scan guild text channels and forums to backfill MESSAGE_COUNT totals.",
-        syntax: "Syntax: /superadmin message-count-backfill [channelname:<string>] [maxperchannel:<int>] [force:<boolean>]",
-        notes: "Counts non-bot messages across text channels and forum threads. maxperchannel limits messages fetched per channel (default unlimited). channelname restricts the scan to a specific channel/thread by name or id. force:true rescans channels even if already scanned.",
-    },
-    {
         id: "gamedb-backfill",
         label: "/superadmin gamedb-backfill",
         summary: "Import all GOTM and NR-GOTM titles into the GameDB using IGDB lookups.",
@@ -144,6 +122,11 @@ function buildSuperAdminHelpButtons(activeId) {
             .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary))));
     }
     return rows;
+}
+async function downloadImageBuffer(url) {
+    const resp = await axios.get(url, { responseType: "arraybuffer" });
+    const mime = resp.headers?.["content-type"] ?? null;
+    return { buffer: Buffer.from(resp.data), mimeType: mime ? String(mime) : null };
 }
 function extractSuperAdminTopicId(customId) {
     const prefix = "superadmin-help-";
@@ -173,74 +156,6 @@ function chunkArray(items, chunkSize) {
     }
     return chunks;
 }
-const delay = (ms) => new Promise((resolve) => {
-    setTimeout(resolve, ms);
-});
-function isTextBasedGuildChannel(channel) {
-    return Boolean(channel && typeof channel.isTextBased === "function" && channel.isTextBased());
-}
-async function collectMessageCounts(channel, maxPerChannel, onProgress, since) {
-    const counts = new Map();
-    let lastId;
-    let processed = 0;
-    let lastProgress = Date.now();
-    while (true) {
-        const options = { limit: 100 };
-        if (lastId)
-            options.before = lastId;
-        const batch = await channel.messages?.fetch(options).catch(() => null);
-        if (!batch || batch.size === 0)
-            break;
-        for (const msg of batch.values()) {
-            const authorId = msg.author?.id;
-            if (!authorId || msg.author.bot)
-                continue;
-            if (since && msg.createdAt && msg.createdAt < since) {
-                lastId = undefined;
-                break;
-            }
-            counts.set(authorId, (counts.get(authorId) ?? 0) + 1);
-            processed++;
-            if (maxPerChannel && processed >= maxPerChannel)
-                break;
-        }
-        if (maxPerChannel && processed >= maxPerChannel)
-            break;
-        lastId = batch.last()?.id;
-        if (!lastId)
-            break;
-        await delay(300);
-        if (onProgress) {
-            const now = Date.now();
-            if (now - lastProgress >= 15_000) {
-                onProgress();
-                lastProgress = now;
-            }
-        }
-    }
-    return counts;
-}
-async function getAllTextChannelsWithThreads(guild) {
-    const results = [];
-    for (const channel of guild.channels.cache.values()) {
-        if (channel.type === ChannelType.GuildForum) {
-            try {
-                const active = await channel.threads.fetchActive();
-                active.threads.forEach((t) => results.push(t));
-                const archived = await channel.threads.fetchArchived();
-                archived.threads.forEach((t) => results.push(t));
-            }
-            catch (err) {
-                console.error("Failed to fetch threads for forum", channel.id, err);
-            }
-            continue;
-        }
-        if (isTextBasedGuildChannel(channel)) {
-            results.push(channel);
-        }
-    }
-    return results;
-}
 async function showSuperAdminPresenceHistory(interaction) {
     const limit = 5;
     const entries = await getPresenceHistory(limit);
@@ -267,470 +182,6 @@ async function showSuperAdminPresenceHistory(interaction) {
     catch {
         // ignore
     }
-}
-export const AUDIT_NO_VALUE_SENTINEL = "__NO_VALUE__";
-const THREAD_ID_MAX_LENGTH = 50;
-function isAuditNoValue(value) {
-    return value === AUDIT_NO_VALUE_SENTINEL;
-}
-function isAuditFieldMissing(value) {
-    return !value && !isAuditNoValue(value);
-}
-function isAuditImageMissing(imageBlob, imageMimeType) {
-    return !imageBlob && !isAuditNoValue(imageMimeType);
-}
-function displayAuditValue(value) {
-    if (isAuditNoValue(value))
-        return null;
-    return value ?? null;
-}
-const MONTHS_LOWER = [
-    "january",
-    "february",
-    "march",
-    "april",
-    "may",
-    "june",
-    "july",
-    "august",
-    "september",
-    "october",
-    "november",
-    "december",
-];
-function isAfterRedditCutoff(monthYear) {
-    const match = monthYear?.match(/([A-Za-z]+)\s+(\d{4})/);
-    if (!match)
-        return false;
-    const monthName = match[1]?.toLowerCase() ?? "";
-    const year = Number(match[2]);
-    const monthIndex = MONTHS_LOWER.indexOf(monthName);
-    if (!Number.isFinite(year) || monthIndex === -1)
-        return false;
-    if (year > 2021)
-        return true;
-    if (year < 2021)
-        return false;
-    return monthIndex > 4; // after May 2021
-}
-function buildAuditPromptEmbed(info) {
-    const lines = [];
-    lines.push(info.roundLabel);
-    lines.push("");
-    lines.push("Current round data:");
-    lines.push("```json");
-    try {
-        if (info.gameIndex !== null && Array.isArray(info.rawEntry?.gameOfTheMonth)) {
-            const game = info.rawEntry.gameOfTheMonth[info.gameIndex];
-            lines.push(JSON.stringify(game ?? info.rawEntry, null, 2));
-        }
-        else {
-            lines.push(JSON.stringify(info.rawEntry, null, 2));
-        }
-    }
-    catch {
-        lines.push("(unable to render data)");
-    }
-    lines.push("```");
-    lines.push("");
-    if (info.field === "threadId") {
-        lines.push("**Missing thread ID**. Provide a webhook/thread/channel ID for this game's discussion.");
-    }
-    else if (info.field === "redditUrl") {
-        lines.push("**Missing Reddit URL**. Provide a link to the Reddit thread for this game.");
-    }
-    else {
-        lines.push("**Missing voting results message ID**. Provide the message ID that contains voting results.");
-    }
-    lines.push("");
-    lines.push("Click Skip to leave it empty, Stop Audit to end, No Value to skip forever, or type a value (none/null to clear).");
-    lines.push("");
-    lines.push("Provide the new value below:");
-    return new EmbedBuilder()
-        .setTitle(`${info.auditLabel} Data Audit`)
-        .setDescription(lines.join("\n"));
-}
-async function downloadImageBuffer(url) {
-    const resp = await axios.get(url, { responseType: "arraybuffer" });
-    const mime = resp.headers?.["content-type"] ?? null;
-    return { buffer: Buffer.from(resp.data), mimeType: mime ? String(mime) : null };
-}
-async function resolveThreadImageBuffer(client, threadId) {
-    try {
-        const channel = await client.channels.fetch(threadId);
-        const anyThread = channel;
-        if (!anyThread || typeof anyThread.fetchStarterMessage !== "function")
-            return null;
-        const starter = await anyThread.fetchStarterMessage().catch(() => null);
-        if (!starter)
-            return null;
-        for (const att of starter.attachments?.values?.() ?? []) {
-            const anyAtt = att;
-            const nameLc = (anyAtt.name ?? "").toLowerCase();
-            const ctype = (anyAtt.contentType ?? "").toLowerCase();
-            if (ctype.startsWith("image/") ||
-                /\.(png|jpg|jpeg|gif|webp|bmp|tiff)$/.test(nameLc) ||
-                anyAtt.width) {
-                const url = anyAtt.url ?? anyAtt.proxyURL;
-                if (!url)
-                    continue;
-                const { buffer, mimeType } = await downloadImageBuffer(url);
-                return { buffer, mimeType, url };
-            }
-        }
-        for (const emb of starter.embeds ?? []) {
-            const anyEmb = emb;
-            const imgUrl = emb.image?.url || anyEmb?.image?.proxyURL || anyEmb?.image?.proxy_url;
-            const thumbUrl = emb.thumbnail?.url ||
-                anyEmb?.thumbnail?.proxyURL ||
-                anyEmb?.thumbnail?.proxy_url;
-            const chosen = imgUrl || thumbUrl;
-            if (chosen) {
-                const { buffer, mimeType } = await downloadImageBuffer(chosen);
-                return { buffer, mimeType, url: chosen };
-            }
-        }
-    }
-    catch {
-        // ignore
-    }
-    return null;
-}
-async function resolveHltbImageBuffer(gameTitle) {
-    try {
-        const result = await searchHltb(gameTitle);
-        let url = result?.imageUrl;
-        if (!url)
-            return null;
-        if (url.startsWith("//")) {
-            url = "https:" + url;
-        }
-        else if (url.startsWith("/")) {
-            url = "https://howlongtobeat.com" + url;
-        }
-        if (!url)
-            return null;
-        const { buffer, mimeType } = await downloadImageBuffer(url);
-        return { buffer, mimeType, url };
-    }
-    catch {
-        return null;
-    }
-}
-function buildImageAttachment(buffer, mimeType, label) {
-    const ext = (() => {
-        const map = {
-            "image/jpeg": "jpg",
-            "image/png": "png",
-            "image/gif": "gif",
-            "image/webp": "webp",
-            "image/bmp": "bmp",
-            "image/tiff": "tiff",
-        };
-        if (!mimeType)
-            return "png";
-        return map[mimeType.toLowerCase()] ?? "png";
-    })();
-    return new AttachmentBuilder(buffer, {
-        name: `${label}.${ext}`,
-    });
-}
-async function promptForAuditValue(interaction, opts) {
-    const promptEmbed = buildAuditPromptEmbed({
-        auditLabel: opts.auditLabel,
-        roundLabel: opts.roundLabel,
-        gameTitle: opts.gameTitle,
-        field: opts.field,
-        winners: opts.winners,
-        rawEntry: opts.rawEntry,
-        gameIndex: opts.gameIndex,
-    });
-    const token = `${opts.tokenPrefix}-audit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const stopPrefix = `${opts.tokenPrefix}-audit-stop`;
-    const skipPrefix = `${opts.tokenPrefix}-audit-skip`;
-    const noValuePrefix = `${opts.tokenPrefix}-audit-novalue`;
-    const buttonRow = new ActionRowBuilder().addComponents(new ButtonBuilder()
-        .setCustomId(`${stopPrefix}-${token}`)
-        .setLabel("Stop Audit")
-        .setStyle(ButtonStyle.Secondary), new ButtonBuilder()
-        .setCustomId(`${noValuePrefix}-${token}`)
-        .setLabel("No Value")
-        .setStyle(ButtonStyle.Secondary), new ButtonBuilder()
-        .setCustomId(`${skipPrefix}-${token}`)
-        .setLabel("Skip")
-        .setStyle(ButtonStyle.Danger));
-    let promptMessage = opts.promptMessage ?? null;
-    const payload = {
-        embeds: [promptEmbed],
-        components: [buttonRow],
-        content: undefined,
-    };
-    const editPrompt = async (msg, data) => {
-        try {
-            return await msg.edit(data);
-        }
-        catch (err) {
-            if (err?.code === 10008 || err?.code === 50027) {
-                return null;
-            }
-            throw err;
-        }
-    };
-    const tryEditReply = async () => {
-        try {
-            const edited = await interaction.editReply(payload);
-            return edited;
-        }
-        catch (err) {
-            if (err?.code === 10008 || err?.code === 50027)
-                return null;
-            throw err;
-        }
-    };
-    if (opts.useEditReply) {
-        promptMessage = await tryEditReply();
-    }
-    else if (promptMessage) {
-        const edited = await editPrompt(promptMessage, payload);
-        promptMessage = edited ?? null;
-    }
-    if (!promptMessage) {
-        // Fallback: create a new followup
-        promptMessage = await interaction.followUp({
-            ...payload,
-            ephemeral: true,
-        });
-    }
-    const buttonPromise = promptMessage
-        .awaitMessageComponent({
-        filter: (i) => {
-            const cid = i.customId ?? "";
-            return i.user?.id === interaction.user.id && cid.endsWith(token);
-        },
-        time: 120_000,
-    })
-        .then(async (i) => {
-        const cid = i.customId ?? "";
-        if (!i.deferred && !i.replied) {
-            await i.deferUpdate().catch(() => { });
-        }
-        if (cid.startsWith(stopPrefix))
-            return "stop";
-        if (cid.startsWith(noValuePrefix))
-            return { action: "no-value" };
-        return { action: "skip" };
-    })
-        .catch(() => null);
-    const channel = interaction.channel;
-    const textPromise = channel?.awaitMessages
-        ? channel
-            .awaitMessages({
-            filter: (m) => m.author?.id === interaction.user.id,
-            max: 1,
-            time: 120_000,
-        })
-            .then(async (collected) => {
-            const first = collected?.first?.();
-            const content = first?.content;
-            if (!content)
-                return null;
-            const trimmed = String(content).trim();
-            const lower = trimmed.toLowerCase();
-            try {
-                await first.delete().catch(() => { });
-            }
-            catch {
-                // ignore delete failures
-            }
-            if (lower === "stop")
-                return "stop";
-            if (lower === "none" || lower === "null" || lower === "skip")
-                return { action: "skip" };
-            if (lower === "never" || lower === "no value" || lower === "no-value") {
-                return { action: "no-value" };
-            }
-            return { action: "value", value: trimmed };
-        })
-            .catch(() => null)
-        : Promise.resolve(null);
-    const result = await Promise.race([buttonPromise, textPromise]);
-    if (opts.useEditReply && promptMessage) {
-        await interaction.editReply({ components: [] });
-    }
-    else {
-        await editPrompt(promptMessage, { components: [] });
-    }
-    return {
-        result: result ?? { action: "skip" },
-        promptMessage,
-    };
-}
-async function promptForAuditImage(interaction, opts) {
-    const token = `${opts.tokenPrefix}-auditimg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const stopPrefix = `${opts.tokenPrefix}-auditimg-stop`;
-    const skipPrefix = `${opts.tokenPrefix}-auditimg-skip`;
-    const noValuePrefix = `${opts.tokenPrefix}-auditimg-novalue`;
-    const useThreadPrefix = `${opts.tokenPrefix}-auditimg-thread`;
-    const useHltbPrefix = `${opts.tokenPrefix}-auditimg-hltb`;
-    const threadCandidate = opts.threadId
-        ? await resolveThreadImageBuffer(interaction.client, opts.threadId).catch(() => null)
-        : null;
-    const hltbCandidate = await resolveHltbImageBuffer(opts.gameTitle).catch(() => null);
-    const files = [];
-    const embed = new EmbedBuilder()
-        .setTitle(`${opts.auditLabel} Image Audit`)
-        .setDescription([
-        opts.roundLabel,
-        `Game: ${opts.gameTitle}`,
-        "",
-        "Choose an image source below, or paste/upload an image in chat.",
-        "Buttons:",
-        "- Use Thread Image: first image from the discussion thread (if available).",
-        "- Use HLTB Image: cover art from /coverart search (if available).",
-        "- Skip: leave image empty for now.",
-        "- No Value: mark as intentionally missing (won't be asked again).",
-        "- Stop Audit: end the audit.",
-    ].join("\n"));
-    if (threadCandidate) {
-        const att = buildImageAttachment(threadCandidate.buffer, threadCandidate.mimeType, "thread-image");
-        files.push(att);
-        embed.addFields({ name: "Thread Image", value: `attachment://${att.name}` });
-    }
-    if (hltbCandidate) {
-        const att = buildImageAttachment(hltbCandidate.buffer, hltbCandidate.mimeType, "hltb-image");
-        files.push(att);
-        embed.addFields({ name: "HLTB Image", value: `attachment://${att.name}` });
-    }
-    const buttonRow = new ActionRowBuilder().addComponents(new ButtonBuilder()
-        .setCustomId(`${stopPrefix}-${token}`)
-        .setLabel("Stop Audit")
-        .setStyle(ButtonStyle.Secondary), new ButtonBuilder()
-        .setCustomId(`${noValuePrefix}-${token}`)
-        .setLabel("No Value")
-        .setStyle(ButtonStyle.Secondary), new ButtonBuilder()
-        .setCustomId(`${skipPrefix}-${token}`)
-        .setLabel("Skip")
-        .setStyle(ButtonStyle.Danger));
-    const chooseRow = new ActionRowBuilder().addComponents(new ButtonBuilder()
-        .setCustomId(`${useThreadPrefix}-${token}`)
-        .setLabel("Use Thread Image")
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(!threadCandidate), new ButtonBuilder()
-        .setCustomId(`${useHltbPrefix}-${token}`)
-        .setLabel("Use HLTB Image")
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(!hltbCandidate));
-    let promptMessage = opts.promptMessage ?? null;
-    const payload = {
-        embeds: [embed],
-        components: [buttonRow, chooseRow],
-        files: files.length ? files : undefined,
-        content: undefined,
-    };
-    const editPrompt = async (msg, data) => {
-        try {
-            return await msg.edit(data);
-        }
-        catch (err) {
-            if (err?.code === 10008 || err?.code === 50027) {
-                return null;
-            }
-            throw err;
-        }
-    };
-    const tryEditReply = async () => {
-        try {
-            const edited = await interaction.editReply(payload);
-            return edited;
-        }
-        catch (err) {
-            if (err?.code === 10008 || err?.code === 50027)
-                return null;
-            throw err;
-        }
-    };
-    if (opts.useEditReply) {
-        promptMessage = await tryEditReply();
-    }
-    else if (promptMessage) {
-        const edited = await editPrompt(promptMessage, payload);
-        promptMessage = edited ?? null;
-    }
-    if (!promptMessage) {
-        promptMessage = await interaction.followUp({
-            ...payload,
-            ephemeral: true,
-        });
-    }
-    const buttonPromise = promptMessage
-        .awaitMessageComponent({
-        filter: (i) => {
-            const cid = i.customId ?? "";
-            return i.user?.id === interaction.user.id && cid.endsWith(token);
-        },
-        time: 120_000,
-    })
-        .then(async (i) => {
-        const cid = i.customId ?? "";
-        if (!i.deferred && !i.replied) {
-            await i.deferUpdate().catch(() => { });
-        }
-        if (cid.startsWith(stopPrefix))
-            return "stop";
-        if (cid.startsWith(noValuePrefix))
-            return { action: "no-value" };
-        if (cid.startsWith(skipPrefix))
-            return { action: "skip" };
-        if (cid.startsWith(useThreadPrefix) && threadCandidate) {
-            return { action: "store", buffer: threadCandidate.buffer, mimeType: threadCandidate.mimeType };
-        }
-        if (cid.startsWith(useHltbPrefix) && hltbCandidate) {
-            return { action: "store", buffer: hltbCandidate.buffer, mimeType: hltbCandidate.mimeType };
-        }
-        return { action: "skip" };
-    })
-        .catch(() => null);
-    const channel = interaction.channel;
-    const textPromise = channel?.awaitMessages
-        ? channel
-            .awaitMessages({
-            filter: (m) => m.author?.id === interaction.user.id,
-            max: 1,
-            time: 120_000,
-        })
-            .then(async (collected) => {
-            const first = collected?.first?.();
-            if (!first)
-                return null;
-            const attachment = first.attachments?.find?.((a) => (a.contentType ?? "").startsWith("image/") ||
-                /\.(png|jpg|jpeg|gif|webp|bmp|tiff)$/i.test((a.name ?? "").toLowerCase())) ?? null;
-            if (!attachment)
-                return null;
-            const url = attachment.url ?? attachment.proxyURL;
-            if (!url)
-                return null;
-            const { buffer, mimeType } = await downloadImageBuffer(url);
-            try {
-                await first.delete().catch(() => { });
-            }
-            catch {
-                // ignore
-            }
-            return { action: "store", buffer, mimeType };
-        })
-            .catch(() => null)
-        : Promise.resolve(null);
-    const result = await Promise.race([buttonPromise, textPromise]);
-    if (opts.useEditReply && promptMessage) {
-        await interaction.editReply({ components: [] });
-    }
-    else {
-        await editPrompt(promptMessage, { components: [] });
-    }
-    return {
-        result: result ?? { action: "skip" },
-        promptMessage,
-    };
 }
 let SuperAdmin = class SuperAdmin {
     async presence(text, interaction) {
@@ -964,462 +415,6 @@ let SuperAdmin = class SuperAdmin {
                 `Marked departed: ${departedCount}.`,
             ephemeral: true,
         });
-    }
-    async gotmDataAudit(threadIdFlag, redditUrlFlag, votingResultsFlag, imageFlag, order, showInChat, interaction) {
-        const ephemeral = !showInChat;
-        await safeDeferReply(interaction, { ephemeral });
-        const okToUseCommand = await isSuperAdmin(interaction);
-        if (!okToUseCommand)
-            return;
-        const checks = {
-            threadId: Boolean(threadIdFlag),
-            redditUrl: Boolean(redditUrlFlag),
-            votingResults: Boolean(votingResultsFlag),
-            image: Boolean(imageFlag),
-        };
-        if (!checks.threadId && !checks.redditUrl && !checks.votingResults && !checks.image) {
-            checks.threadId = true;
-            checks.redditUrl = true;
-            checks.votingResults = true;
-            checks.image = true;
-        }
-        const dir = (order ?? "desc").toLowerCase() === "asc" ? "asc" : "desc";
-        const entries = Gotm.all()
-            .slice()
-            .sort((a, b) => (dir === "asc" ? a.round - b.round : b.round - a.round));
-        if (!entries.length) {
-            await safeReply(interaction, {
-                content: "No GOTM data available to audit.",
-                ephemeral,
-            });
-            return;
-        }
-        await safeReply(interaction, {
-            content: "Starting GOTM data audit. Click Stop Audit at any prompt to end early. Click Skip or type none/null to leave a field empty.",
-            ephemeral,
-        });
-        let stopped = false;
-        let promptMessage = null;
-        let useEditReply = false;
-        try {
-            promptMessage = (await interaction.fetchReply());
-            useEditReply = !!promptMessage;
-        }
-        catch {
-            // ignore fetch failures; prompt creation handled below
-        }
-        for (const entry of entries) {
-            if (stopped)
-                break;
-            const roundLabel = `Round ${entry.round} (${entry.monthYear})`;
-            const skipRedditAudit = isAfterRedditCutoff(entry.monthYear);
-            for (let i = 0; i < entry.gameOfTheMonth.length; i++) {
-                const game = entry.gameOfTheMonth[i];
-                const winners = entry.gameOfTheMonth.map((g) => g.title);
-                if (checks.threadId && isAuditFieldMissing(game.threadId)) {
-                    const res = await promptForAuditValue(interaction, {
-                        auditLabel: "GOTM",
-                        tokenPrefix: "gotm",
-                        round: entry.round,
-                        roundLabel,
-                        gameIndex: i,
-                        gameTitle: game.title,
-                        field: "threadId",
-                        winners,
-                        rawEntry: entry,
-                        promptMessage,
-                        useEditReply,
-                    });
-                    promptMessage = res.promptMessage;
-                    if (res.result === "stop") {
-                        stopped = true;
-                        break;
-                    }
-                    if (res.result && res.result.action === "value") {
-                        const val = res.result.value ?? "";
-                        if (val.length > THREAD_ID_MAX_LENGTH) {
-                            await safeReply(interaction, {
-                                content: `Thread ID is too long (${val.length}). Max allowed is ${THREAD_ID_MAX_LENGTH}. Please provide the ID (not a URL).`,
-                            });
-                            continue;
-                        }
-                        await updateGotmGameFieldInDatabase(entry.round, i, "threadId", res.result.value);
-                        Gotm.updateThreadIdByRound(entry.round, res.result.value, i);
-                    }
-                    else if (res.result && res.result.action === "no-value") {
-                        await updateGotmGameFieldInDatabase(entry.round, i, "threadId", AUDIT_NO_VALUE_SENTINEL);
-                        Gotm.updateThreadIdByRound(entry.round, AUDIT_NO_VALUE_SENTINEL, i);
-                    }
-                }
-                if (stopped)
-                    break;
-                if (checks.redditUrl && !skipRedditAudit && isAuditFieldMissing(game.redditUrl)) {
-                    const res = await promptForAuditValue(interaction, {
-                        auditLabel: "GOTM",
-                        tokenPrefix: "gotm",
-                        round: entry.round,
-                        roundLabel,
-                        gameIndex: i,
-                        gameTitle: game.title,
-                        field: "redditUrl",
-                        winners,
-                        rawEntry: entry,
-                        promptMessage,
-                        useEditReply,
-                    });
-                    promptMessage = res.promptMessage;
-                    if (res.result === "stop") {
-                        stopped = true;
-                        break;
-                    }
-                    if (res.result && res.result.action === "value") {
-                        await updateGotmGameFieldInDatabase(entry.round, i, "redditUrl", res.result.value);
-                        Gotm.updateRedditUrlByRound(entry.round, res.result.value, i);
-                    }
-                    else if (res.result && res.result.action === "no-value") {
-                        await updateGotmGameFieldInDatabase(entry.round, i, "redditUrl", AUDIT_NO_VALUE_SENTINEL);
-                        Gotm.updateRedditUrlByRound(entry.round, AUDIT_NO_VALUE_SENTINEL, i);
-                    }
-                }
-                if (stopped)
-                    break;
-                if (checks.image &&
-                    isAuditImageMissing(game.imageBlob, game.imageMimeType)) {
-                    const resImg = await promptForAuditImage(interaction, {
-                        auditLabel: "GOTM",
-                        tokenPrefix: "gotm",
-                        round: entry.round,
-                        roundLabel,
-                        gameIndex: i,
-                        gameTitle: game.title,
-                        threadId: displayAuditValue(game.threadId),
-                        promptMessage,
-                        useEditReply,
-                    });
-                    promptMessage = resImg.promptMessage;
-                    if (resImg.result === "stop") {
-                        stopped = true;
-                        break;
-                    }
-                    if (resImg.result && resImg.result.action === "store") {
-                        await updateGotmGameImageInDatabase(entry.round, i, resImg.result.buffer, resImg.result.mimeType);
-                        Gotm.updateImageByRound(entry.round, resImg.result.buffer, resImg.result.mimeType, i);
-                    }
-                    else if (resImg.result && resImg.result.action === "no-value") {
-                        await updateGotmGameImageInDatabase(entry.round, i, null, AUDIT_NO_VALUE_SENTINEL);
-                        Gotm.updateImageByRound(entry.round, null, AUDIT_NO_VALUE_SENTINEL, i);
-                    }
-                }
-            }
-            if (stopped)
-                break;
-            if (checks.votingResults && isAuditFieldMissing(entry.votingResultsMessageId)) {
-                const res = await promptForAuditValue(interaction, {
-                    auditLabel: "GOTM",
-                    tokenPrefix: "gotm",
-                    round: entry.round,
-                    roundLabel,
-                    gameIndex: null,
-                    gameTitle: null,
-                    field: "votingResults",
-                    winners: entry.gameOfTheMonth.map((g) => g.title),
-                    rawEntry: entry,
-                    promptMessage,
-                    useEditReply,
-                });
-                promptMessage = res.promptMessage;
-                if (res.result === "stop") {
-                    stopped = true;
-                    break;
-                }
-                if (res.result && res.result.action === "value") {
-                    await updateGotmVotingResultsInDatabase(entry.round, res.result.value);
-                    Gotm.updateVotingResultsByRound(entry.round, res.result.value);
-                }
-                else if (res.result && res.result.action === "no-value") {
-                    await updateGotmVotingResultsInDatabase(entry.round, AUDIT_NO_VALUE_SENTINEL);
-                    Gotm.updateVotingResultsByRound(entry.round, AUDIT_NO_VALUE_SENTINEL);
-                }
-            }
-        }
-        if (promptMessage) {
-            const finalContent = stopped ? "Audit stopped." : "Audit completed.";
-            try {
-                const fetchedReply = await interaction.fetchReply().catch(() => null);
-                const canEdit = interaction.editReply &&
-                    promptMessage &&
-                    promptMessage.id === fetchedReply?.id;
-                if (canEdit) {
-                    await interaction.editReply({
-                        content: finalContent,
-                        embeds: [],
-                        components: [],
-                    });
-                }
-                else {
-                    await promptMessage.edit({ content: finalContent, embeds: [], components: [] });
-                }
-            }
-            catch (err) {
-                if (err?.code !== 10008 && err?.code !== 50027)
-                    throw err;
-                await safeReply(interaction, { content: finalContent });
-            }
-        }
-        else {
-            if (stopped) {
-                await safeReply(interaction, { content: "Audit stopped." });
-            }
-            else {
-                await safeReply(interaction, { content: "Audit completed." });
-            }
-        }
-    }
-    async nrGotmDataAudit(threadIdFlag, redditUrlFlag, votingResultsFlag, imageFlag, order, showInChat, interaction) {
-        const ephemeral = !showInChat;
-        await safeDeferReply(interaction, { ephemeral });
-        const okToUseCommand = await isSuperAdmin(interaction);
-        if (!okToUseCommand)
-            return;
-        const checks = {
-            threadId: Boolean(threadIdFlag),
-            redditUrl: Boolean(redditUrlFlag),
-            votingResults: Boolean(votingResultsFlag),
-            image: Boolean(imageFlag),
-        };
-        if (!checks.threadId && !checks.redditUrl && !checks.votingResults && !checks.image) {
-            checks.threadId = true;
-            checks.redditUrl = true;
-            checks.votingResults = true;
-            checks.image = true;
-        }
-        const dir = (order ?? "desc").toLowerCase() === "asc" ? "asc" : "desc";
-        const entries = NrGotm.all()
-            .slice()
-            .sort((a, b) => (dir === "asc" ? a.round - b.round : b.round - a.round));
-        if (!entries.length) {
-            await safeReply(interaction, {
-                content: "No NR-GOTM data available to audit.",
-                ephemeral,
-            });
-            return;
-        }
-        await safeReply(interaction, {
-            content: "Starting NR-GOTM data audit. Click Stop Audit at any prompt to end early. Click Skip or type none/null to leave a field empty.",
-            ephemeral,
-        });
-        let stopped = false;
-        let promptMessage = null;
-        let useEditReply = false;
-        try {
-            promptMessage = (await interaction.fetchReply());
-            useEditReply = !!promptMessage;
-        }
-        catch {
-            // ignore
-        }
-        for (const entry of entries) {
-            if (stopped)
-                break;
-            const roundLabel = `Round ${entry.round} (${entry.monthYear})`;
-            const skipRedditAudit = isAfterRedditCutoff(entry.monthYear);
-            for (let i = 0; i < entry.gameOfTheMonth.length; i++) {
-                const game = entry.gameOfTheMonth[i];
-                const winners = entry.gameOfTheMonth.map((g) => g.title);
-                if (checks.threadId && isAuditFieldMissing(game.threadId)) {
-                    const res = await promptForAuditValue(interaction, {
-                        auditLabel: "NR-GOTM",
-                        tokenPrefix: "nr-gotm",
-                        round: entry.round,
-                        roundLabel,
-                        gameIndex: i,
-                        gameTitle: game.title,
-                        field: "threadId",
-                        winners,
-                        rawEntry: entry,
-                        promptMessage,
-                        useEditReply,
-                    });
-                    promptMessage = res.promptMessage;
-                    if (res.result === "stop") {
-                        stopped = true;
-                        break;
-                    }
-                    if (res.result && res.result.action === "value") {
-                        const val = res.result.value ?? "";
-                        if (val.length > THREAD_ID_MAX_LENGTH) {
-                            await safeReply(interaction, {
-                                content: `Thread ID is too long (${val.length}). Max allowed is ${THREAD_ID_MAX_LENGTH}. Please provide the ID (not a URL).`,
-                            });
-                            continue;
-                        }
-                        await updateNrGotmGameFieldInDatabase({
-                            rowId: game.id ?? null,
-                            round: entry.round,
-                            gameIndex: i,
-                            field: "threadId",
-                            value: res.result.value,
-                        });
-                        NrGotm.updateThreadIdByRound(entry.round, res.result.value, i);
-                    }
-                    else if (res.result && res.result.action === "no-value") {
-                        await updateNrGotmGameFieldInDatabase({
-                            rowId: game.id ?? null,
-                            round: entry.round,
-                            gameIndex: i,
-                            field: "threadId",
-                            value: AUDIT_NO_VALUE_SENTINEL,
-                        });
-                        NrGotm.updateThreadIdByRound(entry.round, AUDIT_NO_VALUE_SENTINEL, i);
-                    }
-                }
-                if (stopped)
-                    break;
-                if (checks.redditUrl && !skipRedditAudit && isAuditFieldMissing(game.redditUrl)) {
-                    const res = await promptForAuditValue(interaction, {
-                        auditLabel: "NR-GOTM",
-                        tokenPrefix: "nr-gotm",
-                        round: entry.round,
-                        roundLabel,
-                        gameIndex: i,
-                        gameTitle: game.title,
-                        field: "redditUrl",
-                        winners,
-                        rawEntry: entry,
-                        promptMessage,
-                        useEditReply,
-                    });
-                    promptMessage = res.promptMessage;
-                    if (res.result === "stop") {
-                        stopped = true;
-                        break;
-                    }
-                    if (res.result && res.result.action === "value") {
-                        await updateNrGotmGameFieldInDatabase({
-                            rowId: game.id ?? null,
-                            round: entry.round,
-                            gameIndex: i,
-                            field: "redditUrl",
-                            value: res.result.value,
-                        });
-                        NrGotm.updateRedditUrlByRound(entry.round, res.result.value, i);
-                    }
-                    else if (res.result && res.result.action === "no-value") {
-                        await updateNrGotmGameFieldInDatabase({
-                            rowId: game.id ?? null,
-                            round: entry.round,
-                            gameIndex: i,
-                            field: "redditUrl",
-                            value: AUDIT_NO_VALUE_SENTINEL,
-                        });
-                        NrGotm.updateRedditUrlByRound(entry.round, AUDIT_NO_VALUE_SENTINEL, i);
-                    }
-                }
-                if (stopped)
-                    break;
-                if (checks.image &&
-                    isAuditImageMissing(game.imageBlob, game.imageMimeType)) {
-                    const resImg = await promptForAuditImage(interaction, {
-                        auditLabel: "NR-GOTM",
-                        tokenPrefix: "nr-gotm",
-                        round: entry.round,
-                        roundLabel,
-                        gameIndex: i,
-                        gameTitle: game.title,
-                        threadId: displayAuditValue(game.threadId),
-                        promptMessage,
-                        useEditReply,
-                    });
-                    promptMessage = resImg.promptMessage;
-                    if (resImg.result === "stop") {
-                        stopped = true;
-                        break;
-                    }
-                    if (resImg.result && resImg.result.action === "store") {
-                        await updateNrGotmGameImageInDatabase({
-                            rowId: game.id ?? null,
-                            round: entry.round,
-                            gameIndex: i,
-                            imageBlob: resImg.result.buffer,
-                            imageMimeType: resImg.result.mimeType,
-                        });
-                        NrGotm.updateImageByRound(entry.round, resImg.result.buffer, resImg.result.mimeType, i);
-                    }
-                    else if (resImg.result && resImg.result.action === "no-value") {
-                        await updateNrGotmGameImageInDatabase({
-                            rowId: game.id ?? null,
-                            round: entry.round,
-                            gameIndex: i,
-                            imageBlob: null,
-                            imageMimeType: AUDIT_NO_VALUE_SENTINEL,
-                        });
-                        NrGotm.updateImageByRound(entry.round, null, AUDIT_NO_VALUE_SENTINEL, i);
-                    }
-                }
-            }
-            if (stopped)
-                break;
-            if (checks.votingResults && isAuditFieldMissing(entry.votingResultsMessageId)) {
-                const res = await promptForAuditValue(interaction, {
-                    auditLabel: "NR-GOTM",
-                    tokenPrefix: "nr-gotm",
-                    round: entry.round,
-                    roundLabel,
-                    gameIndex: null,
-                    gameTitle: null,
-                    field: "votingResults",
-                    winners: entry.gameOfTheMonth.map((g) => g.title),
-                    rawEntry: entry,
-                    promptMessage,
-                    useEditReply,
-                });
-                promptMessage = res.promptMessage;
-                if (res.result === "stop") {
-                    stopped = true;
-                    break;
-                }
-                if (res.result && res.result.action === "value") {
-                    await updateNrGotmVotingResultsInDatabase(entry.round, res.result.value);
-                    NrGotm.updateVotingResultsByRound(entry.round, res.result.value);
-                }
-                else if (res.result && res.result.action === "no-value") {
-                    await updateNrGotmVotingResultsInDatabase(entry.round, AUDIT_NO_VALUE_SENTINEL);
-                    NrGotm.updateVotingResultsByRound(entry.round, AUDIT_NO_VALUE_SENTINEL);
-                }
-            }
-        }
-        if (promptMessage) {
-            const finalContent = stopped ? "Audit stopped." : "Audit completed.";
-            try {
-                const fetchedReply = await interaction.fetchReply().catch(() => null);
-                const canEdit = interaction.editReply &&
-                    promptMessage &&
-                    promptMessage.id === fetchedReply?.id;
-                if (canEdit) {
-                    await interaction.editReply({
-                        content: finalContent,
-                        embeds: [],
-                        components: [],
-                    });
-                }
-                else {
-                    await promptMessage.edit({ content: finalContent, embeds: [], components: [] });
-                }
-            }
-            catch (err) {
-                if (err?.code !== 10008 && err?.code !== 50027)
-                    throw err;
-                await safeReply(interaction, { content: finalContent });
-            }
-        }
-        else {
-            if (stopped) {
-                await safeReply(interaction, { content: "Audit stopped." });
-            }
-            else {
-                await safeReply(interaction, { content: "Audit completed." });
-            }
-        }
     }
     async setNextVote(dateText, interaction) {
         await safeDeferReply(interaction);
@@ -2168,149 +1163,80 @@ let SuperAdmin = class SuperAdmin {
             });
             return;
         }
-        await safeReply(interaction, {
+        const status = {
+            total: seeds.length,
+            processed: 0,
+            logs: [],
+        };
+        const statusMessage = await safeReply(interaction, {
             content: `Starting GameDB backfill for ${seeds.length} titles...`,
-            ephemeral: true,
+            ephemeral: false,
+            fetchReply: true,
         });
-        const logLines = [];
         for (const seed of seeds) {
             const label = `${seed.source} Round ${seed.round} (${seed.monthYear})`;
             try {
                 const line = await this.processGamedbSeed(interaction, seed, label);
                 if (line)
-                    logLines.push(line);
+                    status.logs.push(line);
             }
             catch (err) {
                 const msg = err?.message ?? String(err);
-                logLines.push(`[${label}] Error: ${msg}`);
+                status.logs.push(`[${label}] Error: ${msg}`);
             }
+            status.processed++;
+            await this.editStatusMessage(interaction, statusMessage, status);
             await this.delay(400);
         }
-        if (!logLines.length) {
-            await safeReply(interaction, {
-                content: "Backfill complete. Nothing new was imported.",
-                ephemeral: true,
-            });
-            return;
-        }
-        const chunks = this.chunkLines(logLines);
-        let first = true;
-        for (const chunk of chunks) {
-            await safeReply(interaction, {
-                content: chunk,
-                ephemeral: true,
-                __forceFollowUp: !first,
-            });
-            first = false;
-        }
-    }
-    async messageCountBackfill(channelNameFilter, maxPerChannelOpt, interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
-        const okToUseCommand = await isSuperAdmin(interaction);
-        if (!okToUseCommand)
-            return;
-        const maxPerChannel = typeof maxPerChannelOpt === "number" && Number.isFinite(maxPerChannelOpt)
-            ? Math.max(0, Math.trunc(maxPerChannelOpt))
-            : null;
-        const guild = interaction.guild;
-        if (!guild) {
-            await safeReply(interaction, {
-                content: "This command must be run in a guild.",
-                ephemeral: true,
-            });
-            return;
-        }
-        const channels = await getAllTextChannelsWithThreads(guild);
-        const scanMeta = await UserChannelMessageCount.getChannelScanMeta();
-        const filteredChannels = channels.filter((ch) => {
-            const id = ch.id ?? "";
-            const name = (ch.name ?? "").toLowerCase();
-            const filter = (channelNameFilter ?? "").toLowerCase().trim();
-            const matchesFilter = !filter || name === filter || id === filter || name.includes(filter);
-            return matchesFilter;
-        });
-        if (!filteredChannels.length) {
-            await safeReply(interaction, {
-                content: "No channels matched the filter or all have already been scanned. Use force:true to rescan.",
-                ephemeral: true,
-            });
-            return;
-        }
-        const counts = new Map();
-        const replyUpdater = async (text) => {
-            try {
-                await safeReply(interaction, { content: text, ephemeral: true });
-            }
-            catch {
-                // ignore
-            }
-        };
-        const startTime = Date.now();
-        let lastLog = startTime;
-        let channelsProcessed = 0;
-        const logStatus = (label) => {
-            const now = Date.now();
-            if (now - lastLog < 15_000)
-                return;
-            console.log(`[MessageCountBackfill] Scanning ${label} (channels processed: ${channelsProcessed}/${channels.length}, users tallied: ${counts.size}, elapsed: ${Math.round((now - startTime) / 1000)}s)`);
-            lastLog = now;
-        };
-        for (const channel of filteredChannels) {
-            const label = channel.name ?? channel.id ?? "unknown";
-            await replyUpdater(`Scanning ${label}... (${counts.size} users tallied so far)`);
-            logStatus(label);
-            const lastScan = scanMeta.get(channel.id ?? "") ?? null;
-            const channelCounts = await collectMessageCounts(channel, maxPerChannel, () => logStatus(label), lastScan);
-            for (const [userId, count] of channelCounts) {
-                counts.set(userId, (counts.get(userId) ?? 0) + count);
-            }
-            await UserChannelMessageCount.upsertChannelCounts(channel.id ?? "", channelCounts, new Date());
-            channelsProcessed++;
-        }
-        let updated = 0;
-        for (const [userId, total] of counts.entries()) {
-            await Member.setMessageCount(userId, total);
-            updated++;
-        }
-        await safeReply(interaction, {
-            content: `Backfill complete.\n` +
-                `Channels scanned: ${filteredChannels.length}\n` +
-                `Users updated: ${updated}\n` +
-                `Message counts populated from historical messages${maxPerChannel ? ` (capped at ${maxPerChannel} per channel)` : ""}.`,
-            ephemeral: true,
-        });
+        await this.editStatusMessage(interaction, statusMessage, status, true);
     }
     buildGamedbSeeds() {
         const seeds = [];
-        const titleSeen = new Set();
-        const addSeed = (title, source, round, monthYear) => {
-            const key = `${source}-${title.toLowerCase()}`;
-            if (titleSeen.has(key))
-                return;
-            titleSeen.add(key);
-            seeds.push({ title, source, round, monthYear });
-        };
         const gotmEntries = Gotm.all();
-        for (const entry of gotmEntries) {
-            for (const game of entry.gameOfTheMonth) {
-                if (game.title)
-                    addSeed(game.title, "GOTM", entry.round, entry.monthYear);
-            }
-        }
+        gotmEntries.forEach((entry) => {
+            entry.gameOfTheMonth.forEach((game, idx) => {
+                if (game.gamedbGameId)
+                    return;
+                if (!game.title)
+                    return;
+                seeds.push({
+                    title: game.title,
+                    source: "GOTM",
+                    round: entry.round,
+                    monthYear: entry.monthYear,
+                    gameIndex: idx,
+                    gamedbGameId: game.gamedbGameId ?? null,
+                });
+            });
+        });
         const nrEntries = NrGotm.all();
-        for (const entry of nrEntries) {
-            for (const game of entry.gameOfTheMonth) {
-                if (game.title)
-                    addSeed(game.title, "NR-GOTM", entry.round, entry.monthYear);
-            }
-        }
+        nrEntries.forEach((entry) => {
+            entry.gameOfTheMonth.forEach((game, idx) => {
+                if (game.gamedbGameId)
+                    return;
+                if (!game.title)
+                    return;
+                seeds.push({
+                    title: game.title,
+                    source: "NR-GOTM",
+                    round: entry.round,
+                    monthYear: entry.monthYear,
+                    gameIndex: idx,
+                    gamedbGameId: game.gamedbGameId ?? null,
+                });
+            });
+        });
         return seeds;
     }
     async processGamedbSeed(interaction, seed, label) {
+        if (seed.gamedbGameId) {
+            return `[${label}] Skipped (already linked) ${seed.title}`;
+        }
         const existingByTitle = await Game.searchGames(seed.title);
-        const match = existingByTitle.find((g) => g.title.toLowerCase() === seed.title.toLowerCase());
-        if (match) {
-            return `[${label}] Skipped (already in GameDB #${match.id}): ${seed.title}`;
+        const exactMatch = existingByTitle.find((g) => g.title.toLowerCase() === seed.title.toLowerCase());
+        if (exactMatch) {
+            await this.linkGameToSeed(seed, exactMatch.id);
+            return `[${label}] Linked existing GameDB #${exactMatch.id} to ${seed.title}`;
         }
         let igdbMatches = [];
         try {
@@ -2325,7 +1251,8 @@ let SuperAdmin = class SuperAdmin {
         }
         const existingIgdb = await this.findExistingIgdbGame(igdbMatches);
         if (existingIgdb) {
-            return `[${label}] Skipped (IGDB already imported #${existingIgdb.id}): ${seed.title}`;
+            await this.linkGameToSeed(seed, existingIgdb.id);
+            return `[${label}] Linked existing GameDB #${existingIgdb.id} to ${seed.title}`;
         }
         let selectedId = null;
         if (igdbMatches.length === 1) {
@@ -2337,7 +1264,7 @@ let SuperAdmin = class SuperAdmin {
         if (!selectedId) {
             return `[${label}] Skipped (no selection): ${seed.title}`;
         }
-        return this.importGameFromIgdb(selectedId, label);
+        return this.importGameFromIgdb(selectedId, label, seed);
     }
     async promptForIgdbSelection(interaction, seed, matches) {
         const options = matches.slice(0, 24).map((game) => {
@@ -2356,63 +1283,47 @@ let SuperAdmin = class SuperAdmin {
             value: "skip",
             description: "Leave this GOTM/NR-GOTM un-imported",
         });
+        const customId = `gamedb-import-${Date.now()}`;
         const menu = new StringSelectMenuBuilder()
-            .setCustomId(`gamedb-import-${Date.now()}`)
+            .setCustomId(customId)
             .setPlaceholder(`Select IGDB match for "${seed.title}"`)
             .addOptions(options);
         const row = new ActionRowBuilder().addComponents(menu);
-        const prompt = await safeReply(interaction, {
+        const payload = {
             content: `Multiple IGDB matches for ${seed.source} Round ${seed.round} (${seed.monthYear}).`,
             components: [row],
-            ephemeral: true,
-        });
-        if (!prompt || typeof prompt.createMessageComponentCollector !== "function") {
-            return null;
+            fetchReply: true,
+        };
+        let prompt = null;
+        const existing = this.__gamedbPromptMessage;
+        if (existing && typeof existing.edit === "function") {
+            try {
+                prompt = (await existing.edit(payload));
+            }
+            catch {
+                prompt = null;
+            }
         }
-        return new Promise((resolve) => {
-            let resolved = false;
-            const collector = prompt.createMessageComponentCollector({
-                componentType: ComponentType.StringSelect,
-                time: 60_000,
-                filter: (i) => i.user.id === interaction.user.id,
-            });
-            collector.on("collect", async (i) => {
-                try {
-                    await i.deferUpdate();
-                }
-                catch {
-                    // ignore
-                }
-                const val = i.values[0];
-                const selected = val === "skip" ? null : Number(val);
-                resolved = true;
-                resolve(Number.isFinite(selected) ? selected : null);
-                try {
-                    await prompt.edit({ components: [] });
-                }
-                catch {
-                    // ignore
-                }
-                collector.stop("selected");
-            });
-            collector.on("end", async () => {
-                if (!resolved)
+        if (!prompt) {
+            prompt = (await safeReply(interaction, { ...payload, ephemeral: false }));
+            this.__gamedbPromptMessage = prompt ?? null;
+        }
+        if (!prompt)
+            return null;
+        return await new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                GAMEDB_IMPORT_PROMPTS.delete(customId);
+                resolve(null);
+            }, 60_000);
+            GAMEDB_IMPORT_PROMPTS.set(customId, (val) => {
+                clearTimeout(timeout);
+                GAMEDB_IMPORT_PROMPTS.delete(customId);
+                if (val === "skip" || val === null) {
                     resolve(null);
-                try {
-                    await prompt.edit({ components: [] });
                 }
-                catch {
-                    // ignore
-                }
-                try {
-                    await safeReply(interaction, {
-                        content: `Selection closed for ${seed.title}.`,
-                        components: [],
-                        ephemeral: true,
-                    });
-                }
-                catch {
-                    // ignore
+                else {
+                    const selected = Number(val);
+                    resolve(Number.isFinite(selected) ? selected : null);
                 }
             });
         });
@@ -2426,7 +1337,31 @@ let SuperAdmin = class SuperAdmin {
         }
         return null;
     }
-    async importGameFromIgdb(igdbId, label) {
+    async handleGamedbImportSelect(interaction) {
+        const resolver = GAMEDB_IMPORT_PROMPTS.get(interaction.customId);
+        if (!resolver) {
+            await interaction.reply({
+                content: "This selection has expired or was already handled.",
+                ephemeral: true,
+            }).catch(() => { });
+            return;
+        }
+        try {
+            await interaction.deferUpdate();
+        }
+        catch {
+            // ignore
+        }
+        const val = interaction.values?.[0] ?? null;
+        resolver(val);
+        try {
+            await interaction.message.edit({ components: [] });
+        }
+        catch {
+            // ignore
+        }
+    }
+    async importGameFromIgdb(igdbId, label, seed) {
         const details = await igdbService.getGameDetails(igdbId);
         if (!details) {
             return `[${label}] IGDB details unavailable for id ${igdbId}`;
@@ -2450,6 +1385,7 @@ let SuperAdmin = class SuperAdmin {
         const newGame = await Game.createGame(details.name, details.summary ?? null, imageData, details.id, details.slug, details.total_rating ?? null, igdbUrl);
         await Game.saveFullGameMetadata(newGame.id, details);
         await this.saveReleaseDates(newGame.id, details);
+        await this.linkGameToSeed(seed, newGame.id);
         return `[${label}] Imported "${newGame.title}" -> GameDB #${newGame.id}`;
     }
     async saveReleaseDates(gameId, details) {
@@ -2497,6 +1433,39 @@ let SuperAdmin = class SuperAdmin {
     async delay(ms) {
         await new Promise((resolve) => setTimeout(resolve, ms));
     }
+    async editStatusMessage(interaction, message, status, done = false) {
+        const header = done
+            ? `GameDB backfill complete. Processed ${status.processed}/${status.total}.`
+            : `GameDB backfill in progress... (${status.processed}/${status.total})`;
+        const recentLogs = this.chunkLines(status.logs).slice(-1);
+        const content = [header, "", ...recentLogs].join("\n").trim();
+        try {
+            if (message && typeof message.edit === "function") {
+                await message.edit(content || header);
+            }
+            else {
+                await safeReply(interaction, { content: content || header, ephemeral: false });
+            }
+        }
+        catch {
+            // ignore status update failures
+        }
+    }
+    async linkGameToSeed(seed, gameId) {
+        if (seed.source === "GOTM") {
+            await updateGotmGameFieldInDatabase(seed.round, seed.gameIndex, "gamedbGameId", gameId);
+            Gotm.updateGamedbIdByRound(seed.round, gameId, seed.gameIndex);
+        }
+        else {
+            await updateNrGotmGameFieldInDatabase({
+                round: seed.round,
+                gameIndex: seed.gameIndex,
+                field: "gamedbGameId",
+                value: gameId,
+            });
+            NrGotm.updateGamedbIdByRound(seed.round, gameId, seed.gameIndex);
+        }
+    }
 };
 __decorate([
     Slash({ description: "Set Presence", name: "presence" }),
@@ -2519,90 +1488,6 @@ __decorate([
 __decorate([
     Slash({ description: "Scan guild members and upsert into RPG_CLUB_USERS", name: "memberscan" })
 ], SuperAdmin.prototype, "memberScan", null);
-__decorate([
-    Slash({
-        description: "Audit GOTM data for missing fields",
-        name: "gotm-data-audit",
-    }),
-    __param(0, SlashOption({
-        description: "Ask only about missing thread IDs",
-        name: "threadid",
-        required: false,
-        type: ApplicationCommandOptionType.Boolean,
-    })),
-    __param(1, SlashOption({
-        description: "Ask only about missing Reddit URLs",
-        name: "redditurl",
-        required: false,
-        type: ApplicationCommandOptionType.Boolean,
-    })),
-    __param(2, SlashOption({
-        description: "Ask only about missing voting result message IDs",
-        name: "votingresults",
-        required: false,
-        type: ApplicationCommandOptionType.Boolean,
-    })),
-    __param(3, SlashOption({
-        description: "Ask only about missing images",
-        name: "image",
-        required: false,
-        type: ApplicationCommandOptionType.Boolean,
-    })),
-    __param(4, SlashOption({
-        description: "Order to audit rounds (asc or desc, default desc)",
-        name: "order",
-        required: false,
-        type: ApplicationCommandOptionType.String,
-    })),
-    __param(5, SlashOption({
-        description: "If true, show prompts in-channel (not ephemeral)",
-        name: "showinchat",
-        required: false,
-        type: ApplicationCommandOptionType.Boolean,
-    }))
-], SuperAdmin.prototype, "gotmDataAudit", null);
-__decorate([
-    Slash({
-        description: "Audit NR-GOTM data for missing fields",
-        name: "nr-gotm-data-audit",
-    }),
-    __param(0, SlashOption({
-        description: "Ask only about missing thread IDs",
-        name: "threadid",
-        required: false,
-        type: ApplicationCommandOptionType.Boolean,
-    })),
-    __param(1, SlashOption({
-        description: "Ask only about missing Reddit URLs",
-        name: "redditurl",
-        required: false,
-        type: ApplicationCommandOptionType.Boolean,
-    })),
-    __param(2, SlashOption({
-        description: "Ask only about missing voting result message IDs",
-        name: "votingresults",
-        required: false,
-        type: ApplicationCommandOptionType.Boolean,
-    })),
-    __param(3, SlashOption({
-        description: "Ask only about missing images",
-        name: "image",
-        required: false,
-        type: ApplicationCommandOptionType.Boolean,
-    })),
-    __param(4, SlashOption({
-        description: "Order to audit rounds (asc or desc, default desc)",
-        name: "order",
-        required: false,
-        type: ApplicationCommandOptionType.String,
-    })),
-    __param(5, SlashOption({
-        description: "If true, show prompts in-channel (not ephemeral)",
-        name: "showinchat",
-        required: false,
-        type: ApplicationCommandOptionType.Boolean,
-    }))
-], SuperAdmin.prototype, "nrGotmDataAudit", null);
 __decorate([
     Slash({
         description: "Votes are typically held the last Friday of the month",
@@ -2700,23 +1585,8 @@ __decorate([
     })
 ], SuperAdmin.prototype, "gamedbBackfill", null);
 __decorate([
-    Slash({
-        description: "Scan guild history to backfill MESSAGE_COUNT totals",
-        name: "message-count-backfill",
-    }),
-    __param(0, SlashOption({
-        description: "Restrict scan to a single channel/thread by name or id",
-        name: "channelname",
-        required: false,
-        type: ApplicationCommandOptionType.String,
-    })),
-    __param(1, SlashOption({
-        description: "Maximum messages to fetch per channel (optional cap)",
-        name: "maxperchannel",
-        required: false,
-        type: ApplicationCommandOptionType.Integer,
-    }))
-], SuperAdmin.prototype, "messageCountBackfill", null);
+    SelectMenuComponent({ id: /^gamedb-import-\d+$/ })
+], SuperAdmin.prototype, "handleGamedbImportSelect", null);
 SuperAdmin = __decorate([
     Discord(),
     SlashGroup({ description: "Server Owner Commands", name: "superadmin" }),
@@ -2780,6 +1650,15 @@ async function promptUserForInput(interaction, question, timeoutMs = 120_000) {
         }
         return null;
     }
+}
+export const AUDIT_NO_VALUE_SENTINEL = "__NO_VALUE__";
+function isAuditNoValue(value) {
+    return value === AUDIT_NO_VALUE_SENTINEL;
+}
+function displayAuditValue(value) {
+    if (isAuditNoValue(value))
+        return null;
+    return value ?? null;
 }
 function formatIGotmEntryForEdit(entry) {
     const lines = [];

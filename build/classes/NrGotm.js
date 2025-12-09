@@ -29,7 +29,8 @@ async function loadFromDatabaseInternal() {
               REDDIT_URL,
               VOTING_RESULTS_MESSAGE_ID,
               IMAGE_BLOB,
-              IMAGE_MIME_TYPE
+              IMAGE_MIME_TYPE,
+              GAMEDB_GAME_ID
          FROM NR_GOTM_ENTRIES
         ORDER BY ROUND_NUMBER, GAME_INDEX`, [], {
             outFormat: oracledb.OUT_FORMAT_OBJECT,
@@ -68,6 +69,7 @@ async function loadFromDatabaseInternal() {
                 redditUrl: row.REDDIT_URL ?? null,
                 imageBlob: row.IMAGE_BLOB ?? null,
                 imageMimeType: row.IMAGE_MIME_TYPE ?? null,
+                gamedbGameId: row.GAMEDB_GAME_ID ?? null,
             };
             entry.gameOfTheMonth.push(game);
         }
@@ -229,6 +231,14 @@ export default class NrGotm {
         entry.gameOfTheMonth[i].imageMimeType = imageMimeType;
         return entry;
     }
+    static updateGamedbIdByRound(round, gamedbGameId, index) {
+        const entry = this.getRoundEntry(round);
+        if (!entry)
+            return null;
+        const i = this.resolveIndex(entry, index);
+        entry.gameOfTheMonth[i].gamedbGameId = gamedbGameId;
+        return entry;
+    }
     static updateVotingResultsByRound(round, messageId) {
         const entry = this.getRoundEntry(round);
         if (!entry)
@@ -303,6 +313,7 @@ export async function updateNrGotmGameFieldInDatabase(opts) {
             title: "GAME_TITLE",
             threadId: "THREAD_ID",
             redditUrl: "REDDIT_URL",
+            gamedbGameId: "GAMEDB_GAME_ID",
         };
         const columnName = columnMap[opts.field];
         // Prefer rowId if provided

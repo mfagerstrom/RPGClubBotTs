@@ -8,6 +8,7 @@ export interface INrGotmGame {
   redditUrl: string | null;
   imageBlob?: Buffer | null;
   imageMimeType?: string | null;
+  gamedbGameId?: number | null;
 }
 
 export interface INrGotmEntry {
@@ -52,6 +53,7 @@ async function loadFromDatabaseInternal(): Promise<INrGotmEntry[]> {
       VOTING_RESULTS_MESSAGE_ID: string | null;
       IMAGE_BLOB: Buffer | null;
       IMAGE_MIME_TYPE: string | null;
+      GAMEDB_GAME_ID: number | null;
     }>(
       `SELECT ROUND_NUMBER,
               MONTH_YEAR,
@@ -61,7 +63,8 @@ async function loadFromDatabaseInternal(): Promise<INrGotmEntry[]> {
               REDDIT_URL,
               VOTING_RESULTS_MESSAGE_ID,
               IMAGE_BLOB,
-              IMAGE_MIME_TYPE
+              IMAGE_MIME_TYPE,
+              GAMEDB_GAME_ID
          FROM NR_GOTM_ENTRIES
         ORDER BY ROUND_NUMBER, GAME_INDEX`,
       [],
@@ -88,6 +91,7 @@ async function loadFromDatabaseInternal(): Promise<INrGotmEntry[]> {
         VOTING_RESULTS_MESSAGE_ID: string | null;
         IMAGE_BLOB: Buffer | null;
         IMAGE_MIME_TYPE: string | null;
+        GAMEDB_GAME_ID: number | null;
       };
 
       const round = Number(row.ROUND_NUMBER);
@@ -118,6 +122,7 @@ async function loadFromDatabaseInternal(): Promise<INrGotmEntry[]> {
         redditUrl: row.REDDIT_URL ?? null,
         imageBlob: row.IMAGE_BLOB ?? null,
         imageMimeType: row.IMAGE_MIME_TYPE ?? null,
+        gamedbGameId: row.GAMEDB_GAME_ID ?? null,
       };
 
       entry.gameOfTheMonth.push(game);
@@ -309,6 +314,18 @@ export default class NrGotm {
     return entry;
   }
 
+  static updateGamedbIdByRound(
+    round: number,
+    gamedbGameId: number | null,
+    index?: number,
+  ): INrGotmEntry | null {
+    const entry = this.getRoundEntry(round);
+    if (!entry) return null;
+    const i = this.resolveIndex(entry, index);
+    entry.gameOfTheMonth[i].gamedbGameId = gamedbGameId;
+    return entry;
+  }
+
   static updateVotingResultsByRound(
     round: number,
     messageId: string | null,
@@ -330,7 +347,7 @@ export default class NrGotm {
   }
 }
 
-export type NrGotmEditableField = "title" | "threadId" | "redditUrl";
+export type NrGotmEditableField = "title" | "threadId" | "redditUrl" | "gamedbGameId";
 
 export async function updateNrGotmGameImageInDatabase(
   opts: {
@@ -423,7 +440,7 @@ export async function updateNrGotmGameFieldInDatabase(
     round?: number;
     gameIndex?: number;
     field: NrGotmEditableField;
-    value: string | null;
+    value: string | number | null;
   },
 ): Promise<void> {
   const pool = getOraclePool();
@@ -434,6 +451,7 @@ export async function updateNrGotmGameFieldInDatabase(
       title: "GAME_TITLE",
       threadId: "THREAD_ID",
       redditUrl: "REDDIT_URL",
+      gamedbGameId: "GAMEDB_GAME_ID",
     };
 
     const columnName = columnMap[opts.field];

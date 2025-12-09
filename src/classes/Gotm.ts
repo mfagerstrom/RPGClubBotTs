@@ -7,6 +7,7 @@ export interface IGotmGame {
   redditUrl: string | null;
   imageBlob?: Buffer | null;
   imageMimeType?: string | null;
+  gamedbGameId?: number | null;
 }
 
 export interface IGotmEntry {
@@ -50,6 +51,7 @@ async function loadFromDatabaseInternal(): Promise<IGotmEntry[]> {
       VOTING_RESULTS_MESSAGE_ID: string | null;
       IMAGE_BLOB: Buffer | null;
       IMAGE_MIME_TYPE: string | null;
+      GAMEDB_GAME_ID: number | null;
     }>(
       `SELECT ROUND_NUMBER,
               MONTH_YEAR,
@@ -59,7 +61,8 @@ async function loadFromDatabaseInternal(): Promise<IGotmEntry[]> {
               REDDIT_URL,
               VOTING_RESULTS_MESSAGE_ID,
               IMAGE_BLOB,
-              IMAGE_MIME_TYPE
+              IMAGE_MIME_TYPE,
+              GAMEDB_GAME_ID
          FROM GOTM_ENTRIES
         ORDER BY ROUND_NUMBER, GAME_INDEX`,
       [],
@@ -85,6 +88,7 @@ async function loadFromDatabaseInternal(): Promise<IGotmEntry[]> {
         VOTING_RESULTS_MESSAGE_ID: string | null;
         IMAGE_BLOB: Buffer | null;
         IMAGE_MIME_TYPE: string | null;
+        GAMEDB_GAME_ID: number | null;
       };
 
       const round = Number(row.ROUND_NUMBER);
@@ -114,6 +118,7 @@ async function loadFromDatabaseInternal(): Promise<IGotmEntry[]> {
         redditUrl: row.REDDIT_URL ?? null,
         imageBlob: row.IMAGE_BLOB ?? null,
         imageMimeType: row.IMAGE_MIME_TYPE ?? null,
+        gamedbGameId: row.GAMEDB_GAME_ID ?? null,
       };
 
       entry.gameOfTheMonth.push(game);
@@ -304,6 +309,18 @@ export default class Gotm {
     return entry;
   }
 
+  static updateGamedbIdByRound(
+    round: number,
+    gamedbGameId: number | null,
+    index?: number,
+  ): IGotmEntry | null {
+    const entry = this.getRoundEntry(round);
+    if (!entry) return null;
+    const i = this.resolveIndex(entry, index);
+    entry.gameOfTheMonth[i].gamedbGameId = gamedbGameId;
+    return entry;
+  }
+
   static updateVotingResultsByRound(round: number, messageId: string | null): IGotmEntry | null {
     const entry = this.getRoundEntry(round);
     if (!entry) return null;
@@ -322,7 +339,7 @@ export default class Gotm {
   }
 }
 
-export type GotmEditableField = "title" | "threadId" | "redditUrl";
+export type GotmEditableField = "title" | "threadId" | "redditUrl" | "gamedbGameId";
 
 export async function updateGotmGameImageInDatabase(
   round: number,
@@ -389,7 +406,7 @@ export async function updateGotmGameFieldInDatabase(
   round: number,
   gameIndex: number,
   field: GotmEditableField,
-  value: string | null,
+  value: string | number | null,
 ): Promise<void> {
   const pool = getOraclePool();
   const connection = await pool.getConnection();
@@ -399,6 +416,7 @@ export async function updateGotmGameFieldInDatabase(
       title: "GAME_TITLE",
       threadId: "THREAD_ID",
       redditUrl: "REDDIT_URL",
+      gamedbGameId: "GAMEDB_GAME_ID",
     };
 
     const columnName = columnMap[field];
