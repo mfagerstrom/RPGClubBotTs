@@ -49,6 +49,23 @@ export interface IEngine { id: number; name: string; igdbId: number | null; }
 export interface IFranchise { id: number; name: string; igdbId: number | null; }
 export interface ICollection { id: number; name: string; igdbId: number | null; }
 
+export interface IGameAssociationSummary {
+  gotmWins: {
+    round: number;
+    threadId: string | null;
+    redditUrl: string | null;
+    monthYear: string;
+  }[];
+  nrGotmWins: {
+    round: number;
+    threadId: string | null;
+    redditUrl: string | null;
+    monthYear: string;
+  }[];
+  gotmNominations: { round: number; userId: string; username: string }[];
+  nrGotmNominations: { round: number; userId: string; username: string }[];
+}
+
 const IGDB_REGION_MAP: Record<number, { code: string; name: string }> = {
   1: { code: "EU", name: "Europe" },
   2: { code: "NA", name: "North America" },
@@ -908,7 +925,9 @@ export default class Game {
   static async searchGames(query: string): Promise<IGame[]> {
     const pool = getOraclePool();
     const connection = await pool.getConnection();
-    const searchQuery = `%${query.toLowerCase()}%`;
+    const rawQuery = query.toLowerCase();
+    const searchQuery = `%${rawQuery}%`;
+    const normalizedQuery = `%${rawQuery.replace(/[^a-z0-9]/g, "")}%`;
 
     try {
       const result = await connection.execute<{
@@ -926,8 +945,9 @@ export default class Game {
         `SELECT GAME_ID, TITLE, DESCRIPTION, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, CREATED_AT, UPDATED_AT
            FROM GAMEDB_GAMES
           WHERE LOWER(TITLE) LIKE :searchQuery
+             OR REGEXP_REPLACE(LOWER(TITLE), '[^a-z0-9]', '') LIKE :normalizedQuery
           ORDER BY TITLE ASC`,
-        { searchQuery },
+        { searchQuery, normalizedQuery },
         {
           outFormat: oracledb.OUT_FORMAT_OBJECT,
           fetchInfo: { DESCRIPTION: { type: oracledb.STRING } },
@@ -947,6 +967,116 @@ export default class Game {
         createdAt: row.CREATED_AT instanceof Date ? row.CREATED_AT : new Date(row.CREATED_AT),
         updatedAt: row.UPDATED_AT instanceof Date ? row.UPDATED_AT : new Date(row.UPDATED_AT),
       }));
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async getGameAssociations(gameId: number): Promise<IGameAssociationSummary> {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+
+    try {
+      const gotmWinsResult = await connection.execute<{
+        ROUND_NUMBER: number;
+        THREAD_ID: string | null;
+        REDDIT_URL: string | null;
+        MONTH_YEAR: string;
+      }>(
+        `SELECT ROUND_NUMBER, THREAD_ID, REDDIT_URL, MONTH_YEAR
+           FROM GOTM_ENTRIES
+          WHERE GAMEDB_GAME_ID = :gameId
+          ORDER BY ROUND_NUMBER`,
+        { gameId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      const nrGotmWinsResult = await connection.execute<{
+        ROUND_NUMBER: number;
+        THREAD_ID: string | null;
+        REDDIT_URL: string | null;
+        MONTH_YEAR: string;
+      }>(
+        `SELECT ROUND_NUMBER, THREAD_ID, REDDIT_URL, MONTH_YEAR
+           FROM NR_GOTM_ENTRIES
+          WHERE GAMEDB_GAME_ID = :gameId
+          ORDER BY ROUND_NUMBER`,
+        { gameId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      const gotmNomsResult = await connection.execute<{
+        ROUND_NUMBER: number;
+        USER_ID: string;
+        USERNAME?: string | null;
+        GLOBAL_NAME?: string | null;
+      }>(
+        `SELECT n.ROUND_NUMBER,
+                n.USER_ID,
+                u.USERNAME,
+                u.GLOBAL_NAME
+           FROM GOTM_NOMINATIONS n
+           LEFT JOIN RPG_CLUB_USERS u ON u.USER_ID = n.USER_ID
+          WHERE n.GAMEDB_GAME_ID = :gameId
+          ORDER BY n.ROUND_NUMBER`,
+        { gameId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      const nrGotmNomsResult = await connection.execute<{
+        ROUND_NUMBER: number;
+        USER_ID: string;
+        USERNAME?: string | null;
+        GLOBAL_NAME?: string | null;
+      }>(
+        `SELECT n.ROUND_NUMBER,
+                n.USER_ID,
+                u.USERNAME,
+                u.GLOBAL_NAME
+           FROM NR_GOTM_NOMINATIONS n
+           LEFT JOIN RPG_CLUB_USERS u ON u.USER_ID = n.USER_ID
+          WHERE n.GAMEDB_GAME_ID = :gameId
+          ORDER BY n.ROUND_NUMBER`,
+        { gameId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      const gotmWins =
+        (gotmWinsResult.rows ?? []).map((row) => ({
+          round: Number(row.ROUND_NUMBER),
+          threadId: row.THREAD_ID ?? null,
+          redditUrl: row.REDDIT_URL ?? null,
+          monthYear: String(row.MONTH_YEAR),
+        })) ?? [];
+
+      const nrGotmWins =
+        (nrGotmWinsResult.rows ?? []).map((row) => ({
+          round: Number(row.ROUND_NUMBER),
+          threadId: row.THREAD_ID ?? null,
+          redditUrl: row.REDDIT_URL ?? null,
+          monthYear: String(row.MONTH_YEAR),
+        })) ?? [];
+
+      const gotmNominations =
+        (gotmNomsResult.rows ?? []).map((row) => ({
+          round: Number(row.ROUND_NUMBER),
+          userId: String(row.USER_ID),
+          username: String(row.GLOBAL_NAME || row.USERNAME || row.USER_ID),
+        })) ?? [];
+
+      const nrGotmNominations =
+        (nrGotmNomsResult.rows ?? []).map((row) => ({
+          round: Number(row.ROUND_NUMBER),
+          userId: String(row.USER_ID),
+          username: String(row.GLOBAL_NAME || row.USERNAME || row.USER_ID),
+        })) ?? [];
+
+      return {
+        gotmWins,
+        nrGotmWins,
+        gotmNominations,
+        nrGotmNominations,
+      };
     } finally {
       await connection.close();
     }

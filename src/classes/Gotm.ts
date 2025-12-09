@@ -1,13 +1,12 @@
 import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
+import Game from "./Game.js";
 
 export interface IGotmGame {
   title: string;
   threadId: string | null;
   redditUrl: string | null;
-  imageBlob?: Buffer | null;
-  imageMimeType?: string | null;
-  gamedbGameId?: number | null;
+  gamedbGameId: number;
 }
 
 export interface IGotmEntry {
@@ -35,6 +34,19 @@ const MONTHS = [
 let gotmData: IGotmEntry[] = [];
 let loadPromise: Promise<IGotmEntry[]> | null = null;
 let gotmLoaded = false;
+const gameCache: Map<number, { title: string }> = new Map();
+
+async function getGameDetailsCached(gameId: number): Promise<{ title: string }> {
+  const cached = gameCache.get(gameId);
+  if (cached) return cached;
+  const game = await Game.getGameById(gameId);
+  if (!game) {
+    throw new Error(`GameDB game ${gameId} not found for GOTM entry.`);
+  }
+  const payload = { title: game.title };
+  gameCache.set(gameId, payload);
+  return payload;
+}
 
 async function loadFromDatabaseInternal(): Promise<IGotmEntry[]> {
   const pool = getOraclePool();
@@ -45,32 +57,23 @@ async function loadFromDatabaseInternal(): Promise<IGotmEntry[]> {
       ROUND_NUMBER: number;
       MONTH_YEAR: string;
       GAME_INDEX: number;
-      GAME_TITLE: string;
       THREAD_ID: string | null;
       REDDIT_URL: string | null;
       VOTING_RESULTS_MESSAGE_ID: string | null;
-      IMAGE_BLOB: Buffer | null;
-      IMAGE_MIME_TYPE: string | null;
       GAMEDB_GAME_ID: number | null;
     }>(
       `SELECT ROUND_NUMBER,
               MONTH_YEAR,
               GAME_INDEX,
-              GAME_TITLE,
               THREAD_ID,
               REDDIT_URL,
               VOTING_RESULTS_MESSAGE_ID,
-              IMAGE_BLOB,
-              IMAGE_MIME_TYPE,
               GAMEDB_GAME_ID
          FROM GOTM_ENTRIES
         ORDER BY ROUND_NUMBER, GAME_INDEX`,
       [],
       {
         outFormat: oracledb.OUT_FORMAT_OBJECT,
-        fetchInfo: {
-          IMAGE_BLOB: { type: oracledb.BUFFER },
-        },
       },
     );
 
@@ -82,12 +85,9 @@ async function loadFromDatabaseInternal(): Promise<IGotmEntry[]> {
         ROUND_NUMBER: number;
         MONTH_YEAR: string;
         GAME_INDEX: number;
-        GAME_TITLE: string;
         THREAD_ID: string | null;
         REDDIT_URL: string | null;
         VOTING_RESULTS_MESSAGE_ID: string | null;
-        IMAGE_BLOB: Buffer | null;
-        IMAGE_MIME_TYPE: string | null;
         GAMEDB_GAME_ID: number | null;
       };
 
@@ -112,13 +112,17 @@ async function loadFromDatabaseInternal(): Promise<IGotmEntry[]> {
         entry.votingResultsMessageId = votingId;
       }
 
+      const gamedbGameId = Number(row.GAMEDB_GAME_ID);
+      if (!Number.isInteger(gamedbGameId) || gamedbGameId <= 0) {
+        throw new Error(`GOTM round ${round} game ${row.GAME_INDEX} is missing GAMEDB_GAME_ID.`);
+      }
+      const gameDetails = await getGameDetailsCached(gamedbGameId);
+
       const game: IGotmGame = {
-        title: row.GAME_TITLE,
+        title: gameDetails.title,
         threadId: row.THREAD_ID ?? null,
         redditUrl: row.REDDIT_URL ?? null,
-        imageBlob: row.IMAGE_BLOB ?? null,
-        imageMimeType: row.IMAGE_MIME_TYPE ?? null,
-        gamedbGameId: row.GAMEDB_GAME_ID ?? null,
+        gamedbGameId,
       };
 
       entry.gameOfTheMonth.push(game);
@@ -223,13 +227,17 @@ export default class Gotm {
     const entry: IGotmEntry = {
       round: r,
       monthYear,
-      gameOfTheMonth: games.map((g) => ({
-        title: g.title,
-        threadId: g.threadId ?? null,
-        redditUrl: g.redditUrl ?? null,
-        imageBlob: g.imageBlob ?? null,
-        imageMimeType: g.imageMimeType ?? null,
-      })),
+      gameOfTheMonth: games.map((g) => {
+        if (!Number.isInteger(g.gamedbGameId) || g.gamedbGameId <= 0) {
+          throw new Error("GameDB id is required for GOTM entries.");
+        }
+        return {
+          title: g.title,
+          threadId: g.threadId ?? null,
+          redditUrl: g.redditUrl ?? null,
+          gamedbGameId: g.gamedbGameId,
+        };
+      }),
     };
     gotmData.push(entry);
     gotmData.sort((a, b) => a.round - b.round);
@@ -259,18 +267,6 @@ export default class Gotm {
     return index;
   }
 
-  static updateTitleByRound(
-    round: number,
-    newTitle: string,
-    index?: number,
-  ): IGotmEntry | null {
-    const entry = this.getRoundEntry(round);
-    if (!entry) return null;
-    const i = this.resolveIndex(entry, index);
-    entry.gameOfTheMonth[i].title = newTitle;
-    return entry;
-  }
-
   static updateThreadIdByRound(
     round: number,
     threadId: string | null,
@@ -295,29 +291,22 @@ export default class Gotm {
     return entry;
   }
 
-  static updateImageByRound(
-    round: number,
-    imageBlob: Buffer | null,
-    imageMimeType: string | null,
-    index?: number,
-  ): IGotmEntry | null {
-    const entry = this.getRoundEntry(round);
-    if (!entry) return null;
-    const i = this.resolveIndex(entry, index);
-    entry.gameOfTheMonth[i].imageBlob = imageBlob;
-    entry.gameOfTheMonth[i].imageMimeType = imageMimeType;
-    return entry;
-  }
-
   static updateGamedbIdByRound(
     round: number,
-    gamedbGameId: number | null,
+    gamedbGameId: number,
     index?: number,
   ): IGotmEntry | null {
     const entry = this.getRoundEntry(round);
     if (!entry) return null;
+    if (!Number.isInteger(gamedbGameId) || gamedbGameId <= 0) {
+      throw new Error("GameDB id must be a positive integer.");
+    }
     const i = this.resolveIndex(entry, index);
     entry.gameOfTheMonth[i].gamedbGameId = gamedbGameId;
+    void getGameDetailsCached(gamedbGameId).then((meta) => {
+      entry.gameOfTheMonth[i].title = meta.title;
+      gameCache.set(gamedbGameId, meta);
+    });
     return entry;
   }
 
@@ -339,68 +328,7 @@ export default class Gotm {
   }
 }
 
-export type GotmEditableField = "title" | "threadId" | "redditUrl" | "gamedbGameId";
-
-export async function updateGotmGameImageInDatabase(
-  round: number,
-  gameIndex: number,
-  imageBlob: Buffer | null,
-  imageMimeType: string | null,
-): Promise<void> {
-  const pool = getOraclePool();
-  const connection = await pool.getConnection();
-
-  try {
-    const result = await connection.execute<{
-      ROUND_NUMBER: number;
-      GAME_INDEX: number;
-    }>(
-      `SELECT ROUND_NUMBER,
-              GAME_INDEX
-         FROM GOTM_ENTRIES
-        WHERE ROUND_NUMBER = :round
-        ORDER BY GAME_INDEX`,
-      { round },
-      { outFormat: oracledb.OUT_FORMAT_OBJECT },
-    );
-
-    const rows = (result.rows ?? []) as any[];
-
-    if (!rows.length) {
-      throw new Error(`No GOTM database rows found for round ${round}.`);
-    }
-
-    if (!Number.isInteger(gameIndex) || gameIndex < 0 || gameIndex >= rows.length) {
-      throw new Error(
-        `Game index ${gameIndex} is out of range for round ${round} (have ${rows.length} games).`,
-      );
-    }
-
-    const targetRow = rows[gameIndex] as {
-      ROUND_NUMBER: number;
-      GAME_INDEX: number;
-    };
-
-    const dbGameIndex = targetRow.GAME_INDEX;
-
-    await connection.execute(
-      `UPDATE GOTM_ENTRIES
-          SET IMAGE_BLOB = :imageBlob,
-              IMAGE_MIME_TYPE = :imageMimeType
-        WHERE ROUND_NUMBER = :round
-          AND GAME_INDEX = :gameIndex`,
-      {
-        round,
-        gameIndex: dbGameIndex,
-        imageBlob,
-        imageMimeType,
-      },
-      { autoCommit: true },
-    );
-  } finally {
-    await connection.close();
-  }
-}
+export type GotmEditableField = "threadId" | "redditUrl" | "gamedbGameId";
 
 export async function updateGotmGameFieldInDatabase(
   round: number,
@@ -408,12 +336,12 @@ export async function updateGotmGameFieldInDatabase(
   field: GotmEditableField,
   value: string | number | null,
 ): Promise<void> {
+  ensureInitialized();
   const pool = getOraclePool();
   const connection = await pool.getConnection();
 
   try {
     const columnMap: Record<GotmEditableField, string> = {
-      title: "GAME_TITLE",
       threadId: "THREAD_ID",
       redditUrl: "REDDIT_URL",
       gamedbGameId: "GAMEDB_GAME_ID",
@@ -453,6 +381,18 @@ export async function updateGotmGameFieldInDatabase(
 
     const dbGameIndex = targetRow.GAME_INDEX;
 
+    let dbValue = value;
+
+    if (field === "gamedbGameId") {
+      const newId = Number(value);
+      if (!Number.isInteger(newId) || newId <= 0) {
+        throw new Error("GameDB id must be a positive integer.");
+      }
+      const exists = await getGameDetailsCached(newId);
+      gameCache.set(newId, exists);
+      dbValue = newId;
+    }
+
     await connection.execute(
       `UPDATE GOTM_ENTRIES
           SET ${columnName} = :value
@@ -461,10 +401,25 @@ export async function updateGotmGameFieldInDatabase(
       {
         round,
         gameIndex: dbGameIndex,
-        value,
+        value: dbValue,
       },
       { autoCommit: true },
     );
+
+    const entry = gotmData.find((e) => e.round === round);
+    if (entry && entry.gameOfTheMonth[gameIndex]) {
+      const target = entry.gameOfTheMonth[gameIndex];
+      if (field === "gamedbGameId") {
+        const newId = value as number;
+        target.gamedbGameId = newId;
+        const meta = await getGameDetailsCached(newId);
+        target.title = meta.title;
+      } else if (field === "threadId") {
+        target.threadId = value as string | null;
+      } else if (field === "redditUrl") {
+        target.redditUrl = value as string | null;
+      }
+    }
   } finally {
     await connection.close();
   }
@@ -523,40 +478,39 @@ export async function insertGotmRoundInDatabase(
 
     for (let i = 0; i < games.length; i++) {
       const g = games[i];
+      if (!Number.isInteger(g.gamedbGameId) || g.gamedbGameId <= 0) {
+        throw new Error(`GameDB id is required for GOTM round ${round}, game ${i + 1}.`);
+      }
+      const gameMeta = await getGameDetailsCached(g.gamedbGameId);
       await connection.execute(
         `INSERT INTO GOTM_ENTRIES (
            ROUND_NUMBER,
            MONTH_YEAR,
            GAME_INDEX,
-           GAME_TITLE,
            THREAD_ID,
            REDDIT_URL,
            VOTING_RESULTS_MESSAGE_ID,
-           IMAGE_BLOB,
-           IMAGE_MIME_TYPE
+           GAMEDB_GAME_ID
          ) VALUES (
            :round,
            :monthYear,
            :gameIndex,
-           :title,
            :threadId,
            :redditUrl,
            NULL,
-           :imageBlob,
-           :imageMimeType
+           :gamedbGameId
          )`,
         {
           round,
           monthYear,
           gameIndex: i,
-          title: g.title,
           threadId: g.threadId ?? null,
           redditUrl: g.redditUrl ?? null,
-          imageBlob: g.imageBlob ?? null,
-          imageMimeType: g.imageMimeType ?? null,
+          gamedbGameId: g.gamedbGameId,
         },
         { autoCommit: true },
       );
+      games[i].title = gameMeta.title;
     }
   } finally {
     await connection.close();

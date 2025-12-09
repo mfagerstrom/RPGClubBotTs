@@ -1,0 +1,16 @@
+-- Drops legacy GAME_TITLE columns now that nominations rely on GameDB metadata.
+-- Ensure GAMEDB_GAME_ID is populated for all rows before running the NOT NULL change.
+
+ALTER TABLE GOTM_NOMINATIONS
+  MODIFY (GAMEDB_GAME_ID NOT NULL);
+
+ALTER TABLE GOTM_NOMINATIONS
+  DROP (GAME_TITLE);
+
+ALTER TABLE NR_GOTM_NOMINATIONS
+  MODIFY (GAMEDB_GAME_ID NOT NULL);
+
+ALTER TABLE NR_GOTM_NOMINATIONS
+  DROP (GAME_TITLE);
+
+COMMIT;

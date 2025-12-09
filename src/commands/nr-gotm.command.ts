@@ -1,6 +1,6 @@
 import type { CommandInteraction, Client, TextBasedChannel } from "discord.js";
-import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
-import { Discord, Slash, SlashChoice, SlashGroup, SlashOption } from "discordx";
+import { ApplicationCommandOptionType, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder,  type StringSelectMenuInteraction } from "discord.js";
+import { Discord, Slash, SlashChoice, SlashGroup, SlashOption, SelectMenuComponent } from "discordx";
 import { AUDIT_NO_VALUE_SENTINEL } from "./superadmin.command.js";
 // Use relative import with .js for ts-node ESM compatibility
 import NrGotm, { INrGotmEntry } from "../classes/NrGotm.js";
@@ -18,8 +18,12 @@ import {
 import { NR_GOTM_NOMINATION_CHANNEL_ID } from "../config/nominationChannels.js";
 import { buildNrGotmHelpResponse } from "./help.command.js";
 import { buildNrGotmEntryEmbed, type IEmbedWithAttachments } from "../functions/GotmEntryEmbeds.js";
+import Game, { type IGame } from "../classes/Game.js";
+import { igdbService } from "../services/IgdbService.js";
+import axios from "axios";
 
 const ANNOUNCEMENTS_CHANNEL_ID: string | undefined = process.env.ANNOUNCEMENTS_CHANNEL_ID;
+const NR_GOTM_NOM_SESSIONS = new Map<string, (value: string | null) => void>();
 
 function isNoNrGotm(entry: INrGotmEntry): boolean {
   return entry.gameOfTheMonth.some((g) => (g.title ?? "").trim().toLowerCase() === "n/a");
@@ -262,10 +266,11 @@ export class NrGotmSearch {
   ): Promise<void> {
     await safeDeferReply(interaction, { ephemeral: true });
 
-    const cleaned = title?.trim();
-    if (!cleaned) {
+    const cleanedTitle = title?.trim();
+    if (!cleanedTitle) {
       await safeReply(interaction, {
         content: "Please provide a non-empty game title to nominate.",
+        ephemeral: true,
       });
       return;
     }
@@ -291,13 +296,16 @@ export class NrGotmSearch {
         return;
       }
 
+      const game = await resolveNrGameDbGame(interaction, cleanedTitle);
+      if (!game) return;
+
       const userId = interaction.user.id;
       const existing = await getNominationForUser("nr-gotm", window.targetRound, userId);
       const saved = await upsertNomination(
         "nr-gotm",
         window.targetRound,
         userId,
-        cleaned,
+        game.id,
         trimmedReason || null,
       );
 
@@ -323,7 +331,7 @@ export class NrGotmSearch {
         window,
         nominations,
       );
-      const content = `<@${interaction.user.id}> nominated "${saved.gameTitle}" for NR-GOTM Round ${window.targetRound}.`;
+      const content = `<@${interaction.user.id}> nominated "${saved.gameTitle}" (GameDB #${game.id}) for NR-GOTM Round ${window.targetRound}.`;
       await announceNomination("NR-GOTM", interaction, content, embed);
     } catch (err: any) {
       const msg = err?.message ?? String(err);
@@ -411,6 +419,22 @@ export class NrGotmSearch {
       });
     }
   }
+
+  @SelectMenuComponent({ id: /^nr-gotm-nom-\d+$/ })
+  async handleNrGotmNominationSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const cb = NR_GOTM_NOM_SESSIONS.get(interaction.customId);
+    if (!cb) {
+      await interaction.deferUpdate().catch(() => {});
+      return;
+    }
+    const val = interaction.values?.[0] ?? null;
+    try {
+      await interaction.deferUpdate();
+    } catch {
+      // ignore
+    }
+    cb(val);
+  }
 }
 
 function buildNominationEmbed(
@@ -456,6 +480,184 @@ async function announceNomination(
     await textChannel.send({ content, embeds: [embed] });
   } catch (err) {
     console.error(`Failed to announce ${kindLabel} nomination in channel ${channelId}:`, err);
+  }
+}
+
+async function resolveNrGameDbGame(interaction: CommandInteraction, title: string): Promise<IGame | null> {
+  const searchTerm = title.trim();
+  const existing = await Game.searchGames(searchTerm);
+  const exact = existing.find((g) => g.title.toLowerCase() === searchTerm.toLowerCase());
+  if (exact) return exact;
+  if (existing.length === 1) return existing[0] ?? null;
+
+  let igdbResults: Awaited<ReturnType<typeof igdbService.searchGames>>["results"] = [];
+  try {
+    igdbResults = (await igdbService.searchGames(searchTerm, 10, false)).results;
+  } catch (err: any) {
+    const msg = err?.message ?? String(err);
+    await safeReply(interaction, {
+      content: `IGDB search failed: ${msg}. Tag @merph518 if you need help importing.`,
+      ephemeral: true,
+    });
+    return null;
+  }
+
+  if (!igdbResults.length) {
+    await safeReply(interaction, {
+      content:
+        `No GameDB entry found and IGDB search returned no results for "${searchTerm}". ` +
+        "Use /gamedb add to import first (tag @merph518 if you need help).",
+      ephemeral: true,
+    });
+    return null;
+  }
+
+  if (igdbResults.length === 1) {
+    return await importNrGameFromIgdb(interaction, igdbResults[0].id);
+  }
+
+  const options = igdbResults.slice(0, 25).map((game) => {
+    const year = game.first_release_date
+      ? new Date(game.first_release_date * 1000).getFullYear()
+      : "TBD";
+    return {
+      label: `${game.name} (${year})`.substring(0, 100),
+      value: game.id.toString(),
+      description: (game.summary || "No summary").substring(0, 100),
+    };
+  });
+
+  const customId = `nr-gotm-nom-${Date.now()}`;
+  const selectMenu = new StringSelectMenuBuilder()
+    .setCustomId(customId)
+    .setPlaceholder("Select the correct game")
+    .addOptions(options);
+
+  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
+  const embed = new EmbedBuilder()
+    .setDescription(`Select the correct game for "${searchTerm}".`)
+    .setFooter({ text: "If you have trouble importing, tag @merph518." });
+
+  const prompt = await safeReply(interaction, {
+    content: "Game not found in GameDB. Select the IGDB match to import (2 min timeout).",
+    embeds: [embed],
+    components: [row],
+    fetchReply: true,
+    __forceFollowUp: true,
+  });
+
+  if (!prompt) return null;
+
+  const selectedId = await new Promise<number | null>((resolve) => {
+    const timeout = setTimeout(() => {
+      NR_GOTM_NOM_SESSIONS.delete(customId);
+      resolve(null);
+    }, 120000);
+    NR_GOTM_NOM_SESSIONS.set(customId, (val) => {
+      clearTimeout(timeout);
+      NR_GOTM_NOM_SESSIONS.delete(customId);
+      const id = Number(val);
+      resolve(Number.isFinite(id) ? id : null);
+    });
+  });
+
+  if (!selectedId) {
+    await safeReply(interaction, {
+      content:
+        "Import cancelled or timed out. Nominations must be in GameDB first. " +
+        "Use /gamedb add to import (tag @merph518 if you have trouble).",
+      ephemeral: true,
+    });
+    return null;
+  }
+
+  return await importNrGameFromIgdb(interaction, selectedId);
+}
+
+async function importNrGameFromIgdb(
+  interaction: CommandInteraction,
+  igdbId: number,
+): Promise<IGame | null> {
+  const existing = await Game.getGameByIgdbId(igdbId);
+  if (existing) return existing;
+
+  const details = await igdbService.getGameDetails(igdbId);
+  if (!details) {
+    await safeReply(interaction, {
+      content: `Could not fetch IGDB details for id ${igdbId}.`,
+      ephemeral: true,
+    });
+    return null;
+  }
+
+  let imageData: Buffer | null = null;
+  if (details.cover?.image_id) {
+    try {
+      const imageUrl = `https://images.igdb.com/igdb/image/upload/t_cover_big/${details.cover.image_id}.jpg`;
+      const resp = await axios.get(imageUrl, { responseType: "arraybuffer" });
+      imageData = Buffer.from(resp.data);
+    } catch {
+      // ignore
+    }
+  }
+
+  const igdbUrl = details.url || (details.slug ? `https://www.igdb.com/games/${details.slug}` : null);
+
+  const newGame = await Game.createGame(
+    details.name,
+    details.summary || null,
+    imageData,
+    details.id,
+    details.slug,
+    details.total_rating ?? null,
+    igdbUrl,
+  );
+
+  await Game.saveFullGameMetadata(newGame.id, details);
+  await processNrReleaseDates(newGame.id, details.release_dates || [], details.platforms || []);
+
+  return newGame;
+}
+
+async function processNrReleaseDates(
+  gameId: number,
+  releaseDates: any[],
+  platforms: { id: number; name: string }[],
+): Promise<void> {
+  if (!releaseDates || !Array.isArray(releaseDates)) {
+    return;
+  }
+
+  for (const release of releaseDates) {
+    const platformId: number | null =
+      typeof release.platform === "number" ? release.platform : release.platform?.id ?? null;
+    const platformName: string | null =
+      typeof release.platform === "object"
+        ? release.platform?.name ?? null
+        : platforms.find((p) => p.id === platformId)?.name ?? null;
+    if (!platformId || !release.region) {
+      continue;
+    }
+
+    const platform = await Game.ensurePlatform({ id: platformId, name: platformName });
+    const region = await Game.ensureRegion(release.region);
+
+    if (!platform || !region) {
+      continue;
+    }
+
+    try {
+      await Game.addReleaseInfo(
+        gameId,
+        platform.id,
+        region.id,
+        "Physical",
+        release.date ? new Date(release.date * 1000) : null,
+        null,
+      );
+    } catch {
+      // ignore
+    }
   }
 }
 

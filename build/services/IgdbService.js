@@ -28,31 +28,64 @@ class IgdbService {
             throw new Error("IGDB service unavailable: Could not authenticate with Twitch.");
         }
     }
-    async searchGames(query, limit = 10) {
+    async searchGames(query, limit = 24, includeRaw = false) {
         if (!this.clientId) {
             throw new Error("IGDB service not configured.");
         }
         const token = await this.getAccessToken();
         const sanitizedQuery = query.replace(/"/g, '\\"');
-        const body = [
+        const buildBody = () => [
             "fields name, cover.image_id, summary, first_release_date, total_rating, url;",
             `search "${sanitizedQuery}";`,
             `limit ${limit};`,
         ].join(" ");
         try {
-            const response = await axios.post("https://api.igdb.com/v4/games", body, {
+            const response = await axios.post("https://api.igdb.com/v4/games", buildBody(), {
                 headers: {
                     "Client-ID": this.clientId,
                     "Authorization": `Bearer ${token}`,
                     "Content-Type": "text/plain",
                 },
             });
-            return response.data;
+            return {
+                results: response.data,
+                raw: includeRaw ? response.data : null,
+            };
         }
         catch (error) {
             console.error("IGDB: Failed to search games:", error);
             throw new Error(`IGDB service unavailable: Could not search for games. Error: ${error.message}`);
         }
+    }
+    async fetchReleaseDates(igdbId, token) {
+        const body = [
+            "fields date, y, m, region, category, platform.id, platform.name;",
+            `where game = ${igdbId};`,
+            "sort date asc;",
+            "limit 500;",
+        ].join(" ");
+        const response = await axios.post("https://api.igdb.com/v4/release_dates", body, {
+            headers: {
+                "Client-ID": this.clientId,
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "text/plain",
+            },
+        });
+        return (response.data ?? []).map((r) => ({
+            platform: r.platform ?? { id: 0, name: "Unknown Platform" },
+            region: r.region,
+            date: r.date,
+            y: r.y,
+            m: r.m,
+            category: r.category,
+        }));
+    }
+    async getGameDetailsBySearch(query) {
+        const search = await this.searchGames(query, 1, false);
+        const first = search.results[0];
+        if (!first)
+            return null;
+        return this.getGameDetails(first.id);
     }
     async getGameDetails(igdbId) {
         if (!this.clientId) {
@@ -97,7 +130,19 @@ class IgdbService {
                     "Content-Type": "text/plain",
                 },
             });
-            return response.data[0] || null;
+            const details = response.data[0] || null;
+            if (!details)
+                return null;
+            if (!details.release_dates || details.release_dates.length === 0) {
+                try {
+                    const releases = await this.fetchReleaseDates(igdbId, token);
+                    details.release_dates = releases;
+                }
+                catch (err) {
+                    console.warn("IGDB: Failed to fetch release_dates via fallback endpoint:", err);
+                }
+            }
+            return details;
         }
         catch (error) {
             console.error("IGDB: Failed to get game details:", error);

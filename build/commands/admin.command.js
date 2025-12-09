@@ -15,6 +15,7 @@ import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionU
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
 import Gotm, { updateGotmGameFieldInDatabase, insertGotmRoundInDatabase, } from "../classes/Gotm.js";
 import NrGotm, { updateNrGotmGameFieldInDatabase, insertNrGotmRoundInDatabase, } from "../classes/NrGotm.js";
+import Game from "../classes/Game.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
 import { buildNominationDeleteView, handleNominationDeletionButton, buildNominationDeleteViewEmbed, announceNominationChange, } from "../functions/NominationAdminHelpers.js";
 import { getUpcomingNominationWindow } from "../functions/NominationWindow.js";
@@ -553,14 +554,18 @@ let Admin = class Admin {
         const games = [];
         for (let i = 0; i < gameCount; i++) {
             const n = i + 1;
-            const titleRaw = await promptUserForInput(interaction, `Enter the title for game #${n}.`);
-            if (titleRaw === null) {
+            const gamedbRaw = await promptUserForInput(interaction, `Enter the GameDB id for game #${n} (use /gamedb add first if needed).`);
+            if (gamedbRaw === null)
+                return;
+            const gamedbId = Number(gamedbRaw.trim());
+            if (!Number.isInteger(gamedbId) || gamedbId <= 0) {
+                await safeReply(interaction, { content: "Invalid GameDB id. Creation cancelled." });
                 return;
             }
-            const title = titleRaw.trim();
-            if (!title) {
+            const gameMeta = await Game.getGameById(gamedbId);
+            if (!gameMeta) {
                 await safeReply(interaction, {
-                    content: "Game title cannot be empty. Creation cancelled.",
+                    content: `GameDB id ${gamedbId} not found. Use /gamedb add first.`,
                 });
                 return;
             }
@@ -577,9 +582,10 @@ let Admin = class Admin {
             const redditTrimmed = redditRaw.trim();
             const redditUrl = redditTrimmed && !/^none|null$/i.test(redditTrimmed) ? redditTrimmed : null;
             games.push({
-                title,
+                title: gameMeta.title,
                 threadId,
                 redditUrl,
+                gamedbGameId: gamedbId,
             });
         }
         try {
@@ -645,14 +651,18 @@ let Admin = class Admin {
         const games = [];
         for (let i = 0; i < gameCount; i++) {
             const n = i + 1;
-            const titleRaw = await promptUserForInput(interaction, `Enter the title for NR-GOTM game #${n}.`);
-            if (titleRaw === null) {
+            const gamedbRaw = await promptUserForInput(interaction, `Enter the GameDB id for NR-GOTM game #${n} (use /gamedb add first if needed).`);
+            if (gamedbRaw === null)
+                return;
+            const gamedbId = Number(gamedbRaw.trim());
+            if (!Number.isInteger(gamedbId) || gamedbId <= 0) {
+                await safeReply(interaction, { content: "Invalid GameDB id. Creation cancelled." });
                 return;
             }
-            const title = titleRaw.trim();
-            if (!title) {
+            const gameMeta = await Game.getGameById(gamedbId);
+            if (!gameMeta) {
                 await safeReply(interaction, {
-                    content: "Game title cannot be empty. Creation cancelled.",
+                    content: `GameDB id ${gamedbId} not found. Use /gamedb add first.`,
                 });
                 return;
             }
@@ -669,9 +679,10 @@ let Admin = class Admin {
             const redditTrimmed = redditRaw.trim();
             const redditUrl = redditTrimmed && !/^none|null$/i.test(redditTrimmed) ? redditTrimmed : null;
             games.push({
-                title,
+                title: gameMeta.title,
                 threadId,
                 redditUrl,
+                gamedbGameId: gamedbId,
             });
         }
         try {
@@ -745,15 +756,15 @@ let Admin = class Admin {
             }
             gameIndex = idx - 1;
         }
-        const fieldAnswerRaw = await promptUserForInput(interaction, "Which field do you want to edit? Type one of: `title`, `thread`, `reddit`. Type `cancel` to abort.");
+        const fieldAnswerRaw = await promptUserForInput(interaction, "Which field do you want to edit? Type one of: `gamedb`, `thread`, `reddit`. Type `cancel` to abort.");
         if (fieldAnswerRaw === null) {
             return;
         }
         const fieldAnswer = fieldAnswerRaw.toLowerCase();
         let field = null;
         let nullableField = false;
-        if (fieldAnswer === "title") {
-            field = "title";
+        if (fieldAnswer === "gamedb") {
+            field = "gamedbGameId";
         }
         else if (fieldAnswer === "thread") {
             field = "threadId";
@@ -771,7 +782,7 @@ let Admin = class Admin {
         }
         const valuePrompt = nullableField
             ? `Enter the new value for ${fieldAnswer} (or type \`none\` / \`null\` to clear it).`
-            : `Enter the new value for ${fieldAnswer}.`;
+            : `Enter the new value for ${fieldAnswer} (GameDB id required).`;
         const valueAnswerRaw = await promptUserForInput(interaction, valuePrompt, 5 * 60_000);
         if (valueAnswerRaw === null) {
             return;
@@ -781,11 +792,28 @@ let Admin = class Admin {
         if (nullableField && /^none|null$/i.test(valueTrimmed)) {
             newValue = null;
         }
+        else if (field === "gamedbGameId") {
+            const parsed = Number(valueTrimmed);
+            if (!Number.isInteger(parsed) || parsed <= 0) {
+                await safeReply(interaction, {
+                    content: "Please provide a valid numeric GameDB id.",
+                });
+                return;
+            }
+            const game = await Game.getGameById(parsed);
+            if (!game) {
+                await safeReply(interaction, {
+                    content: `GameDB id ${parsed} was not found. Use /gamedb add first if needed.`,
+                });
+                return;
+            }
+            newValue = parsed;
+        }
         try {
             await updateGotmGameFieldInDatabase(roundNumber, gameIndex, field, newValue);
             let updatedEntry = null;
-            if (field === "title") {
-                updatedEntry = Gotm.updateTitleByRound(roundNumber, newValue ?? "", gameIndex);
+            if (field === "gamedbGameId") {
+                updatedEntry = Gotm.updateGamedbIdByRound(roundNumber, newValue, gameIndex);
             }
             else if (field === "threadId") {
                 updatedEntry = Gotm.updateThreadIdByRound(roundNumber, newValue, gameIndex);
@@ -861,15 +889,15 @@ let Admin = class Admin {
             }
             gameIndex = idx - 1;
         }
-        const fieldAnswerRaw = await promptUserForInput(interaction, "Which field do you want to edit? Type one of: `title`, `thread`, `reddit`. Type `cancel` to abort.");
+        const fieldAnswerRaw = await promptUserForInput(interaction, "Which field do you want to edit? Type one of: `gamedb`, `thread`, `reddit`. Type `cancel` to abort.");
         if (fieldAnswerRaw === null) {
             return;
         }
         const fieldAnswer = fieldAnswerRaw.toLowerCase();
         let field = null;
         let nullableField = false;
-        if (fieldAnswer === "title") {
-            field = "title";
+        if (fieldAnswer === "gamedb") {
+            field = "gamedbGameId";
         }
         else if (fieldAnswer === "thread") {
             field = "threadId";
@@ -887,7 +915,7 @@ let Admin = class Admin {
         }
         const valuePrompt = nullableField
             ? `Enter the new value for ${fieldAnswer} (or type \`none\` / \`null\` to clear it).`
-            : `Enter the new value for ${fieldAnswer}.`;
+            : `Enter the new value for ${fieldAnswer} (GameDB id required).`;
         const valueAnswerRaw = await promptUserForInput(interaction, valuePrompt, 5 * 60_000);
         if (valueAnswerRaw === null) {
             return;
@@ -896,6 +924,23 @@ let Admin = class Admin {
         let newValue = valueTrimmed;
         if (nullableField && /^none|null$/i.test(valueTrimmed)) {
             newValue = null;
+        }
+        else if (field === "gamedbGameId") {
+            const parsed = Number(valueTrimmed);
+            if (!Number.isInteger(parsed) || parsed <= 0) {
+                await safeReply(interaction, {
+                    content: "Please provide a valid numeric GameDB id.",
+                });
+                return;
+            }
+            const game = await Game.getGameById(parsed);
+            if (!game) {
+                await safeReply(interaction, {
+                    content: `GameDB id ${parsed} was not found. Use /gamedb add first if needed.`,
+                });
+                return;
+            }
+            newValue = parsed;
         }
         try {
             await updateNrGotmGameFieldInDatabase({
@@ -906,8 +951,8 @@ let Admin = class Admin {
                 value: newValue,
             });
             let updatedEntry = null;
-            if (field === "title") {
-                updatedEntry = NrGotm.updateTitleByRound(roundNumber, newValue ?? "", gameIndex);
+            if (field === "gamedbGameId") {
+                updatedEntry = NrGotm.updateGamedbIdByRound(roundNumber, newValue, gameIndex);
             }
             else if (field === "threadId") {
                 updatedEntry = NrGotm.updateThreadIdByRound(roundNumber, newValue, gameIndex);

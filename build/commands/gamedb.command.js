@@ -7,7 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ApplicationCommandOptionType, EmbedBuilder, StringSelectMenuBuilder, ActionRowBuilder, ComponentType, ButtonBuilder, ButtonStyle, } from "discord.js";
+import { ApplicationCommandOptionType, EmbedBuilder, StringSelectMenuBuilder, ActionRowBuilder, ComponentType, ButtonBuilder, ButtonStyle, AttachmentBuilder, escapeCodeBlock, } from "discord.js";
 import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption, } from "discordx";
 import { safeDeferReply, safeReply } from "../../src/functions/InteractionUtils.js";
 import Game from "../../src/classes/Game.js";
@@ -19,22 +19,180 @@ function isUniqueConstraintError(err) {
     const msg = err?.message ?? "";
     return /ORA-00001/i.test(msg) || /unique constraint/i.test(msg);
 }
+function isUnknownWebhookError(err) {
+    const code = err?.code ?? err?.rawError?.code;
+    return code === 10015;
+}
 let GameDb = class GameDb {
-    async add(title, interaction) {
+    async add(title, igdbId, bulkTitles, includeRaw, interaction) {
+        await safeDeferReply(interaction);
+        if (igdbId) {
+            await this.addGameToDatabase(interaction, Number(igdbId), { selectionMessage: null });
+            return;
+        }
+        const parsedBulk = bulkTitles?.split(",").map((t) => t.trim()).filter(Boolean) ?? [];
+        const singleTitle = title?.trim() ?? "";
+        const allTitles = (singleTitle ? [singleTitle] : []).concat(parsedBulk).filter(Boolean);
+        if (!allTitles.length) {
+            await safeReply(interaction, {
+                content: "Provide a title or up to 5 comma-separated titles.",
+            });
+            return;
+        }
+        if (allTitles.length > 5) {
+            await safeReply(interaction, {
+                content: "Bulk import supports up to 5 titles at a time.",
+            });
+            return;
+        }
+        for (const t of allTitles) {
+            await this.processTitle(interaction, t, includeRaw ?? true);
+        }
+    }
+    async handleNoResults(interaction, query) {
+        try {
+            // If something was added concurrently, re-check GameDB before prompting IGDB import.
+            const existing = await Game.searchGames(query);
+            if (existing.length > 0) {
+                const list = existing
+                    .slice(0, 10)
+                    .map((g) => `• **${g.title}** (GameDB #${g.id})`)
+                    .join("\n");
+                await safeReply(interaction, {
+                    content: `GameDB already has matching entries for "${query}".\n` +
+                        list +
+                        `${existing.length > 10 ? "\n(and more...)" : ""}`,
+                    __forceFollowUp: true,
+                });
+                return;
+            }
+            const searchRes = await igdbService.searchGames(query, 10, false);
+            const results = searchRes.results;
+            if (!results.length) {
+                await safeReply(interaction, {
+                    content: `No games found on IGDB matching "${query}". Please use /gamedb add to import it (tag @merph518 if you need help).`,
+                    __forceFollowUp: true,
+                });
+                return;
+            }
+            if (results.length === 1) {
+                await this.addGameToDatabase(interaction, results[0].id, { selectionMessage: null });
+                return;
+            }
+            const options = results.slice(0, 25).map((game) => {
+                const year = game.first_release_date
+                    ? new Date(game.first_release_date * 1000).getFullYear()
+                    : "TBD";
+                return {
+                    label: `${game.name} (${year})`.substring(0, 100),
+                    value: game.id.toString(),
+                    description: (game.summary || "No summary").substring(0, 100),
+                };
+            });
+            const selectMenu = new StringSelectMenuBuilder()
+                .setCustomId(`gamedb-add-select-${Date.now()}`)
+                .setPlaceholder("Select the correct game to import")
+                .addOptions(options);
+            const row = new ActionRowBuilder().addComponents(selectMenu);
+            const reply = await safeReply(interaction, {
+                content: `No exact GameDB match for "${query}". Select the correct IGDB result to import (2 min timeout):`,
+                components: [row],
+                __forceFollowUp: true,
+                fetchReply: true,
+            });
+            if (!reply)
+                return;
+            await new Promise((resolve) => {
+                const collector = reply.createMessageComponentCollector({
+                    componentType: ComponentType.StringSelect,
+                    time: 120000,
+                    filter: (i) => i.user.id === interaction.user.id,
+                });
+                collector.on("collect", async (i) => {
+                    try {
+                        await i.deferUpdate();
+                        const selectedId = Number(i.values[0]);
+                        await this.addGameToDatabase(i, selectedId, { selectionMessage: reply });
+                        collector.stop("selected");
+                    }
+                    catch (err) {
+                        console.error("Error importing from IGDB selection:", err);
+                        const payload = {
+                            content: `Import failed: ${err.message}`,
+                            __forceFollowUp: true,
+                        };
+                        await safeReply(i, payload);
+                    }
+                });
+                collector.on("end", async (_collected, reason) => {
+                    if (reason !== "selected") {
+                        try {
+                            await reply.edit({
+                                content: "Import cancelled or timed out. Nominations must be in GameDB first. Use /gamedb add (tag @merph518 if you need help).",
+                                components: [],
+                            });
+                        }
+                        catch {
+                            // ignore
+                        }
+                    }
+                    resolve();
+                });
+            });
+        }
+        catch (err) {
+            await safeReply(interaction, {
+                content: `Auto-import failed: ${err?.message ?? err}`,
+                __forceFollowUp: true,
+            });
+        }
+    }
+    async igdbApiDump(title, interaction) {
         await safeDeferReply(interaction);
         try {
-            // 1. Search IGDB
-            const results = await igdbService.searchGames(title);
-            if (!results || results.length === 0) {
+            const searchRes = await igdbService.searchGames(title, 5);
+            const first = searchRes.results[0];
+            if (!first) {
                 await safeReply(interaction, {
-                    content: `No games found on IGDB matching "${title}".`,
-                    ephemeral: true,
+                    content: `No IGDB results for "${title}".`,
+                    __forceFollowUp: true,
                 });
+                return;
+            }
+            const details = await igdbService.getGameDetails(first.id);
+            const payload = details ?? first;
+            const json = JSON.stringify(payload, null, 2);
+            const sanitized = escapeCodeBlock ? escapeCodeBlock(json) : json;
+            const attachment = new AttachmentBuilder(Buffer.from(json, "utf8"), {
+                name: "igdb-response.json",
+            });
+            const maxPreview = 1500;
+            const preview = sanitized.length > maxPreview ? `${sanitized.slice(0, maxPreview)}...\n(truncated)` : sanitized;
+            await safeReply(interaction, {
+                content: `\`\`\`json\n${preview}\n\`\`\`\nFull response attached as igdb-response.json.`,
+                files: [attachment],
+                __forceFollowUp: true,
+            });
+        }
+        catch (err) {
+            await safeReply(interaction, {
+                content: `Failed to fetch IGDB data: ${err?.message ?? err}`,
+                __forceFollowUp: true,
+            });
+        }
+    }
+    async processTitle(interaction, title, includeRaw = false) {
+        try {
+            // 1. Search IGDB
+            const searchRes = await igdbService.searchGames(title, 24, includeRaw);
+            const results = searchRes.results;
+            if (!results || results.length === 0) {
+                await this.handleNoResults(interaction, title);
                 return;
             }
             // 1b. Single Result - Auto Add
             if (results.length === 1) {
-                await this.addGameToDatabase(interaction, results[0].id);
+                await this.addGameToDatabase(interaction, results[0].id, { selectionMessage: null });
                 return;
             }
             // 2. Build Select Menu
@@ -53,10 +211,17 @@ let GameDb = class GameDb {
                 .setPlaceholder("Select the correct game")
                 .addOptions(options);
             const row = new ActionRowBuilder().addComponents(selectMenu);
+            const attachment = includeRaw && searchRes.raw
+                ? new AttachmentBuilder(Buffer.from(JSON.stringify(searchRes.raw, null, 2), "utf8"), {
+                    name: "igdb-search.json",
+                })
+                : null;
             const reply = await safeReply(interaction, {
                 content: `Found ${results.length} results for "${title}". Please select one:`,
                 components: [row],
-                ephemeral: true,
+                files: attachment ? [attachment] : undefined,
+                __forceFollowUp: true,
+                fetchReply: true,
             });
             if (!reply)
                 return; // Should not happen given safeReply logic but safety first
@@ -66,53 +231,76 @@ let GameDb = class GameDb {
                 time: 60000, // 1 minute timeout
                 filter: (i) => i.user.id === interaction.user.id,
             });
-            collector.on("collect", async (i) => {
-                try {
-                    await i.deferUpdate(); // Acknowledge selection
-                    const selectedId = Number(i.values[0]);
-                    await this.addGameToDatabase(i, selectedId);
-                    collector.stop("selected");
-                }
-                catch (err) {
-                    console.error("Error in gamedb add selection:", err);
-                    await i.followUp({
-                        content: `An error occurred while adding the game: ${err.message}`,
-                        ephemeral: true,
-                    });
-                }
-            });
-            collector.on("end", async (_collected, reason) => {
-                if (reason !== "selected") {
+            await new Promise((resolve) => {
+                collector.on("collect", async (i) => {
                     try {
-                        await interaction.editReply({
-                            content: "Selection timed out or cancelled.",
-                            components: [],
-                        });
+                        await i.deferUpdate(); // Acknowledge selection
+                        const selectedId = Number(i.values[0]);
+                        await this.addGameToDatabase(i, selectedId, { selectionMessage: reply });
+                        collector.stop("selected");
                     }
-                    catch {
-                        // Ignore if message deleted
+                    catch (err) {
+                        console.error("Error in gamedb add selection:", err);
+                        const payload = {
+                            content: `An error occurred while adding the game: ${err.message}`,
+                        };
+                        try {
+                            await i.followUp(payload);
+                        }
+                        catch (e) {
+                            if (isUnknownWebhookError(e)) {
+                                await safeReply(i, { ...payload, __forceFollowUp: true });
+                            }
+                            else {
+                                throw e;
+                            }
+                        }
                     }
-                }
+                });
+                collector.on("end", async (_collected, reason) => {
+                    if (reason !== "selected") {
+                        try {
+                            await reply.edit({
+                                content: "Selection timed out or cancelled.",
+                                components: [],
+                            });
+                        }
+                        catch {
+                            // Ignore if message deleted
+                        }
+                    }
+                    resolve();
+                });
             });
         }
         catch (error) {
             await safeReply(interaction, {
                 content: `Failed to search IGDB. Error: ${error.message}`,
-                ephemeral: true,
             });
         }
     }
-    async addGameToDatabase(interaction, igdbId) {
+    async addGameToDatabase(interaction, igdbId, opts) {
         // 4. Fetch Details
         const details = await igdbService.getGameDetails(igdbId);
         if (!details) {
             // followUp for components, editReply for command interactions.
             const msg = "Failed to fetch details from IGDB.";
-            if (interaction.isMessageComponent()) {
-                await interaction.followUp({ content: msg, ephemeral: true });
+            const payload = { content: msg };
+            try {
+                if (interaction.isMessageComponent()) {
+                    await interaction.followUp(payload);
+                }
+                else {
+                    await interaction.editReply(payload);
+                }
             }
-            else {
-                await interaction.editReply({ content: msg });
+            catch (err) {
+                if (isUnknownWebhookError(err)) {
+                    await safeReply(interaction, { ...payload, __forceFollowUp: true });
+                }
+                else {
+                    throw err;
+                }
             }
             return;
         }
@@ -139,11 +327,22 @@ let GameDb = class GameDb {
         catch (err) {
             if (isUniqueConstraintError(err)) {
                 const msg = "This game has already been imported.";
-                if (interaction.isMessageComponent()) {
-                    await interaction.followUp({ content: msg, ephemeral: true }).catch(() => { });
+                const payload = { content: msg };
+                try {
+                    if (interaction.isMessageComponent()) {
+                        await interaction.followUp(payload);
+                    }
+                    else {
+                        await interaction.editReply(payload);
+                    }
                 }
-                else {
-                    await interaction.editReply({ content: msg }).catch(() => { });
+                catch (e) {
+                    if (isUnknownWebhookError(e)) {
+                        await safeReply(interaction, { ...payload, __forceFollowUp: true });
+                    }
+                    else {
+                        throw e;
+                    }
                 }
                 return;
             }
@@ -153,11 +352,29 @@ let GameDb = class GameDb {
         await Game.saveFullGameMetadata(newGame.id, details);
         // 6b. Process Releases
         await this.processReleaseDates(newGame.id, details.release_dates || [], details.platforms || []);
-        // 7. Final Success Message
-        // editReply works for both deferred command and component interactions.
-        await interaction.editReply({
+        // Clean up selection menu if present
+        if (opts?.selectionMessage) {
+            try {
+                await opts.selectionMessage.edit({ components: [] });
+            }
+            catch {
+                // ignore cleanup failures
+            }
+        }
+        // 7. Final Success Message with embed left in chat
+        const files = imageData ? [{ attachment: imageData, name: "cover.jpg" }] : [];
+        const embed = new EmbedBuilder()
+            .setTitle(`Added to GameDB: ${newGame.title}`)
+            .setDescription(`GameDB ID: ${newGame.id}${igdbUrl ? `\nIGDB: ${igdbUrl}` : ""}`)
+            .setColor(0x0099ff);
+        if (files.length) {
+            embed.setImage("attachment://cover.jpg");
+        }
+        await safeReply(interaction, {
             content: `Successfully added **${newGame.title}** (ID: ${newGame.id}) to the database!`,
-            components: [], // Remove dropdown if present
+            embeds: [embed],
+            files: files.length ? files : undefined,
+            __forceFollowUp: true,
         });
     }
     async view(gameId, interaction) {
@@ -187,15 +404,17 @@ let GameDb = class GameDb {
             const releases = await Game.getGameReleases(gameId);
             const platforms = await Game.getAllPlatforms();
             const regions = await Game.getAllRegions();
+            const associations = await Game.getGameAssociations(gameId);
             const platformMap = new Map(platforms.map((p) => [p.id, p.name]));
             const regionMap = new Map(regions.map((r) => [r.id, r.name]));
             const embed = new EmbedBuilder()
-                .setTitle(game.title)
+                .setTitle(`${game.title} (GameDB #${game.id})`)
                 .setDescription(game.description || "No description available.")
                 .setColor(0x0099ff);
             if (game.imageData) {
                 embed.setImage("attachment://game_image.png");
             }
+            this.appendAssociationFields(embed, associations);
             if (releases.length > 0) {
                 const releaseField = releases
                     .map((r) => {
@@ -296,18 +515,39 @@ let GameDb = class GameDb {
             }
         }
     }
+    appendAssociationFields(embed, assoc) {
+        if (assoc.gotmWins.length) {
+            const lines = assoc.gotmWins.map((win) => {
+                const thread = win.threadId ? ` — Thread: <#${win.threadId}>` : "";
+                const reddit = win.redditUrl ? ` — [Reddit](${win.redditUrl})` : "";
+                return `Round ${win.round}${thread}${reddit}`;
+            });
+            embed.addFields({ name: "GOTM Round(s)", value: lines.join("\n"), inline: false });
+        }
+        if (assoc.nrGotmWins.length) {
+            const lines = assoc.nrGotmWins.map((win) => {
+                const thread = win.threadId ? ` — Thread: <#${win.threadId}>` : "";
+                const reddit = win.redditUrl ? ` — [Reddit](${win.redditUrl})` : "";
+                return `Round ${win.round}${thread}${reddit}`;
+            });
+            embed.addFields({ name: "NR-GOTM Round(s)", value: lines.join("\n"), inline: false });
+        }
+        if (assoc.gotmNominations.length) {
+            const lines = assoc.gotmNominations.map((nom) => `Round ${nom.round} — ${nom.username} (<@${nom.userId}>)`);
+            embed.addFields({ name: "GOTM Nominations", value: lines.join("\n"), inline: false });
+        }
+        if (assoc.nrGotmNominations.length) {
+            const lines = assoc.nrGotmNominations.map((nom) => `Round ${nom.round} — ${nom.username} (<@${nom.userId}>)`);
+            embed.addFields({ name: "NR-GOTM Nominations", value: lines.join("\n"), inline: false });
+        }
+    }
     async search(query, interaction) {
         await safeDeferReply(interaction);
         try {
             const searchTerm = (query ?? "").trim();
             const results = await Game.searchGames(searchTerm);
             if (results.length === 0) {
-                await safeReply(interaction, {
-                    content: searchTerm
-                        ? `No games found matching "${searchTerm}".`
-                        : "No games found.",
-                    ephemeral: true,
-                });
+                await this.handleNoResults(interaction, searchTerm || query || "Unknown");
                 return;
             }
             if (results.length === 1) {
@@ -487,10 +727,37 @@ __decorate([
     __param(0, SlashOption({
         description: "Title of the game to search for",
         name: "title",
+        required: false,
+        type: ApplicationCommandOptionType.String,
+    })),
+    __param(1, SlashOption({
+        description: "IGDB id (skip search and import directly)",
+        name: "igdb_id",
+        required: false,
+        type: ApplicationCommandOptionType.Integer,
+    })),
+    __param(2, SlashOption({
+        description: "Comma-separated list of up to 5 titles to import",
+        name: "bulk_titles",
+        required: false,
+        type: ApplicationCommandOptionType.String,
+    })),
+    __param(3, SlashOption({
+        description: "Include raw IGDB search JSON attachment",
+        name: "include_raw",
+        required: false,
+        type: ApplicationCommandOptionType.Boolean,
+    }))
+], GameDb.prototype, "add", null);
+__decorate([
+    Slash({ description: "Dump raw IGDB API data for a title", name: "igdb_api_dump" }),
+    __param(0, SlashOption({
+        description: "Title to query on IGDB",
+        name: "title",
         required: true,
         type: ApplicationCommandOptionType.String,
     }))
-], GameDb.prototype, "add", null);
+], GameDb.prototype, "igdbApiDump", null);
 __decorate([
     Slash({ description: "View details of a game", name: "view" }),
     __param(0, SlashOption({

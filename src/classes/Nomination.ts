@@ -8,6 +8,7 @@ export interface INominationEntry {
   roundNumber: number;
   userId: string;
   gameTitle: string;
+  gamedbGameId: number;
   nominatedAt: Date;
   reason: string | null;
 }
@@ -20,18 +21,30 @@ function mapRow(row: {
   NOMINATION_ID: number;
   ROUND_NUMBER: number;
   USER_ID: string;
-  GAME_TITLE: string;
+  GAMEDB_GAME_ID?: number | null;
+  GAMEDB_TITLE?: string | null;
   NOMINATED_AT: Date | string;
   REASON?: string | null;
 }): INominationEntry {
   const nominatedAt =
     row.NOMINATED_AT instanceof Date ? row.NOMINATED_AT : new Date(row.NOMINATED_AT);
 
+  if (row.GAMEDB_GAME_ID === null || row.GAMEDB_GAME_ID === undefined) {
+    throw new Error("Nomination row is missing a GameDB game id.");
+  }
+
+  const gamedbGameId = Number(row.GAMEDB_GAME_ID);
+  const gameTitle =
+    row.GAMEDB_TITLE !== undefined && row.GAMEDB_TITLE !== null
+      ? String(row.GAMEDB_TITLE)
+      : `(missing GameDB title for id ${gamedbGameId})`;
+
   return {
     id: Number(row.NOMINATION_ID),
     roundNumber: Number(row.ROUND_NUMBER),
     userId: String(row.USER_ID),
-    gameTitle: String(row.GAME_TITLE),
+    gameTitle,
+    gamedbGameId,
     nominatedAt,
     reason: row.REASON ?? null,
   };
@@ -50,19 +63,22 @@ export async function getNominationForUser(
       NOMINATION_ID: number;
       ROUND_NUMBER: number;
       USER_ID: string;
-      GAME_TITLE: string;
+      GAMEDB_GAME_ID?: number | null;
+      GAMEDB_TITLE?: string | null;
       NOMINATED_AT: Date | string;
       REASON?: string | null;
     }>(
-      `SELECT NOMINATION_ID,
-              ROUND_NUMBER,
-              USER_ID,
-              GAME_TITLE,
-              NOMINATED_AT,
-              REASON
-         FROM ${tableName(kind)}
-        WHERE ROUND_NUMBER = :roundNumber
-          AND USER_ID = :userId`,
+      `SELECT n.NOMINATION_ID,
+              n.ROUND_NUMBER,
+              n.USER_ID,
+              n.GAMEDB_GAME_ID,
+              g.TITLE AS GAMEDB_TITLE,
+              n.NOMINATED_AT,
+              n.REASON
+         FROM ${tableName(kind)} n
+         LEFT JOIN GAMEDB_GAMES g ON g.GAME_ID = n.GAMEDB_GAME_ID
+        WHERE n.ROUND_NUMBER = :roundNumber
+          AND n.USER_ID = :userId`,
       { roundNumber, userId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT },
     );
@@ -78,9 +94,13 @@ export async function upsertNomination(
   kind: NominationKind,
   roundNumber: number,
   userId: string,
-  gameTitle: string,
+  gamedbGameId: number,
   reason: string | null,
 ): Promise<INominationEntry> {
+  if (!Number.isInteger(gamedbGameId) || gamedbGameId <= 0) {
+    throw new Error("A valid GameDB game id is required to save a nomination.");
+  }
+
   const pool = getOraclePool();
   const connection = await pool.getConnection();
 
@@ -90,23 +110,23 @@ export async function upsertNomination(
         USING (
           SELECT :roundNumber AS ROUND_NUMBER,
                  :userId AS USER_ID,
-                 :gameTitle AS GAME_TITLE,
+                 :gamedbGameId AS GAMEDB_GAME_ID,
                  CAST(:nominatedAt AS TIMESTAMP) AS NOMINATED_AT,
                  :reason AS REASON
             FROM dual
         ) src
            ON (t.ROUND_NUMBER = src.ROUND_NUMBER AND t.USER_ID = src.USER_ID)
       WHEN MATCHED THEN
-        UPDATE SET t.GAME_TITLE = src.GAME_TITLE,
+        UPDATE SET t.GAMEDB_GAME_ID = src.GAMEDB_GAME_ID,
                    t.NOMINATED_AT = src.NOMINATED_AT,
                    t.REASON = src.REASON
       WHEN NOT MATCHED THEN
-        INSERT (ROUND_NUMBER, USER_ID, GAME_TITLE, NOMINATED_AT, REASON)
-        VALUES (src.ROUND_NUMBER, src.USER_ID, src.GAME_TITLE, src.NOMINATED_AT, src.REASON)`,
+        INSERT (ROUND_NUMBER, USER_ID, GAMEDB_GAME_ID, NOMINATED_AT, REASON)
+        VALUES (src.ROUND_NUMBER, src.USER_ID, src.GAMEDB_GAME_ID, src.NOMINATED_AT, src.REASON)`,
       {
         roundNumber,
         userId,
-        gameTitle,
+        gamedbGameId,
         nominatedAt: new Date(),
         reason,
       },
@@ -159,19 +179,22 @@ export async function listNominationsForRound(
       NOMINATION_ID: number;
       ROUND_NUMBER: number;
       USER_ID: string;
-      GAME_TITLE: string;
+      GAMEDB_GAME_ID?: number | null;
+      GAMEDB_TITLE?: string | null;
       NOMINATED_AT: Date | string;
       REASON?: string | null;
     }>(
-      `SELECT NOMINATION_ID,
-              ROUND_NUMBER,
-              USER_ID,
-              GAME_TITLE,
-              NOMINATED_AT,
-              REASON
-         FROM ${tableName(kind)}
-        WHERE ROUND_NUMBER = :roundNumber
-        ORDER BY GAME_TITLE ASC`,
+      `SELECT n.NOMINATION_ID,
+              n.ROUND_NUMBER,
+              n.USER_ID,
+              n.GAMEDB_GAME_ID,
+              g.TITLE AS GAMEDB_TITLE,
+              n.NOMINATED_AT,
+              n.REASON
+         FROM ${tableName(kind)} n
+         LEFT JOIN GAMEDB_GAMES g ON g.GAME_ID = n.GAMEDB_GAME_ID
+        WHERE n.ROUND_NUMBER = :roundNumber
+        ORDER BY g.TITLE ASC`,
       { roundNumber },
       { outFormat: oracledb.OUT_FORMAT_OBJECT },
     );
@@ -183,8 +206,10 @@ export async function listNominationsForRound(
           NOMINATION_ID: number;
           ROUND_NUMBER: number;
           USER_ID: string;
-          GAME_TITLE: string;
+          GAMEDB_GAME_ID?: number | null;
+          GAMEDB_TITLE?: string | null;
           NOMINATED_AT: Date | string;
+          REASON?: string | null;
         },
       ),
     );

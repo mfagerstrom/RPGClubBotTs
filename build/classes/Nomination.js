@@ -5,11 +5,19 @@ function tableName(kind) {
 }
 function mapRow(row) {
     const nominatedAt = row.NOMINATED_AT instanceof Date ? row.NOMINATED_AT : new Date(row.NOMINATED_AT);
+    if (row.GAMEDB_GAME_ID === null || row.GAMEDB_GAME_ID === undefined) {
+        throw new Error("Nomination row is missing a GameDB game id.");
+    }
+    const gamedbGameId = Number(row.GAMEDB_GAME_ID);
+    const gameTitle = row.GAMEDB_TITLE !== undefined && row.GAMEDB_TITLE !== null
+        ? String(row.GAMEDB_TITLE)
+        : `(missing GameDB title for id ${gamedbGameId})`;
     return {
         id: Number(row.NOMINATION_ID),
         roundNumber: Number(row.ROUND_NUMBER),
         userId: String(row.USER_ID),
-        gameTitle: String(row.GAME_TITLE),
+        gameTitle,
+        gamedbGameId,
         nominatedAt,
         reason: row.REASON ?? null,
     };
@@ -18,15 +26,17 @@ export async function getNominationForUser(kind, roundNumber, userId) {
     const pool = getOraclePool();
     const connection = await pool.getConnection();
     try {
-        const result = await connection.execute(`SELECT NOMINATION_ID,
-              ROUND_NUMBER,
-              USER_ID,
-              GAME_TITLE,
-              NOMINATED_AT,
-              REASON
-         FROM ${tableName(kind)}
-        WHERE ROUND_NUMBER = :roundNumber
-          AND USER_ID = :userId`, { roundNumber, userId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const result = await connection.execute(`SELECT n.NOMINATION_ID,
+              n.ROUND_NUMBER,
+              n.USER_ID,
+              n.GAMEDB_GAME_ID,
+              g.TITLE AS GAMEDB_TITLE,
+              n.NOMINATED_AT,
+              n.REASON
+         FROM ${tableName(kind)} n
+         LEFT JOIN GAMEDB_GAMES g ON g.GAME_ID = n.GAMEDB_GAME_ID
+        WHERE n.ROUND_NUMBER = :roundNumber
+          AND n.USER_ID = :userId`, { roundNumber, userId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
         const row = (result.rows ?? [])[0];
         return row ? mapRow(row) : null;
     }
@@ -34,7 +44,10 @@ export async function getNominationForUser(kind, roundNumber, userId) {
         await connection.close();
     }
 }
-export async function upsertNomination(kind, roundNumber, userId, gameTitle, reason) {
+export async function upsertNomination(kind, roundNumber, userId, gamedbGameId, reason) {
+    if (!Number.isInteger(gamedbGameId) || gamedbGameId <= 0) {
+        throw new Error("A valid GameDB game id is required to save a nomination.");
+    }
     const pool = getOraclePool();
     const connection = await pool.getConnection();
     try {
@@ -42,22 +55,22 @@ export async function upsertNomination(kind, roundNumber, userId, gameTitle, rea
         USING (
           SELECT :roundNumber AS ROUND_NUMBER,
                  :userId AS USER_ID,
-                 :gameTitle AS GAME_TITLE,
+                 :gamedbGameId AS GAMEDB_GAME_ID,
                  CAST(:nominatedAt AS TIMESTAMP) AS NOMINATED_AT,
                  :reason AS REASON
             FROM dual
         ) src
            ON (t.ROUND_NUMBER = src.ROUND_NUMBER AND t.USER_ID = src.USER_ID)
       WHEN MATCHED THEN
-        UPDATE SET t.GAME_TITLE = src.GAME_TITLE,
+        UPDATE SET t.GAMEDB_GAME_ID = src.GAMEDB_GAME_ID,
                    t.NOMINATED_AT = src.NOMINATED_AT,
                    t.REASON = src.REASON
       WHEN NOT MATCHED THEN
-        INSERT (ROUND_NUMBER, USER_ID, GAME_TITLE, NOMINATED_AT, REASON)
-        VALUES (src.ROUND_NUMBER, src.USER_ID, src.GAME_TITLE, src.NOMINATED_AT, src.REASON)`, {
+        INSERT (ROUND_NUMBER, USER_ID, GAMEDB_GAME_ID, NOMINATED_AT, REASON)
+        VALUES (src.ROUND_NUMBER, src.USER_ID, src.GAMEDB_GAME_ID, src.NOMINATED_AT, src.REASON)`, {
             roundNumber,
             userId,
-            gameTitle,
+            gamedbGameId,
             nominatedAt: new Date(),
             reason,
         }, { autoCommit: true });
@@ -89,15 +102,17 @@ export async function listNominationsForRound(kind, roundNumber) {
     const pool = getOraclePool();
     const connection = await pool.getConnection();
     try {
-        const result = await connection.execute(`SELECT NOMINATION_ID,
-              ROUND_NUMBER,
-              USER_ID,
-              GAME_TITLE,
-              NOMINATED_AT,
-              REASON
-         FROM ${tableName(kind)}
-        WHERE ROUND_NUMBER = :roundNumber
-        ORDER BY GAME_TITLE ASC`, { roundNumber }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const result = await connection.execute(`SELECT n.NOMINATION_ID,
+              n.ROUND_NUMBER,
+              n.USER_ID,
+              n.GAMEDB_GAME_ID,
+              g.TITLE AS GAMEDB_TITLE,
+              n.NOMINATED_AT,
+              n.REASON
+         FROM ${tableName(kind)} n
+         LEFT JOIN GAMEDB_GAMES g ON g.GAME_ID = n.GAMEDB_GAME_ID
+        WHERE n.ROUND_NUMBER = :roundNumber
+        ORDER BY g.TITLE ASC`, { roundNumber }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
         const rows = (result.rows ?? []);
         return rows.map((row) => mapRow(row));
     }

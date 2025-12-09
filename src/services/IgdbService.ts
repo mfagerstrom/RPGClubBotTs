@@ -51,6 +51,11 @@ export interface IGDBGameDetails extends IGDBGame {
   }[];
 }
 
+export interface IGameSearchResult {
+  results: IGDBGame[];
+  raw: any;
+}
+
 class IgdbService {
   private clientId: string;
   private clientSecret: string;
@@ -87,23 +92,28 @@ class IgdbService {
     }
   }
 
-  async searchGames(query: string, limit: number = 10): Promise<IGDBGame[]> {
+  async searchGames(
+    query: string,
+    limit: number = 24,
+    includeRaw: boolean = false,
+  ): Promise<IGameSearchResult> {
     if (!this.clientId) {
       throw new Error("IGDB service not configured.");
     }
     const token = await this.getAccessToken();
 
     const sanitizedQuery = query.replace(/"/g, '\\"');
-    const body = [
-      "fields name, cover.image_id, summary, first_release_date, total_rating, url;",
-      `search "${sanitizedQuery}";`,
-      `limit ${limit};`,
-    ].join(" ");
+    const buildBody = (): string =>
+      [
+        "fields name, cover.image_id, summary, first_release_date, total_rating, url;",
+        `search "${sanitizedQuery}";`,
+        `limit ${limit};`,
+      ].join(" ");
 
     try {
       const response = await axios.post<IGDBGame[]>(
         "https://api.igdb.com/v4/games",
-        body,
+        buildBody(),
         {
           headers: {
             "Client-ID": this.clientId,
@@ -113,11 +123,63 @@ class IgdbService {
         },
       );
 
-      return response.data;
+      return {
+        results: response.data,
+        raw: includeRaw ? response.data : null,
+      };
     } catch (error: any) {
       console.error("IGDB: Failed to search games:", error);
       throw new Error(`IGDB service unavailable: Could not search for games. Error: ${error.message}`);
     }
+  }
+
+  private async fetchReleaseDates(
+    igdbId: number,
+    token: string,
+  ): Promise<NonNullable<IGDBGameDetails["release_dates"]>> {
+    const body = [
+      "fields date, y, m, region, category, platform.id, platform.name;",
+      `where game = ${igdbId};`,
+      "sort date asc;",
+      "limit 500;",
+    ].join(" ");
+
+    const response = await axios.post<
+      {
+        date: number;
+        y: number;
+        m: number;
+        region: number;
+        category?: number;
+        platform?: { id: number; name: string };
+      }[]
+    >(
+      "https://api.igdb.com/v4/release_dates",
+      body,
+      {
+        headers: {
+          "Client-ID": this.clientId,
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "text/plain",
+        },
+      },
+    );
+
+    return (response.data ?? []).map((r) => ({
+      platform: r.platform ?? { id: 0, name: "Unknown Platform" },
+      region: r.region,
+      date: r.date,
+      y: r.y,
+      m: r.m,
+      category: r.category,
+    }));
+  }
+
+  async getGameDetailsBySearch(query: string): Promise<IGDBGameDetails | null> {
+    const search = await this.searchGames(query, 1, false);
+    const first = search.results[0];
+    if (!first) return null;
+    return this.getGameDetails(first.id);
   }
 
   async getGameDetails(igdbId: number): Promise<IGDBGameDetails | null> {
@@ -171,7 +233,19 @@ class IgdbService {
         },
       );
 
-      return response.data[0] || null;
+      const details = response.data[0] || null;
+      if (!details) return null;
+
+      if (!details.release_dates || details.release_dates.length === 0) {
+        try {
+          const releases = await this.fetchReleaseDates(igdbId, token);
+          details.release_dates = releases;
+        } catch (err) {
+          console.warn("IGDB: Failed to fetch release_dates via fallback endpoint:", err);
+        }
+      }
+
+      return details;
     } catch (error: any) {
       console.error("IGDB: Failed to get game details:", error);
       throw new Error(`IGDB service unavailable: Could not retrieve game details. Error: ${error.message}`);

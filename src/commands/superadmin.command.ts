@@ -120,7 +120,7 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
   {
     id: "add-gotm",
     label: "/superadmin add-gotm",
-    summary: "Interactively add a new GOTM round.",
+    summary: "Interactively add a new GOTM round (requires GameDB ids).",
     syntax: "Syntax: /superadmin add-gotm",
     notes:
       "The round number is always assigned automatically as the next round after the current highest GOTM round.",
@@ -128,7 +128,7 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
   {
     id: "edit-gotm",
     label: "/superadmin edit-gotm",
-    summary: "Interactively edit GOTM data for a given round.",
+    summary: "Interactively edit GOTM data for a given round (GameDB/thread/Reddit only).",
     syntax: "Syntax: /superadmin edit-gotm round:<integer>",
     parameters:
       "round (required integer) - GOTM round number to edit. The bot will show current data and prompt you for which game and field to update.",
@@ -144,7 +144,7 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
   {
     id: "add-nr-gotm",
     label: "/superadmin add-nr-gotm",
-    summary: "Interactively add a new NR-GOTM (Non-RPG Game of the Month) round.",
+    summary: "Interactively add a new NR-GOTM (Non-RPG Game of the Month) round (GameDB ids).",
     syntax: "Syntax: /superadmin add-nr-gotm",
     notes:
       "The round number is always assigned automatically as the next round after the current highest NR-GOTM round.",
@@ -152,7 +152,7 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
   {
     id: "edit-nr-gotm",
     label: "/superadmin edit-nr-gotm",
-    summary: "Interactively edit NR-GOTM data for a given round.",
+    summary: "Interactively edit NR-GOTM data for a given round (GameDB/thread/Reddit only).",
     syntax: "Syntax: /superadmin edit-nr-gotm round:<integer>",
     parameters:
       "round (required integer) - NR-GOTM round number to edit. The bot will show current data and prompt you for which game and field to update.",
@@ -684,17 +684,24 @@ export class SuperAdmin {
     for (let i = 0; i < gameCount; i++) {
       const n = i + 1;
 
-      const titleRaw = await promptUserForInput(
+      const gamedbRaw = await promptUserForInput(
         interaction,
-        `Enter the title for game #${n}.`,
+        `Enter the GameDB id for game #${n} (use /gamedb add first if needed).`,
       );
-      if (titleRaw === null) {
+      if (gamedbRaw === null) {
         return;
       }
-      const title = titleRaw.trim();
-      if (!title) {
+      const gamedbId = Number(gamedbRaw.trim());
+      if (!Number.isInteger(gamedbId) || gamedbId <= 0) {
         await safeReply(interaction, {
-          content: "Game title cannot be empty. Creation cancelled.",
+          content: "Invalid GameDB id. Creation cancelled.",
+        });
+        return;
+      }
+      const gameMeta = await Game.getGameById(gamedbId);
+      if (!gameMeta) {
+        await safeReply(interaction, {
+          content: `GameDB id ${gamedbId} not found. Use /gamedb add first.`,
         });
         return;
       }
@@ -722,9 +729,10 @@ export class SuperAdmin {
         redditTrimmed && !/^none|null$/i.test(redditTrimmed) ? redditTrimmed : null;
 
       games.push({
-        title,
+        title: gameMeta.title,
         threadId,
         redditUrl,
+        gamedbGameId: gamedbId,
       });
     }
 
@@ -813,17 +821,24 @@ export class SuperAdmin {
     for (let i = 0; i < gameCount; i++) {
       const n = i + 1;
 
-      const titleRaw = await promptUserForInput(
+      const gamedbRaw = await promptUserForInput(
         interaction,
-        `Enter the title for NR-GOTM game #${n}.`,
+        `Enter the GameDB id for NR-GOTM game #${n} (use /gamedb add first if needed).`,
       );
-      if (titleRaw === null) {
+      if (gamedbRaw === null) {
         return;
       }
-      const title = titleRaw.trim();
-      if (!title) {
+      const gamedbId = Number(gamedbRaw.trim());
+      if (!Number.isInteger(gamedbId) || gamedbId <= 0) {
         await safeReply(interaction, {
-          content: "Game title cannot be empty. Creation cancelled.",
+          content: "Invalid GameDB id. Creation cancelled.",
+        });
+        return;
+      }
+      const gameMeta = await Game.getGameById(gamedbId);
+      if (!gameMeta) {
+        await safeReply(interaction, {
+          content: `GameDB id ${gamedbId} not found. Use /gamedb add first.`,
         });
         return;
       }
@@ -851,9 +866,10 @@ export class SuperAdmin {
         redditTrimmed && !/^none|null$/i.test(redditTrimmed) ? redditTrimmed : null;
 
       games.push({
-        title,
+        title: gameMeta.title,
         threadId,
         redditUrl,
+        gamedbGameId: gamedbId,
       });
     }
 
@@ -962,7 +978,7 @@ export class SuperAdmin {
 
     const fieldAnswerRaw = await promptUserForInput(
       interaction,
-      "Which field do you want to edit? Type one of: `title`, `thread`, `reddit`. Type `cancel` to abort.",
+      "Which field do you want to edit? Type one of: `gamedb`, `thread`, `reddit`. Type `cancel` to abort.",
     );
     if (fieldAnswerRaw === null) {
       return;
@@ -972,9 +988,8 @@ export class SuperAdmin {
     let field: GotmEditableField | null = null;
     let nullableField = false;
 
-    if (fieldAnswer === "title") {
-      field = "title";
-      nullableField = false;
+    if (fieldAnswer === "gamedb") {
+      field = "gamedbGameId";
     } else if (fieldAnswer === "thread") {
       field = "threadId";
       nullableField = true;
@@ -990,7 +1005,7 @@ export class SuperAdmin {
 
     const valuePrompt = nullableField
       ? `Enter the new value for ${fieldAnswer} (or type \`none\` / \`null\` to clear it).`
-      : `Enter the new value for ${fieldAnswer}.`;
+      : "Enter the new GameDB id.";
 
     const valueAnswerRaw = await promptUserForInput(interaction, valuePrompt, 5 * 60_000);
     if (valueAnswerRaw === null) {
@@ -998,22 +1013,38 @@ export class SuperAdmin {
     }
 
     const valueTrimmed = valueAnswerRaw.trim();
-    let newValue: string | null = valueTrimmed;
+    let newValue: string | number | null = valueTrimmed;
 
     if (nullableField && /^none|null$/i.test(valueTrimmed)) {
       newValue = null;
+    } else if (field === "gamedbGameId") {
+      const parsed = Number(valueTrimmed);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        await safeReply(interaction, {
+          content: "Please provide a valid numeric GameDB id.",
+        });
+        return;
+      }
+      const game = await Game.getGameById(parsed);
+      if (!game) {
+        await safeReply(interaction, {
+          content: `GameDB id ${parsed} was not found. Use /gamedb add first if needed.`,
+        });
+        return;
+      }
+      newValue = parsed;
     }
 
     try {
       await updateGotmGameFieldInDatabase(roundNumber, gameIndex, field!, newValue);
 
       let updatedEntry: IGotmEntry | null = null;
-      if (field === "title") {
-        updatedEntry = Gotm.updateTitleByRound(roundNumber, newValue ?? "", gameIndex);
+      if (field === "gamedbGameId") {
+        updatedEntry = Gotm.updateGamedbIdByRound(roundNumber, newValue as number, gameIndex);
       } else if (field === "threadId") {
-        updatedEntry = Gotm.updateThreadIdByRound(roundNumber, newValue, gameIndex);
+        updatedEntry = Gotm.updateThreadIdByRound(roundNumber, newValue as string | null, gameIndex);
       } else if (field === "redditUrl") {
-        updatedEntry = Gotm.updateRedditUrlByRound(roundNumber, newValue, gameIndex);
+        updatedEntry = Gotm.updateRedditUrlByRound(roundNumber, newValue as string | null, gameIndex);
       }
 
       const entryToShow = updatedEntry ?? entry;
@@ -1118,7 +1149,7 @@ export class SuperAdmin {
 
     const fieldAnswerRaw = await promptUserForInput(
       interaction,
-      "Which field do you want to edit? Type one of: `title`, `thread`, `reddit`. Type `cancel` to abort.",
+      "Which field do you want to edit? Type one of: `gamedb`, `thread`, `reddit`. Type `cancel` to abort.",
     );
     if (fieldAnswerRaw === null) {
       return;
@@ -1128,8 +1159,8 @@ export class SuperAdmin {
     let field: NrGotmEditableField | null = null;
     let nullableField = false;
 
-    if (fieldAnswer === "title") {
-      field = "title";
+    if (fieldAnswer === "gamedb") {
+      field = "gamedbGameId";
     } else if (fieldAnswer === "thread") {
       field = "threadId";
       nullableField = true;
@@ -1145,7 +1176,7 @@ export class SuperAdmin {
 
     const valuePrompt = nullableField
       ? `Enter the new value for ${fieldAnswer} (or type \`none\` / \`null\` to clear it).`
-      : `Enter the new value for ${fieldAnswer}.`;
+      : "Enter the new GameDB id.";
 
     const valueAnswerRaw = await promptUserForInput(interaction, valuePrompt, 5 * 60_000);
     if (valueAnswerRaw === null) {
@@ -1153,10 +1184,26 @@ export class SuperAdmin {
     }
 
     const valueTrimmed = valueAnswerRaw.trim();
-    let newValue: string | null = valueTrimmed;
+    let newValue: string | number | null = valueTrimmed;
 
     if (nullableField && /^none|null$/i.test(valueTrimmed)) {
       newValue = null;
+    } else if (field === "gamedbGameId") {
+      const parsed = Number(valueTrimmed);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        await safeReply(interaction, {
+          content: "Please provide a valid numeric GameDB id.",
+        });
+        return;
+      }
+      const game = await Game.getGameById(parsed);
+      if (!game) {
+        await safeReply(interaction, {
+          content: `GameDB id ${parsed} was not found. Use /gamedb add first if needed.`,
+        });
+        return;
+      }
+      newValue = parsed;
     }
 
     try {
@@ -1169,12 +1216,12 @@ export class SuperAdmin {
       });
 
       let updatedEntry: INrGotmEntry | null = null;
-      if (field === "title") {
-        updatedEntry = NrGotm.updateTitleByRound(roundNumber, newValue ?? "", gameIndex);
+      if (field === "gamedbGameId") {
+        updatedEntry = NrGotm.updateGamedbIdByRound(roundNumber, newValue as number, gameIndex);
       } else if (field === "threadId") {
-        updatedEntry = NrGotm.updateThreadIdByRound(roundNumber, newValue, gameIndex);
+        updatedEntry = NrGotm.updateThreadIdByRound(roundNumber, newValue as string | null, gameIndex);
       } else if (field === "redditUrl") {
-        updatedEntry = NrGotm.updateRedditUrlByRound(roundNumber, newValue, gameIndex);
+        updatedEntry = NrGotm.updateRedditUrlByRound(roundNumber, newValue as string | null, gameIndex);
       }
 
       const entryToShow = updatedEntry ?? entry;
@@ -1688,7 +1735,8 @@ export class SuperAdmin {
     while (true) {
       let igdbMatches: IGDBGame[] = [];
       try {
-        igdbMatches = await igdbService.searchGames(searchTerm, 8);
+        const searchRes = await igdbService.searchGames(searchTerm, 8);
+        igdbMatches = searchRes.results;
       } catch (err: any) {
         const msg = err?.message ?? String(err);
         return `[${label}] IGDB search failed: ${msg}`;
@@ -1791,7 +1839,9 @@ export class SuperAdmin {
       (this as any).__gamedbPromptMessage = prompt ?? null;
     }
 
-    if (!prompt) return null;
+    if (!prompt) {
+      return { selectedId: null, newQuery: null, skipped: true };
+    }
 
     const selection = await new Promise<string | null>((resolve) => {
       const timeout = setTimeout(() => {
