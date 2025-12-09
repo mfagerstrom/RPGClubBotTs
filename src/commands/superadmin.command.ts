@@ -85,6 +85,7 @@ type SuperAdminHelpTopic = {
 
 const SUPERADMIN_PRESENCE_CHOICES = new Map<string, string[]>();
 const GAMEDB_IMPORT_PROMPTS = new Map<string, (value: string | null) => void>();
+const GAMEDB_SESSION_LIMIT: number = 10;
 
 type GameDbSeed = {
   title: string;
@@ -93,6 +94,12 @@ type GameDbSeed = {
   monthYear: string;
   gameIndex: number;
   gamedbGameId: number | null;
+};
+
+type IgdbSelectionResult = {
+  selectedId: number | null;
+  newQuery: string | null;
+  skipped: boolean;
 };
 
 export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
@@ -1575,7 +1582,9 @@ export class SuperAdmin {
     }
 
     const seeds = this.buildGamedbSeeds();
-    if (!seeds.length) {
+    const totalPending = seeds.length;
+    const sessionSeeds = seeds.slice(0, GAMEDB_SESSION_LIMIT);
+    if (!sessionSeeds.length) {
       await safeReply(interaction, {
         content: "No GOTM or NR-GOTM entries found to import.",
         ephemeral: true,
@@ -1584,18 +1593,24 @@ export class SuperAdmin {
     }
 
     const status = {
-      total: seeds.length,
+      total: sessionSeeds.length,
       processed: 0,
       logs: [] as string[],
+      pendingTotal: totalPending,
     };
 
+    const startMessage =
+      `Starting GameDB backfill for ${sessionSeeds.length} of ${totalPending} pending titles ` +
+      `(max ${GAMEDB_SESSION_LIMIT} per run)...`;
+
     const statusMessage = await safeReply(interaction, {
-      content: `Starting GameDB backfill for ${seeds.length} titles...`,
+      content: startMessage,
+      embeds: [this.buildGamedbStatusEmbed(startMessage, status.logs, false)],
       ephemeral: false,
       fetchReply: true,
     });
 
-    for (const seed of seeds) {
+    for (const seed of sessionSeeds) {
       const label = `${seed.source} Round ${seed.round} (${seed.monthYear})`;
       try {
         const line = await this.processGamedbSeed(interaction, seed, label);
@@ -1668,44 +1683,62 @@ export class SuperAdmin {
       return `[${label}] Linked existing GameDB #${exactMatch.id} to ${seed.title}`;
     }
 
-    let igdbMatches: IGDBGame[] = [];
-    try {
-      igdbMatches = await igdbService.searchGames(seed.title, 8);
-    } catch (err: any) {
-      const msg = err?.message ?? String(err);
-      return `[${label}] IGDB search failed: ${msg}`;
-    }
+    let searchTerm = seed.title;
 
-    if (!igdbMatches.length) {
-      return `[${label}] No IGDB match for "${seed.title}"`;
-    }
+    while (true) {
+      let igdbMatches: IGDBGame[] = [];
+      try {
+        igdbMatches = await igdbService.searchGames(searchTerm, 8);
+      } catch (err: any) {
+        const msg = err?.message ?? String(err);
+        return `[${label}] IGDB search failed: ${msg}`;
+      }
 
-    const existingIgdb = await this.findExistingIgdbGame(igdbMatches);
-    if (existingIgdb) {
-      await this.linkGameToSeed(seed, existingIgdb.id);
-      return `[${label}] Linked existing GameDB #${existingIgdb.id} to ${seed.title}`;
-    }
+      if (!igdbMatches.length) {
+        return `[${label}] No IGDB match for "${searchTerm}"`;
+      }
 
-    let selectedId: number | null = null;
-    if (igdbMatches.length === 1) {
-      selectedId = igdbMatches[0].id;
-    } else {
-      selectedId = await this.promptForIgdbSelection(interaction, seed, igdbMatches);
-    }
+      const existingIgdb = await this.findExistingIgdbGame(igdbMatches);
+      if (existingIgdb) {
+        await this.linkGameToSeed(seed, existingIgdb.id);
+        return `[${label}] Linked existing GameDB #${existingIgdb.id} to ${seed.title}`;
+      }
 
-    if (!selectedId) {
-      return `[${label}] Skipped (no selection): ${seed.title}`;
-    }
+      let selectedId: number | null = null;
+      if (igdbMatches.length === 1) {
+        selectedId = igdbMatches[0].id;
+      } else {
+        const selection = await this.promptForIgdbSelection(
+          interaction,
+          seed,
+          igdbMatches,
+          searchTerm,
+        );
+        if (selection.newQuery) {
+          searchTerm = selection.newQuery;
+          continue;
+        }
+        if (selection.skipped) {
+          return `[${label}] Skipped (no selection): ${seed.title}`;
+        }
+        selectedId = selection.selectedId;
+      }
 
-    return this.importGameFromIgdb(selectedId, label, seed);
+      if (!selectedId) {
+        return `[${label}] Skipped (no selection): ${seed.title}`;
+      }
+
+      return this.importGameFromIgdb(selectedId, label, seed);
+    }
   }
 
   private async promptForIgdbSelection(
     interaction: CommandInteraction,
     seed: GameDbSeed,
     matches: IGDBGame[],
-  ): Promise<number | null> {
-    const options = matches.slice(0, 24).map((game) => {
+    searchTerm: string,
+  ): Promise<IgdbSelectionResult> {
+    const options = matches.slice(0, 23).map((game) => {
       const year = game.first_release_date
         ? new Date(game.first_release_date * 1000).getFullYear()
         : "TBD";
@@ -1721,6 +1754,11 @@ export class SuperAdmin {
       label: "Skip (do not import this title)",
       value: "skip",
       description: "Leave this GOTM/NR-GOTM un-imported",
+    });
+    options.push({
+      label: "Search with a different title",
+      value: "search-new",
+      description: "Type a new search string in this channel, then re-run the lookup",
     });
 
     const customId = `gamedb-import-${Date.now()}`;
@@ -1755,7 +1793,7 @@ export class SuperAdmin {
 
     if (!prompt) return null;
 
-    return await new Promise((resolve) => {
+    const selection = await new Promise<string | null>((resolve) => {
       const timeout = setTimeout(() => {
         GAMEDB_IMPORT_PROMPTS.delete(customId);
         resolve(null);
@@ -1764,14 +1802,78 @@ export class SuperAdmin {
       GAMEDB_IMPORT_PROMPTS.set(customId, (val: string | null) => {
         clearTimeout(timeout);
         GAMEDB_IMPORT_PROMPTS.delete(customId);
-        if (val === "skip" || val === null) {
-          resolve(null);
-        } else {
-          const selected = Number(val);
-          resolve(Number.isFinite(selected) ? selected : null);
-        }
+        resolve(val);
       });
     });
+
+    if (selection === "skip" || selection === null) {
+      return { selectedId: null, newQuery: null, skipped: true };
+    }
+
+    if (selection === "search-new") {
+      const newQuery = await this.promptForNewIgdbSearch(interaction, seed, searchTerm);
+      return {
+        selectedId: null,
+        newQuery,
+        skipped: !newQuery,
+      };
+    }
+
+    const selected = Number(selection);
+    return {
+      selectedId: Number.isFinite(selected) ? selected : null,
+      newQuery: null,
+      skipped: false,
+    };
+  }
+
+  private async promptForNewIgdbSearch(
+    interaction: CommandInteraction,
+    seed: GameDbSeed,
+    searchTerm: string,
+  ): Promise<string | null> {
+    const channel: any = interaction.channel;
+    const userId = interaction.user.id;
+
+    if (!channel || typeof channel.awaitMessages !== "function") {
+      await safeReply(interaction, {
+        content: "Cannot prompt for a new search; use this command in a text channel.",
+        ephemeral: true,
+      });
+      return null;
+    }
+
+    const prompt =
+      `Reply in this channel with a new search string for "${seed.title}" ` +
+      `(current search: "${searchTerm}").`;
+
+    await safeReply(interaction, { content: prompt, ephemeral: false });
+
+    try {
+      const collected = await channel.awaitMessages({
+        filter: (m: any) => m.author?.id === userId,
+        max: 1,
+        time: 120_000,
+      });
+
+      const first = collected?.first?.();
+      if (!first) return null;
+
+      const content = (first.content ?? "").trim();
+      try {
+        await first.delete();
+      } catch {
+        // ignore delete failures
+      }
+
+      if (!content || /^cancel$/i.test(content)) {
+        return null;
+      }
+
+      return content;
+    } catch {
+      return null;
+    }
   }
 
   private async findExistingIgdbGame(matches: IGDBGame[]): Promise<IGame | null> {
@@ -1912,25 +2014,41 @@ export class SuperAdmin {
   private async editStatusMessage(
     interaction: CommandInteraction,
     message: any,
-    status: { total: number; processed: number; logs: string[] },
+    status: { total: number; processed: number; logs: string[]; pendingTotal?: number },
     done: boolean = false,
   ): Promise<void> {
+    const progress = status.pendingTotal
+      ? `${status.processed}/${status.total} (of ${status.pendingTotal} pending)`
+      : `${status.processed}/${status.total}`;
     const header = done
-      ? `GameDB backfill complete. Processed ${status.processed}/${status.total}.`
-      : `GameDB backfill in progress... (${status.processed}/${status.total})`;
+      ? `GameDB backfill complete. Processed ${progress}. Audit complete.`
+      : `GameDB backfill in progress... (${progress})`;
 
-    const recentLogs = this.chunkLines(status.logs).slice(-1);
-    const content = [header, "", ...recentLogs].join("\n").trim();
+    const embed = this.buildGamedbStatusEmbed(header, status.logs, done);
 
     try {
       if (message && typeof message.edit === "function") {
-        await message.edit(content || header);
+        await message.edit({ embeds: [embed] });
       } else {
-        await safeReply(interaction, { content: content || header, ephemeral: false });
+        await safeReply(interaction, { embeds: [embed], ephemeral: false });
       }
     } catch {
       // ignore status update failures
     }
+  }
+
+  private buildGamedbStatusEmbed(
+    header: string,
+    logs: string[],
+    done: boolean,
+  ): EmbedBuilder {
+    const recentLogs = this.chunkLines(logs).slice(-1);
+    const description = [header, ...recentLogs].join("\n\n").trim();
+
+    return new EmbedBuilder()
+      .setTitle("GameDB Backfill Audit")
+      .setDescription(description)
+      .setColor(done ? 0x2ecc71 : 0x3498db);
   }
 
   private async linkGameToSeed(seed: GameDbSeed, gameId: number): Promise<void> {

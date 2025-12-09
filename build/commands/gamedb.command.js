@@ -260,10 +260,13 @@ let GameDb = class GameDb {
     async search(query, interaction) {
         await safeDeferReply(interaction);
         try {
-            const results = await Game.searchGames(query);
+            const searchTerm = (query ?? "").trim();
+            const results = await Game.searchGames(searchTerm);
             if (results.length === 0) {
                 await safeReply(interaction, {
-                    content: `No games found matching "${query}".`,
+                    content: searchTerm
+                        ? `No games found matching "${searchTerm}".`
+                        : "No games found.",
                     ephemeral: true,
                 });
                 return;
@@ -271,12 +274,19 @@ let GameDb = class GameDb {
             // Limit results to 25 to fit in an embed reasonably
             const displayedResults = results.slice(0, 25);
             const resultList = displayedResults
-                .map((g) => `• **${g.title}** (ID: \`${g.id}\`)`)
+                .map((g) => `• **${g.title}**`)
                 .join("\n");
+            const title = searchTerm
+                ? `Search Results for "${searchTerm}"`
+                : "All Games";
             const embed = new EmbedBuilder()
-                .setTitle(`Search Results for "${query}"`)
+                .setTitle(title)
                 .setDescription(resultList || "No results.")
-                .setFooter({ text: results.length > 25 ? `Showing 25 of ${results.length} results` : `${results.length} results found` });
+                .setFooter({
+                text: results.length > 25
+                    ? `Showing 25 of ${results.length} results`
+                    : `${results.length} results found`,
+            });
             await safeReply(interaction, {
                 embeds: [embed],
             });
@@ -310,9 +320,9 @@ __decorate([
 __decorate([
     Slash({ description: "Search for a game", name: "search" }),
     __param(0, SlashOption({
-        description: "Search query (game title)",
+        description: "Search query (game title). Leave empty to list all.",
         name: "query",
-        required: true,
+        required: false,
         type: ApplicationCommandOptionType.String,
     }))
 ], GameDb.prototype, "search", null);

@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { listFeeds, markItemsSeen, isItemSeen, } from "../classes/RssFeed.js";
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
 const parser = new Parser({
-    timeout: 10_000,
+    timeout: 30_000,
 });
 function hashId(parts) {
     const joined = parts.filter(Boolean).join("|");
