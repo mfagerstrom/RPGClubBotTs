@@ -6,6 +6,9 @@ import {
   ButtonStyle,
   EmbedBuilder,
   MessageFlags,
+  ComponentType,
+  StringSelectMenuBuilder,
+  StringSelectMenuInteraction,
   ChannelType,
   type TextBasedChannel,
   type ThreadChannel,
@@ -56,6 +59,10 @@ import {
 } from "../classes/Nomination.js";
 import { getOraclePool } from "../db/oracleClient.js";
 import UserChannelMessageCount from "../classes/UserChannelMessageCount.js";
+import Game, { type IGame } from "../classes/Game.js";
+import { igdbService, type IGDBGame, type IGDBGameDetails } from "../services/IgdbService.js";
+import { loadGotmFromDb } from "../classes/Gotm.js";
+import { loadNrGotmFromDb } from "../classes/NrGotm.js";
 
 type SuperAdminHelpTopicId =
   | "presence"
@@ -71,7 +78,8 @@ type SuperAdminHelpTopicId =
   | "set-nextvote"
   | "gotm-data-audit"
   | "nr-gotm-data-audit"
-  | "message-count-backfill";
+  | "message-count-backfill"
+  | "gamedb-backfill";
 
 type SuperAdminHelpTopic = {
   id: SuperAdminHelpTopicId;
@@ -83,6 +91,13 @@ type SuperAdminHelpTopic = {
 };
 
 const SUPERADMIN_PRESENCE_CHOICES = new Map<string, string[]>();
+
+type GameDbSeed = {
+  title: string;
+  source: "GOTM" | "NR-GOTM";
+  round: number;
+  monthYear: string;
+};
 
 export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
   {
@@ -195,6 +210,13 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
       "Syntax: /superadmin message-count-backfill [channelname:<string>] [maxperchannel:<int>] [force:<boolean>]",
     notes:
       "Counts non-bot messages across text channels and forum threads. maxperchannel limits messages fetched per channel (default unlimited). channelname restricts the scan to a specific channel/thread by name or id. force:true rescans channels even if already scanned.",
+  },
+  {
+    id: "gamedb-backfill",
+    label: "/superadmin gamedb-backfill",
+    summary: "Import all GOTM and NR-GOTM titles into the GameDB using IGDB lookups.",
+    syntax: "Syntax: /superadmin gamedb-backfill",
+    notes: "Prompts for choice when IGDB returns multiple matches; skips titles already in GameDB.",
   },
 ];
 
@@ -2761,6 +2783,77 @@ export class SuperAdmin {
   }
 
   @Slash({
+    description: "Import GOTM and NR-GOTM titles into the GameDB (interactive IGDB search)",
+    name: "gamedb-backfill",
+  })
+  async gamedbBackfill(
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction, { ephemeral: true });
+
+    const okToUseCommand: boolean = await isSuperAdmin(interaction);
+    if (!okToUseCommand) return;
+
+    try {
+      await loadGotmFromDb();
+      await loadNrGotmFromDb();
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      await safeReply(interaction, {
+        content: `Failed to load GOTM data: ${msg}`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const seeds = this.buildGamedbSeeds();
+    if (!seeds.length) {
+      await safeReply(interaction, {
+        content: "No GOTM or NR-GOTM entries found to import.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await safeReply(interaction, {
+      content: `Starting GameDB backfill for ${seeds.length} titles...`,
+      ephemeral: true,
+    });
+
+    const logLines: string[] = [];
+    for (const seed of seeds) {
+      const label = `${seed.source} Round ${seed.round} (${seed.monthYear})`;
+      try {
+        const line = await this.processGamedbSeed(interaction, seed, label);
+        if (line) logLines.push(line);
+      } catch (err: any) {
+        const msg = err?.message ?? String(err);
+        logLines.push(`[${label}] Error: ${msg}`);
+      }
+      await this.delay(400);
+    }
+
+    if (!logLines.length) {
+      await safeReply(interaction, {
+        content: "Backfill complete. Nothing new was imported.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const chunks = this.chunkLines(logLines);
+    let first = true;
+    for (const chunk of chunks) {
+      await safeReply(interaction, {
+        content: chunk,
+        ephemeral: true,
+        __forceFollowUp: !first,
+      });
+      first = false;
+    }
+  }
+
+  @Slash({
     description: "Scan guild history to backfill MESSAGE_COUNT totals",
     name: "message-count-backfill",
   })
@@ -2884,6 +2977,276 @@ export class SuperAdmin {
         }.`,
       ephemeral: true,
     });
+  }
+
+  private buildGamedbSeeds(): GameDbSeed[] {
+    const seeds: GameDbSeed[] = [];
+    const titleSeen = new Set<string>();
+
+    const addSeed = (
+      title: string,
+      source: "GOTM" | "NR-GOTM",
+      round: number,
+      monthYear: string,
+    ) => {
+      const key = `${source}-${title.toLowerCase()}`;
+      if (titleSeen.has(key)) return;
+      titleSeen.add(key);
+      seeds.push({ title, source, round, monthYear });
+    };
+
+    const gotmEntries = Gotm.all();
+    for (const entry of gotmEntries) {
+      for (const game of entry.gameOfTheMonth) {
+        if (game.title) addSeed(game.title, "GOTM", entry.round, entry.monthYear);
+      }
+    }
+
+    const nrEntries = NrGotm.all();
+    for (const entry of nrEntries) {
+      for (const game of entry.gameOfTheMonth) {
+        if (game.title) addSeed(game.title, "NR-GOTM", entry.round, entry.monthYear);
+      }
+    }
+
+    return seeds;
+  }
+
+  private async processGamedbSeed(
+    interaction: CommandInteraction,
+    seed: GameDbSeed,
+    label: string,
+  ): Promise<string | null> {
+    const existingByTitle = await Game.searchGames(seed.title);
+    const match = existingByTitle.find(
+      (g) => g.title.toLowerCase() === seed.title.toLowerCase(),
+    );
+    if (match) {
+      return `[${label}] Skipped (already in GameDB #${match.id}): ${seed.title}`;
+    }
+
+    let igdbMatches: IGDBGame[] = [];
+    try {
+      igdbMatches = await igdbService.searchGames(seed.title, 8);
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      return `[${label}] IGDB search failed: ${msg}`;
+    }
+
+    if (!igdbMatches.length) {
+      return `[${label}] No IGDB match for "${seed.title}"`;
+    }
+
+    const existingIgdb = await this.findExistingIgdbGame(igdbMatches);
+    if (existingIgdb) {
+      return `[${label}] Skipped (IGDB already imported #${existingIgdb.id}): ${seed.title}`;
+    }
+
+    let selectedId: number | null = null;
+    if (igdbMatches.length === 1) {
+      selectedId = igdbMatches[0].id;
+    } else {
+      selectedId = await this.promptForIgdbSelection(interaction, seed, igdbMatches);
+    }
+
+    if (!selectedId) {
+      return `[${label}] Skipped (no selection): ${seed.title}`;
+    }
+
+    return this.importGameFromIgdb(selectedId, label);
+  }
+
+  private async promptForIgdbSelection(
+    interaction: CommandInteraction,
+    seed: GameDbSeed,
+    matches: IGDBGame[],
+  ): Promise<number | null> {
+    const options = matches.slice(0, 24).map((game) => {
+      const year = game.first_release_date
+        ? new Date(game.first_release_date * 1000).getFullYear()
+        : "TBD";
+      const rating = game.total_rating ? ` | ${Math.round(game.total_rating)}/100` : "";
+      return {
+        label: `${game.name} (${year})`.substring(0, 100),
+        value: String(game.id),
+        description: `${rating} ${game.summary ?? "No summary"}`.substring(0, 95),
+      };
+    });
+
+    options.push({
+      label: "Skip (do not import this title)",
+      value: "skip",
+      description: "Leave this GOTM/NR-GOTM un-imported",
+    });
+
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId(`gamedb-import-${Date.now()}`)
+      .setPlaceholder(`Select IGDB match for "${seed.title}"`)
+      .addOptions(options);
+
+    const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
+
+    const prompt = await safeReply(interaction, {
+      content: `Multiple IGDB matches for ${seed.source} Round ${seed.round} (${seed.monthYear}).`,
+      components: [row],
+      ephemeral: true,
+    });
+
+    if (!prompt || typeof (prompt as any).createMessageComponentCollector !== "function") {
+      return null;
+    }
+
+    return new Promise((resolve) => {
+      let resolved = false;
+      const collector = (prompt as any).createMessageComponentCollector({
+        componentType: ComponentType.StringSelect,
+        time: 60_000,
+        filter: (i: any) => i.user.id === interaction.user.id,
+      });
+
+      collector.on("collect", async (i: StringSelectMenuInteraction) => {
+        try {
+          await i.deferUpdate();
+        } catch {
+          // ignore
+        }
+        const val = i.values[0];
+        const selected = val === "skip" ? null : Number(val);
+        resolved = true;
+        resolve(Number.isFinite(selected as number) ? (selected as number) : null);
+        try {
+          await (prompt as any).edit({ components: [] });
+        } catch {
+          // ignore
+        }
+        collector.stop("selected");
+      });
+
+      collector.on("end", async () => {
+        if (!resolved) resolve(null);
+        try {
+          await (prompt as any).edit({ components: [] });
+        } catch {
+          // ignore
+        }
+        try {
+          await safeReply(interaction, {
+            content: `Selection closed for ${seed.title}.`,
+            components: [],
+            ephemeral: true,
+          });
+        } catch {
+          // ignore
+        }
+      });
+    });
+  }
+
+  private async findExistingIgdbGame(matches: IGDBGame[]): Promise<IGame | null> {
+    for (const match of matches) {
+      const existing = await Game.getGameByIgdbId(match.id);
+      if (existing) {
+        return existing;
+      }
+    }
+    return null;
+  }
+
+  private async importGameFromIgdb(igdbId: number, label: string): Promise<string> {
+    const details: IGDBGameDetails | null = await igdbService.getGameDetails(igdbId);
+    if (!details) {
+      return `[${label}] IGDB details unavailable for id ${igdbId}`;
+    }
+
+    const existing = details.id ? await Game.getGameByIgdbId(details.id) : null;
+    if (existing) {
+      return `[${label}] Skipped (IGDB already in GameDB #${existing.id}): ${details.name}`;
+    }
+
+    let imageData: Buffer | null = null;
+    if (details.cover?.image_id) {
+      try {
+        const url =
+          `https://images.igdb.com/igdb/image/upload/t_cover_big/${details.cover.image_id}.jpg`;
+        const resp = await axios.get(url, { responseType: "arraybuffer" });
+        imageData = Buffer.from(resp.data);
+      } catch {
+        // ignore image failures
+      }
+    }
+
+    const igdbUrl =
+      details.url || (details.slug ? `https://www.igdb.com/games/${details.slug}` : null);
+
+    const newGame = await Game.createGame(
+      details.name,
+      details.summary ?? null,
+      imageData,
+      details.id,
+      details.slug,
+      details.total_rating ?? null,
+      igdbUrl,
+    );
+
+    await Game.saveFullGameMetadata(newGame.id, details);
+    await this.saveReleaseDates(newGame.id, details);
+
+    return `[${label}] Imported "${newGame.title}" -> GameDB #${newGame.id}`;
+  }
+
+  private async saveReleaseDates(gameId: number, details: IGDBGameDetails): Promise<void> {
+    const releaseDates = details.release_dates;
+    if (!releaseDates || !Array.isArray(releaseDates)) return;
+
+    for (const release of releaseDates) {
+      const platformId: number | null =
+        typeof release.platform === "number"
+          ? release.platform
+          : (release.platform?.id ?? null);
+      const platformName: string | null =
+        typeof release.platform === "object"
+          ? release.platform?.name ?? null
+          : null;
+
+      if (!platformId || !release.region) continue;
+
+      const platform = await Game.ensurePlatform({ id: platformId, name: platformName });
+      const region = await Game.ensureRegion(release.region);
+      if (!platform || !region) continue;
+
+      try {
+        await Game.addReleaseInfo(
+          gameId,
+          platform.id,
+          region.id,
+          "Physical",
+          release.date ? new Date(release.date * 1000) : null,
+          null,
+        );
+      } catch {
+        // ignore duplicate inserts
+      }
+    }
+  }
+
+  private chunkLines(lines: string[]): string[] {
+    const chunks: string[] = [];
+    let current = "";
+    for (const line of lines) {
+      const addition = `${line}\n`;
+      if ((current + addition).length > 1800) {
+        chunks.push(current.trimEnd());
+        current = addition;
+      } else {
+        current += addition;
+      }
+    }
+    if (current.trim()) chunks.push(current.trimEnd());
+    return chunks;
+  }
+
+  private async delay(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 

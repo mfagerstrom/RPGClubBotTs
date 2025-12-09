@@ -68,7 +68,7 @@ const isAckError = (err: any): boolean => {
   return code === 40060 || code === 10062;
 };
 
-export async function safeReply(interaction: AnyRepliable, options: any): Promise<void> {
+export async function safeReply(interaction: AnyRepliable, options: any): Promise<any> {
   const anyInteraction = interaction as any;
   const forceFollowUp = Boolean(options?.__forceFollowUp);
   const normalizedOptions = normalizeOptions(options);
@@ -84,9 +84,9 @@ export async function safeReply(interaction: AnyRepliable, options: any): Promis
   if (forceFollowUp) {
     try {
       if (typeof options === "string") {
-        await interaction.followUp({ content: options });
+        return await interaction.followUp({ content: options });
       } else {
-        await interaction.followUp(normalizedOptions as any);
+        return await interaction.followUp(normalizedOptions as any);
       }
     } catch (err: any) {
       if (!isAckError(err)) throw err;
@@ -98,9 +98,9 @@ export async function safeReply(interaction: AnyRepliable, options: any): Promis
   if (deferred && !replied) {
     try {
       if (typeof options === "string") {
-        await interaction.editReply({ content: options });
+        return await interaction.editReply({ content: options });
       } else {
-        await interaction.editReply(normalizedOptions as any);
+        return await interaction.editReply(normalizedOptions as any);
       }
     } catch (err: any) {
       if (!isAckError(err)) throw err;
@@ -113,9 +113,9 @@ export async function safeReply(interaction: AnyRepliable, options: any): Promis
   if (replied || acked || forceFollowUp) {
     try {
       if (typeof options === "string") {
-        await interaction.followUp({ content: options });
+        return await interaction.followUp({ content: options });
       } else {
-        await interaction.followUp(normalizedOptions as any);
+        return await interaction.followUp(normalizedOptions as any);
       }
     } catch (err: any) {
       if (!isAckError(err)) throw err;
@@ -125,12 +125,14 @@ export async function safeReply(interaction: AnyRepliable, options: any): Promis
 
   // First-time acknowledgement: normal reply
   try {
-    if (typeof options === "string") {
-      await interaction.reply({ content: options });
-    } else {
-      await interaction.reply(normalizedOptions as any);
-    }
+    // Force fetchReply so we can return the message
+    const replyOptions = typeof options === "string" 
+      ? { content: options, fetchReply: true } 
+      : { ...normalizedOptions, fetchReply: true };
+
+    const result = await interaction.reply(replyOptions as any);
     anyInteraction.__rpgAcked = true;
+    return result;
   } catch (err: any) {
     if (!isAckError(err)) throw err;
   }

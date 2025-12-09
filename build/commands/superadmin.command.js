@@ -7,7 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ActionRowBuilder, ApplicationCommandOptionType, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ChannelType, } from "discord.js";
+import { ActionRowBuilder, ApplicationCommandOptionType, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ComponentType, StringSelectMenuBuilder, ChannelType, } from "discord.js";
 import axios from "axios";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { searchHltb } from "../functions/SearchHltb.js";
@@ -23,6 +23,10 @@ import { getUpcomingNominationWindow } from "../functions/NominationWindow.js";
 import { deleteNominationForUser, getNominationForUser, listNominationsForRound, } from "../classes/Nomination.js";
 import { getOraclePool } from "../db/oracleClient.js";
 import UserChannelMessageCount from "../classes/UserChannelMessageCount.js";
+import Game from "../classes/Game.js";
+import { igdbService } from "../services/IgdbService.js";
+import { loadGotmFromDb } from "../classes/Gotm.js";
+import { loadNrGotmFromDb } from "../classes/NrGotm.js";
 const SUPERADMIN_PRESENCE_CHOICES = new Map();
 export const SUPERADMIN_HELP_TOPICS = [
     {
@@ -122,6 +126,13 @@ export const SUPERADMIN_HELP_TOPICS = [
         summary: "Scan guild text channels and forums to backfill MESSAGE_COUNT totals.",
         syntax: "Syntax: /superadmin message-count-backfill [channelname:<string>] [maxperchannel:<int>] [force:<boolean>]",
         notes: "Counts non-bot messages across text channels and forum threads. maxperchannel limits messages fetched per channel (default unlimited). channelname restricts the scan to a specific channel/thread by name or id. force:true rescans channels even if already scanned.",
+    },
+    {
+        id: "gamedb-backfill",
+        label: "/superadmin gamedb-backfill",
+        summary: "Import all GOTM and NR-GOTM titles into the GameDB using IGDB lookups.",
+        syntax: "Syntax: /superadmin gamedb-backfill",
+        notes: "Prompts for choice when IGDB returns multiple matches; skips titles already in GameDB.",
     },
 ];
 function buildSuperAdminHelpButtons(activeId) {
@@ -2132,6 +2143,67 @@ let SuperAdmin = class SuperAdmin {
             });
         }
     }
+    async gamedbBackfill(interaction) {
+        await safeDeferReply(interaction, { ephemeral: true });
+        const okToUseCommand = await isSuperAdmin(interaction);
+        if (!okToUseCommand)
+            return;
+        try {
+            await loadGotmFromDb();
+            await loadNrGotmFromDb();
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeReply(interaction, {
+                content: `Failed to load GOTM data: ${msg}`,
+                ephemeral: true,
+            });
+            return;
+        }
+        const seeds = this.buildGamedbSeeds();
+        if (!seeds.length) {
+            await safeReply(interaction, {
+                content: "No GOTM or NR-GOTM entries found to import.",
+                ephemeral: true,
+            });
+            return;
+        }
+        await safeReply(interaction, {
+            content: `Starting GameDB backfill for ${seeds.length} titles...`,
+            ephemeral: true,
+        });
+        const logLines = [];
+        for (const seed of seeds) {
+            const label = `${seed.source} Round ${seed.round} (${seed.monthYear})`;
+            try {
+                const line = await this.processGamedbSeed(interaction, seed, label);
+                if (line)
+                    logLines.push(line);
+            }
+            catch (err) {
+                const msg = err?.message ?? String(err);
+                logLines.push(`[${label}] Error: ${msg}`);
+            }
+            await this.delay(400);
+        }
+        if (!logLines.length) {
+            await safeReply(interaction, {
+                content: "Backfill complete. Nothing new was imported.",
+                ephemeral: true,
+            });
+            return;
+        }
+        const chunks = this.chunkLines(logLines);
+        let first = true;
+        for (const chunk of chunks) {
+            await safeReply(interaction, {
+                content: chunk,
+                ephemeral: true,
+                __forceFollowUp: !first,
+            });
+            first = false;
+        }
+    }
     async messageCountBackfill(channelNameFilter, maxPerChannelOpt, interaction) {
         await safeDeferReply(interaction, { ephemeral: true });
         const okToUseCommand = await isSuperAdmin(interaction);
@@ -2207,6 +2279,223 @@ let SuperAdmin = class SuperAdmin {
                 `Message counts populated from historical messages${maxPerChannel ? ` (capped at ${maxPerChannel} per channel)` : ""}.`,
             ephemeral: true,
         });
+    }
+    buildGamedbSeeds() {
+        const seeds = [];
+        const titleSeen = new Set();
+        const addSeed = (title, source, round, monthYear) => {
+            const key = `${source}-${title.toLowerCase()}`;
+            if (titleSeen.has(key))
+                return;
+            titleSeen.add(key);
+            seeds.push({ title, source, round, monthYear });
+        };
+        const gotmEntries = Gotm.all();
+        for (const entry of gotmEntries) {
+            for (const game of entry.gameOfTheMonth) {
+                if (game.title)
+                    addSeed(game.title, "GOTM", entry.round, entry.monthYear);
+            }
+        }
+        const nrEntries = NrGotm.all();
+        for (const entry of nrEntries) {
+            for (const game of entry.gameOfTheMonth) {
+                if (game.title)
+                    addSeed(game.title, "NR-GOTM", entry.round, entry.monthYear);
+            }
+        }
+        return seeds;
+    }
+    async processGamedbSeed(interaction, seed, label) {
+        const existingByTitle = await Game.searchGames(seed.title);
+        const match = existingByTitle.find((g) => g.title.toLowerCase() === seed.title.toLowerCase());
+        if (match) {
+            return `[${label}] Skipped (already in GameDB #${match.id}): ${seed.title}`;
+        }
+        let igdbMatches = [];
+        try {
+            igdbMatches = await igdbService.searchGames(seed.title, 8);
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            return `[${label}] IGDB search failed: ${msg}`;
+        }
+        if (!igdbMatches.length) {
+            return `[${label}] No IGDB match for "${seed.title}"`;
+        }
+        const existingIgdb = await this.findExistingIgdbGame(igdbMatches);
+        if (existingIgdb) {
+            return `[${label}] Skipped (IGDB already imported #${existingIgdb.id}): ${seed.title}`;
+        }
+        let selectedId = null;
+        if (igdbMatches.length === 1) {
+            selectedId = igdbMatches[0].id;
+        }
+        else {
+            selectedId = await this.promptForIgdbSelection(interaction, seed, igdbMatches);
+        }
+        if (!selectedId) {
+            return `[${label}] Skipped (no selection): ${seed.title}`;
+        }
+        return this.importGameFromIgdb(selectedId, label);
+    }
+    async promptForIgdbSelection(interaction, seed, matches) {
+        const options = matches.slice(0, 24).map((game) => {
+            const year = game.first_release_date
+                ? new Date(game.first_release_date * 1000).getFullYear()
+                : "TBD";
+            const rating = game.total_rating ? ` | ${Math.round(game.total_rating)}/100` : "";
+            return {
+                label: `${game.name} (${year})`.substring(0, 100),
+                value: String(game.id),
+                description: `${rating} ${game.summary ?? "No summary"}`.substring(0, 95),
+            };
+        });
+        options.push({
+            label: "Skip (do not import this title)",
+            value: "skip",
+            description: "Leave this GOTM/NR-GOTM un-imported",
+        });
+        const menu = new StringSelectMenuBuilder()
+            .setCustomId(`gamedb-import-${Date.now()}`)
+            .setPlaceholder(`Select IGDB match for "${seed.title}"`)
+            .addOptions(options);
+        const row = new ActionRowBuilder().addComponents(menu);
+        const prompt = await safeReply(interaction, {
+            content: `Multiple IGDB matches for ${seed.source} Round ${seed.round} (${seed.monthYear}).`,
+            components: [row],
+            ephemeral: true,
+        });
+        if (!prompt || typeof prompt.createMessageComponentCollector !== "function") {
+            return null;
+        }
+        return new Promise((resolve) => {
+            let resolved = false;
+            const collector = prompt.createMessageComponentCollector({
+                componentType: ComponentType.StringSelect,
+                time: 60_000,
+                filter: (i) => i.user.id === interaction.user.id,
+            });
+            collector.on("collect", async (i) => {
+                try {
+                    await i.deferUpdate();
+                }
+                catch {
+                    // ignore
+                }
+                const val = i.values[0];
+                const selected = val === "skip" ? null : Number(val);
+                resolved = true;
+                resolve(Number.isFinite(selected) ? selected : null);
+                try {
+                    await prompt.edit({ components: [] });
+                }
+                catch {
+                    // ignore
+                }
+                collector.stop("selected");
+            });
+            collector.on("end", async () => {
+                if (!resolved)
+                    resolve(null);
+                try {
+                    await prompt.edit({ components: [] });
+                }
+                catch {
+                    // ignore
+                }
+                try {
+                    await safeReply(interaction, {
+                        content: `Selection closed for ${seed.title}.`,
+                        components: [],
+                        ephemeral: true,
+                    });
+                }
+                catch {
+                    // ignore
+                }
+            });
+        });
+    }
+    async findExistingIgdbGame(matches) {
+        for (const match of matches) {
+            const existing = await Game.getGameByIgdbId(match.id);
+            if (existing) {
+                return existing;
+            }
+        }
+        return null;
+    }
+    async importGameFromIgdb(igdbId, label) {
+        const details = await igdbService.getGameDetails(igdbId);
+        if (!details) {
+            return `[${label}] IGDB details unavailable for id ${igdbId}`;
+        }
+        const existing = details.id ? await Game.getGameByIgdbId(details.id) : null;
+        if (existing) {
+            return `[${label}] Skipped (IGDB already in GameDB #${existing.id}): ${details.name}`;
+        }
+        let imageData = null;
+        if (details.cover?.image_id) {
+            try {
+                const url = `https://images.igdb.com/igdb/image/upload/t_cover_big/${details.cover.image_id}.jpg`;
+                const resp = await axios.get(url, { responseType: "arraybuffer" });
+                imageData = Buffer.from(resp.data);
+            }
+            catch {
+                // ignore image failures
+            }
+        }
+        const igdbUrl = details.url || (details.slug ? `https://www.igdb.com/games/${details.slug}` : null);
+        const newGame = await Game.createGame(details.name, details.summary ?? null, imageData, details.id, details.slug, details.total_rating ?? null, igdbUrl);
+        await Game.saveFullGameMetadata(newGame.id, details);
+        await this.saveReleaseDates(newGame.id, details);
+        return `[${label}] Imported "${newGame.title}" -> GameDB #${newGame.id}`;
+    }
+    async saveReleaseDates(gameId, details) {
+        const releaseDates = details.release_dates;
+        if (!releaseDates || !Array.isArray(releaseDates))
+            return;
+        for (const release of releaseDates) {
+            const platformId = typeof release.platform === "number"
+                ? release.platform
+                : (release.platform?.id ?? null);
+            const platformName = typeof release.platform === "object"
+                ? release.platform?.name ?? null
+                : null;
+            if (!platformId || !release.region)
+                continue;
+            const platform = await Game.ensurePlatform({ id: platformId, name: platformName });
+            const region = await Game.ensureRegion(release.region);
+            if (!platform || !region)
+                continue;
+            try {
+                await Game.addReleaseInfo(gameId, platform.id, region.id, "Physical", release.date ? new Date(release.date * 1000) : null, null);
+            }
+            catch {
+                // ignore duplicate inserts
+            }
+        }
+    }
+    chunkLines(lines) {
+        const chunks = [];
+        let current = "";
+        for (const line of lines) {
+            const addition = `${line}\n`;
+            if ((current + addition).length > 1800) {
+                chunks.push(current.trimEnd());
+                current = addition;
+            }
+            else {
+                current += addition;
+            }
+        }
+        if (current.trim())
+            chunks.push(current.trimEnd());
+        return chunks;
+    }
+    async delay(ms) {
+        await new Promise((resolve) => setTimeout(resolve, ms));
     }
 };
 __decorate([
@@ -2404,6 +2693,12 @@ __decorate([
         type: ApplicationCommandOptionType.String,
     }))
 ], SuperAdmin.prototype, "deleteNrGotmNomination", null);
+__decorate([
+    Slash({
+        description: "Import GOTM and NR-GOTM titles into the GameDB (interactive IGDB search)",
+        name: "gamedb-backfill",
+    })
+], SuperAdmin.prototype, "gamedbBackfill", null);
 __decorate([
     Slash({
         description: "Scan guild history to backfill MESSAGE_COUNT totals",

@@ -9,7 +9,7 @@ import {
 } from "discord.js";
 import type { ButtonInteraction, CommandInteraction, User } from "discord.js";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
-import { DateTime, Duration } from "luxon";
+import { DateTime } from "luxon";
 import {
   getPresenceHistory,
   setPresence,

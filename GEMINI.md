@@ -6,19 +6,13 @@
   - Example: `cmd /c npm install`
   - Example: `cmd /c npm run compile`
   - Example: `cmd /c npm run lint`
-- **Node.js:** The project scripts (`scripts/ensure-local-node.sh`) are Bash-only.
-  - **Strategy:** Check `node -v` first. If it is v22+, use the system Node directly and skip the bash scripts.
-  - Current System Node: v22.20.0 (Confirmed Working).
-
+  
 # Project Rules & Tasks
-
+- I will run all sql manually.  Just give me the scripts I need.
 - Research best practices for Discord.js and DiscordX, along with Typescript, so your coding mindset isn't out of date
-- Bootstrap Node.js locally (Node v22) even if system Node is missing: `bash scripts/ensure-local-node.sh`
-- Use the repo-local npm wrapper so the bundled Node is picked up: `bash scripts/npm-local.sh <npm args>` (e.g., `bash scripts/npm-local.sh run compile`)
 - After code changes, run `npm run lint` and `npm run compile`, fixing all errors reported by each command
 - You are disallowed from using npm run build or npm run buildDev
 - You are disallowed from using git commands that can result in file changes or losses
-- To capture lint output, run `TMPDIR=/tmp bash scripts/npm-local.sh run lint > /tmp/lint.log ; echo $? > /tmp/lint.status` then read `/tmp/lint.log`.
 - rules to follow while coding: keep interfaces PascalCase with `I` prefix, type all functions and variable declarations, keep lines <=100 chars, use trailing commas on multiline, semicolons always, avoid multiple blank lines, keep spaced comments.
 - Prefer npm/Node commands over Python or other languages for scripting and tooling.
 - Check the TODO.md file for development goals. Don't do these automatically but ask me if I would like you to tackle one of them when you set up a new task context.
@@ -31,3 +25,4 @@
   db/rpg_club_user_avatar_history.md (RPG_CLUB_USER_AVATAR_HISTORY),
   db/rpg_club_user_nick_history.md (RPG_CLUB_USER_NICK_HISTORY), and db/help.md (HELP).
 - when adding new SQL scripts, the number at the beginning of the filename is a DATE.  Not a number to be incremented, it should be today's date
+- Always run `npm run lint` and fix any reported errors before considering a task complete.

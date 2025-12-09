@@ -1,16 +1,19 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+# Wrapper to run npm/npx using the local Node if available
 
-# Wrapper to always run npm using the repo-local Node.js toolchain.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-LOCAL_NPM="$REPO_ROOT/.node/bin/npm"
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+LOCAL_NODE_DIR="$SCRIPT_DIR/../.node"
+LOCAL_NODE_BIN="$LOCAL_NODE_DIR/bin"
 
-bash "$SCRIPT_DIR/ensure-local-node.sh"
-export PATH="$REPO_ROOT/.node/bin:$PATH"
-
-if [[ $# -eq 0 ]]; then
-  exec "$LOCAL_NPM"
-else
-  exec "$LOCAL_NPM" "$@"
+if [ -d "$LOCAL_NODE_BIN" ]; then
+  export PATH="$LOCAL_NODE_BIN:$PATH"
 fi
+
+# Check if 'npm' is available
+if ! command -v npm &> /dev/null; then
+    echo "Error: npm not found. Ensure Node.js is installed or bootstrap the local environment."
+    exit 1
+fi
+
+# Execute the passed command
+exec npm "$@"

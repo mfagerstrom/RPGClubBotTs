@@ -60,10 +60,10 @@ export async function safeReply(interaction, options) {
     if (forceFollowUp) {
         try {
             if (typeof options === "string") {
-                await interaction.followUp({ content: options });
+                return await interaction.followUp({ content: options });
             }
             else {
-                await interaction.followUp(normalizedOptions);
+                return await interaction.followUp(normalizedOptions);
             }
         }
         catch (err) {
@@ -76,10 +76,10 @@ export async function safeReply(interaction, options) {
     if (deferred && !replied) {
         try {
             if (typeof options === "string") {
-                await interaction.editReply({ content: options });
+                return await interaction.editReply({ content: options });
             }
             else {
-                await interaction.editReply(normalizedOptions);
+                return await interaction.editReply(normalizedOptions);
             }
         }
         catch (err) {
@@ -93,10 +93,10 @@ export async function safeReply(interaction, options) {
     if (replied || acked || forceFollowUp) {
         try {
             if (typeof options === "string") {
-                await interaction.followUp({ content: options });
+                return await interaction.followUp({ content: options });
             }
             else {
-                await interaction.followUp(normalizedOptions);
+                return await interaction.followUp(normalizedOptions);
             }
         }
         catch (err) {
@@ -107,13 +107,13 @@ export async function safeReply(interaction, options) {
     }
     // First-time acknowledgement: normal reply
     try {
-        if (typeof options === "string") {
-            await interaction.reply({ content: options });
-        }
-        else {
-            await interaction.reply(normalizedOptions);
-        }
+        // Force fetchReply so we can return the message
+        const replyOptions = typeof options === "string"
+            ? { content: options, fetchReply: true }
+            : { ...normalizedOptions, fetchReply: true };
+        const result = await interaction.reply(replyOptions);
         anyInteraction.__rpgAcked = true;
+        return result;
     }
     catch (err) {
         if (!isAckError(err))
