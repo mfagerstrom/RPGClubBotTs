@@ -6,13 +6,33 @@ import {
   ActionRowBuilder,
   ComponentType,
   StringSelectMenuInteraction,
+  ButtonBuilder,
+  ButtonInteraction,
+  ButtonStyle,
 } from "discord.js";
-import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
+import {
+  ButtonComponent,
+  Discord,
+  SelectMenuComponent,
+  Slash,
+  SlashGroup,
+  SlashOption,
+} from "discordx";
 import { safeDeferReply, safeReply } from "../../src/functions/InteractionUtils.js";
-import { isAdmin } from "../../src/commands/admin.command.js";
 import Game from "../../src/classes/Game.js";
 import axios from "axios"; // For downloading image attachments
 import { igdbService } from "../../src/services/IgdbService.js";
+
+const GAME_SEARCH_PAGE_SIZE = 25;
+const GAME_SEARCH_SESSIONS = new Map<
+  string,
+  { userId: string; results: any[]; query: string }
+>();
+
+function isUniqueConstraintError(err: any): boolean {
+  const msg = err?.message ?? "";
+  return /ORA-00001/i.test(msg) || /unique constraint/i.test(msg);
+}
 
 @Discord()
 @SlashGroup({ description: "Game Database Commands", name: "gamedb" })
@@ -30,11 +50,6 @@ export class GameDb {
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction);
-
-    const okToUseCommand: boolean = await isAdmin(interaction);
-    if (!okToUseCommand) {
-      return;
-    }
 
     try {
       // 1. Search IGDB
@@ -131,11 +146,7 @@ export class GameDb {
     // 4. Fetch Details
     const details = await igdbService.getGameDetails(igdbId);
     if (!details) {
-      // If it's a component interaction, followUp is better for errors after deferUpdate
-      // If it's command interaction, editReply is fine.
-      // InteractionUtils.safeReply handles both somewhat, but let's be explicit for errors if needed.
-      // We'll throw here and let caller handle, OR handle gracefully.
-      // Caller expects void.
+      // followUp for components, editReply for command interactions.
       const msg = "Failed to fetch details from IGDB.";
       if (interaction.isMessageComponent()) {
         await interaction.followUp({ content: msg, ephemeral: true });
@@ -149,7 +160,8 @@ export class GameDb {
     let imageData: Buffer | null = null;
     if (details.cover?.image_id) {
       try {
-        const imageUrl = `https://images.igdb.com/igdb/image/upload/t_cover_big/${details.cover.image_id}.jpg`;
+        const imageUrl =
+          `https://images.igdb.com/igdb/image/upload/t_cover_big/${details.cover.image_id}.jpg`;
         const imageResponse = await axios.get(imageUrl, { responseType: "arraybuffer" });
         imageData = Buffer.from(imageResponse.data);
       } catch (err) {
@@ -161,15 +173,29 @@ export class GameDb {
     // 6. Save to DB
     const igdbUrl = details.url
       || (details.slug ? `https://www.igdb.com/games/${details.slug}` : null);
-    const newGame = await Game.createGame(
-      details.name,
-      details.summary || null,
-      imageData,
-      details.id,
-      details.slug,
-      details.total_rating ?? null,
-      igdbUrl,
-    );
+    let newGame;
+    try {
+      newGame = await Game.createGame(
+        details.name,
+        details.summary || null,
+        imageData,
+        details.id,
+        details.slug,
+        details.total_rating ?? null,
+        igdbUrl,
+      );
+    } catch (err: any) {
+      if (isUniqueConstraintError(err)) {
+        const msg = "This game has already been imported.";
+        if (interaction.isMessageComponent()) {
+          await interaction.followUp({ content: msg, ephemeral: true }).catch(() => {});
+        } else {
+          await interaction.editReply({ content: msg }).catch(() => {});
+        }
+        return;
+      }
+      throw err;
+    }
 
     // 6a. Save Extended Metadata
     await Game.saveFullGameMetadata(newGame.id, details);
@@ -182,9 +208,10 @@ export class GameDb {
     );
 
     // 7. Final Success Message
-    // We use editReply because both paths (command deferral, component deferUpdate) leave us in a state where editReply updates the original message.
+    // editReply works for both deferred command and component interactions.
     await interaction.editReply({
-      content: `Successfully added **${newGame.title}** (ID: ${newGame.id}) to the database!`,
+      content:
+        `Successfully added **${newGame.title}** (ID: ${newGame.id}) to the database!`,
       components: [], // Remove dropdown if present
     });
   }
@@ -202,14 +229,35 @@ export class GameDb {
   ): Promise<void> {
     await safeDeferReply(interaction);
 
+    await this.showGameProfile(interaction, gameId);
+  }
+
+  private async showGameProfile(
+    interaction: CommandInteraction | StringSelectMenuInteraction,
+    gameId: number,
+  ): Promise<void> {
+    const profile = await this.buildGameProfile(gameId);
+    if (!profile) {
+      await safeReply(interaction, {
+        content: `No game found with ID ${gameId}.`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await safeReply(interaction, {
+      embeds: [profile.embed],
+      files: profile.files,
+    });
+  }
+
+  private async buildGameProfile(
+    gameId: number,
+  ): Promise<{ embed: EmbedBuilder; files: { attachment: Buffer; name: string }[] } | null> {
     try {
       const game = await Game.getGameById(gameId);
       if (!game) {
-        await safeReply(interaction, {
-          content: `No game found with ID ${gameId}.`,
-          ephemeral: true,
-        });
-        return;
+        return null;
       }
 
       const releases = await Game.getGameReleases(gameId);
@@ -222,73 +270,94 @@ export class GameDb {
       const embed = new EmbedBuilder()
         .setTitle(game.title)
         .setDescription(game.description || "No description available.")
-        .setColor(0x0099ff); // A nice blue color
+        .setColor(0x0099ff);
 
       if (game.imageData) {
-        // Discord.js embeds can use 'attachment://filename' for image URL
-        // We'll attach the image Buffer directly and reference it.
         embed.setImage("attachment://game_image.png");
       }
 
       if (releases.length > 0) {
-        const releaseField = releases.map(r => {
-          const platformName = platformMap.get(r.platformId) || "Unknown Platform";
-          const regionName = regionMap.get(r.regionId) || "Unknown Region";
-          const releaseDate = r.releaseDate ? r.releaseDate.toLocaleDateString() : "TBD";
-          const format = r.format ? `(${r.format})` : "";
-          return `• **${platformName}** (${regionName}) ${format} - ${releaseDate}`;
-        }).join("\n");
+        const releaseField = releases
+          .map((r) => {
+            const platformName = platformMap.get(r.platformId) || "Unknown Platform";
+            const regionName = regionMap.get(r.regionId) || "Unknown Region";
+            const releaseDate = r.releaseDate ? r.releaseDate.toLocaleDateString() : "TBD";
+            const format = r.format ? `(${r.format})` : "";
+            return `• **${platformName}** (${regionName}) ${format} - ${releaseDate}`;
+          })
+          .join("\n");
         embed.addFields({ name: "Releases", value: releaseField, inline: false });
       }
 
-      // Fetch extended metadata
       const developers = await Game.getGameDevelopers(gameId);
-      if (developers.length) embed.addFields({ name: "Developers", value: developers.join(", "), inline: true });
+      if (developers.length) {
+        embed.addFields({ name: "Developers", value: developers.join(", "), inline: true });
+      }
 
       const publishers = await Game.getGamePublishers(gameId);
-      if (publishers.length) embed.addFields({ name: "Publishers", value: publishers.join(", "), inline: true });
+      if (publishers.length) {
+        embed.addFields({ name: "Publishers", value: publishers.join(", "), inline: true });
+      }
 
       const genres = await Game.getGameGenres(gameId);
-      if (genres.length) embed.addFields({ name: "Genres", value: genres.join(", "), inline: true });
+      if (genres.length) {
+        embed.addFields({ name: "Genres", value: genres.join(", "), inline: true });
+      }
 
       const themes = await Game.getGameThemes(gameId);
-      if (themes.length) embed.addFields({ name: "Themes", value: themes.join(", "), inline: true });
+      if (themes.length) {
+        embed.addFields({ name: "Themes", value: themes.join(", "), inline: true });
+      }
 
       const modes = await Game.getGameModes(gameId);
-      if (modes.length) embed.addFields({ name: "Game Modes", value: modes.join(", "), inline: true });
+      if (modes.length) {
+        embed.addFields({ name: "Game Modes", value: modes.join(", "), inline: true });
+      }
 
-      const perspectives = await Game.getGamePerspectives(gameId);
-      if (perspectives.length) embed.addFields({ name: "Player Perspectives", value: perspectives.join(", "), inline: true });
+    const perspectives = await Game.getGamePerspectives(gameId);
+    if (perspectives.length) {
+      embed.addFields({
+        name: "Player Perspectives",
+        value: perspectives.join(", "),
+        inline: true,
+      });
+    }
 
-      const engines = await Game.getGameEngines(gameId);
-      if (engines.length) embed.addFields({ name: "Game Engines", value: engines.join(", "), inline: true });
+    const engines = await Game.getGameEngines(gameId);
+      if (engines.length) {
+        embed.addFields({ name: "Game Engines", value: engines.join(", "), inline: true });
+      }
 
       const franchises = await Game.getGameFranchises(gameId);
-      if (franchises.length) embed.addFields({ name: "Franchises", value: franchises.join(", "), inline: true });
+      if (franchises.length) {
+        embed.addFields({ name: "Franchises", value: franchises.join(", "), inline: true });
+      }
 
       const series = await Game.getGameSeries(gameId);
-      if (series) embed.addFields({ name: "Series / Collection", value: series, inline: true });
-
-      if (game.totalRating) {
-        embed.addFields({ name: "IGDB Rating", value: `${Math.round(game.totalRating)}/100`, inline: true });
+      if (series) {
+        embed.addFields({ name: "Series / Collection", value: series, inline: true });
       }
+
+    if (game.totalRating) {
+      embed.addFields({
+        name: "IGDB Rating",
+        value: `${Math.round(game.totalRating)}/100`,
+        inline: true,
+      });
+    }
 
       if (game.igdbUrl) {
         embed.setURL(game.igdbUrl);
       }
 
-      const files = game.imageData ? [{ attachment: game.imageData, name: "game_image.png" }] : [];
+    const files = game.imageData
+      ? [{ attachment: game.imageData, name: "game_image.png" }]
+      : [];
 
-      await safeReply(interaction, {
-        embeds: [embed],
-        files: files,
-      });
-
+      return { embed, files };
     } catch (error: any) {
-      await safeReply(interaction, {
-        content: `Failed to retrieve game details. Error: ${error.message}`,
-        ephemeral: true,
-      });
+      console.error("Failed to build game profile:", error);
+      return null;
     }
   }
 
@@ -362,34 +431,213 @@ export class GameDb {
         return;
       }
 
-      // Limit results to 25 to fit in an embed reasonably
-      const displayedResults = results.slice(0, 25);
-      const resultList = displayedResults
-        .map((g) => `• **${g.title}**`)
-        .join("\n");
+      if (results.length === 1) {
+        await this.showGameProfile(interaction, results[0].id);
+        return;
+      }
 
-      const title = searchTerm
-        ? `Search Results for "${searchTerm}"`
-        : "All Games";
-
-      const embed = new EmbedBuilder()
-        .setTitle(title)
-        .setDescription(resultList || "No results.")
-        .setFooter({
-          text:
-            results.length > 25
-              ? `Showing 25 of ${results.length} results`
-              : `${results.length} results found`,
-        });
-
-      await safeReply(interaction, {
-        embeds: [embed],
+      const sessionId = interaction.id;
+      GAME_SEARCH_SESSIONS.set(sessionId, {
+        userId: interaction.user.id,
+        results,
+        query: searchTerm,
       });
+
+      const response = this.buildSearchResponse(sessionId, GAME_SEARCH_SESSIONS.get(sessionId)!, 0);
+
+      await safeReply(interaction, response);
     } catch (error: any) {
       await safeReply(interaction, {
         content: `Failed to search games. Error: ${error.message}`,
         ephemeral: true,
       });
     }
+  }
+
+  @SelectMenuComponent({ id: /^gamedb-search-select:[^:]+:\d+:\d+$/ })
+  async handleSearchSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const parts = interaction.customId.split(":");
+    const sessionId = parts[1];
+    const ownerId = parts[2];
+    const page = Number(parts[3]);
+
+    if (interaction.user.id !== ownerId) {
+      await interaction
+        .reply({
+          content: "This menu isn't for you.",
+          ephemeral: true,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    const session = GAME_SEARCH_SESSIONS.get(sessionId);
+    if (!session) {
+      await interaction
+        .reply({
+          content: "This search session has expired.",
+          ephemeral: true,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    const gameId = Number(interaction.values?.[0]);
+    if (!Number.isFinite(gameId)) {
+      await interaction
+        .reply({
+          content: "Invalid selection.",
+          ephemeral: true,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    try {
+      await interaction.deferUpdate();
+    } catch {
+      // ignore
+    }
+
+    const profile = await this.buildGameProfile(gameId);
+    if (!profile) {
+      await interaction
+        .followUp({
+          content: "Unable to load that game.",
+          ephemeral: true,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    const response = this.buildSearchResponse(sessionId, session, page);
+
+    try {
+      await interaction.editReply({
+        embeds: [profile.embed],
+        files: profile.files,
+        components: response.components,
+        content: null as any,
+      });
+    } catch {
+      // ignore update failures
+    }
+  }
+
+  @ButtonComponent({ id: /^gamedb-search-page:[^:]+:\d+:\d+:(next|prev)$/ })
+  async handleSearchPage(interaction: ButtonInteraction): Promise<void> {
+    const parts = interaction.customId.split(":");
+    const sessionId = parts[1];
+    const ownerId = parts[2];
+    const page = Number(parts[3]);
+    const direction = parts[4];
+
+    if (interaction.user.id !== ownerId) {
+      await interaction
+        .reply({
+          content: "This menu isn't for you.",
+          ephemeral: true,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    const session = GAME_SEARCH_SESSIONS.get(sessionId);
+    if (!session) {
+      await interaction
+        .reply({
+          content: "This search session has expired.",
+          ephemeral: true,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    const totalPages = Math.max(
+      1,
+      Math.ceil(session.results.length / GAME_SEARCH_PAGE_SIZE),
+    );
+    const delta = direction === "next" ? 1 : -1;
+    const newPage = Math.min(Math.max(page + delta, 0), totalPages - 1);
+
+    try {
+      await interaction.deferUpdate();
+    } catch {
+      // ignore
+    }
+
+    const response = this.buildSearchResponse(sessionId, session, newPage);
+
+    try {
+      await interaction.editReply({
+        ...response,
+        files: [],
+        content: null as any,
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  private buildSearchResponse(
+    sessionId: string,
+    session: { userId: string; results: any[]; query: string },
+    page: number,
+  ): { embeds: EmbedBuilder[]; components: any[] } {
+    const totalPages = Math.max(
+      1,
+      Math.ceil(session.results.length / GAME_SEARCH_PAGE_SIZE),
+    );
+    const safePage = Math.min(Math.max(page, 0), totalPages - 1);
+    const start = safePage * GAME_SEARCH_PAGE_SIZE;
+    const displayedResults = session.results.slice(
+      start,
+      start + GAME_SEARCH_PAGE_SIZE,
+    );
+    const resultList = displayedResults.map((g) => `• **${g.title}**`).join("\n");
+
+    const title = session.query
+      ? `Search Results for "${session.query}" (Page ${safePage + 1}/${totalPages})`
+      : `All Games (Page ${safePage + 1}/${totalPages})`;
+
+    const embed = new EmbedBuilder()
+      .setTitle(title)
+      .setDescription(resultList || "No results.")
+      .setFooter({
+        text: `${session.results.length} results total`,
+      });
+
+    const selectCustomId = `gamedb-search-select:${sessionId}:${session.userId}:${safePage}`;
+    const options = displayedResults.map((g) => ({
+      label: g.title.substring(0, 100),
+      value: String(g.id),
+      description: "View this game",
+    }));
+
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId(selectCustomId)
+      .setPlaceholder("Select a game to view details")
+      .addOptions(options);
+
+    const selectRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
+
+    const prevButton = new ButtonBuilder()
+      .setCustomId(`gamedb-search-page:${sessionId}:${session.userId}:${safePage}:prev`)
+      .setLabel("Previous Page")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(safePage === 0);
+
+    const nextButton = new ButtonBuilder()
+      .setCustomId(`gamedb-search-page:${sessionId}:${session.userId}:${safePage}:next`)
+      .setLabel("Next Page")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(safePage >= totalPages - 1);
+
+    const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(prevButton, nextButton);
+
+    return {
+      embeds: [embed],
+      components: [selectRow, buttonRow],
+    };
   }
 }

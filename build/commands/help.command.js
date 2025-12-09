@@ -82,6 +82,12 @@ const HELP_TOPICS = [
         syntax: "Use /profile help for subcommands (view/edit/search) and parameters.",
     },
     {
+        id: "gamedb",
+        label: "/gamedb",
+        summary: "Game database tools powered by IGDB search, import, and paging results.",
+        syntax: "Use /gamedb help for subcommands: add, search, view.",
+    },
+    {
         id: "rss",
         label: "/rss",
         summary: "Admin-only RSS relays with include/exclude keyword filters per channel.",
@@ -226,6 +232,28 @@ function buildProfileHelpEmbed(topic) {
     }
     return embed;
 }
+function buildGamedbHelpButtons(activeId) {
+    const rows = [];
+    rows.push(new ActionRowBuilder().addComponents(GAMEDB_HELP_TOPICS.map((topic) => new ButtonBuilder()
+        .setCustomId(`gamedb-help-${topic.id}`)
+        .setLabel(topic.label)
+        .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary))));
+    rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
+        .setCustomId("help-main")
+        .setLabel("Back to Help Main Menu")
+        .setStyle(ButtonStyle.Secondary)));
+    return rows;
+}
+function buildGamedbHelpEmbed(topic) {
+    const embed = new EmbedBuilder()
+        .setTitle(`${topic.label} help`)
+        .setDescription(topic.summary)
+        .addFields({ name: "Syntax", value: topic.syntax });
+    if (topic.notes) {
+        embed.addFields({ name: "Notes", value: topic.notes });
+    }
+    return embed;
+}
 const NR_GOTM_HELP_TOPICS = [
     {
         id: "search",
@@ -356,6 +384,29 @@ const PROFILE_HELP_TOPICS = [
         notes: "Filters default to partial matches; date/times use ISO formats; limit max 100; departed members are excluded unless include-departed-members is true.",
     },
 ];
+const GAMEDB_HELP_TOPICS = [
+    {
+        id: "add",
+        label: "/gamedb add",
+        summary: "Search IGDB and import a game into GameDB (open to all users).",
+        syntax: "Syntax: /gamedb add title:<string>",
+        notes: "Returns a dropdown of IGDB matches; if only one result, it imports automatically. Duplicate titles already in GameDB show an 'already imported' message.",
+    },
+    {
+        id: "search",
+        label: "/gamedb search",
+        summary: "Search GameDB titles with paged dropdown navigation.",
+        syntax: "Syntax: /gamedb search [query:<string>]",
+        notes: "Query is optional; omit to list all games. Results show a dropdown and Previous/Next buttons; selecting a game shows its profile.",
+    },
+    {
+        id: "view",
+        label: "/gamedb view",
+        summary: "View a GameDB entry by id.",
+        syntax: "Syntax: /gamedb view game_id:<number>",
+        notes: "Shows cover art, metadata, releases, and IGDB link when available.",
+    },
+];
 function buildRssHelpButtons(activeId) {
     const rows = [];
     rows.push(new ActionRowBuilder().addComponents(RSS_HELP_TOPICS.map((topic) => new ButtonBuilder()
@@ -416,6 +467,13 @@ export function buildProfileHelpResponse(activeTopicId) {
         .setTitle("/profile commands")
         .setDescription("Choose a profile subcommand button to view details.");
     const components = buildProfileHelpButtons(activeTopicId);
+    return { embeds: [embed], components };
+}
+export function buildGamedbHelpResponse(activeTopicId) {
+    const embed = new EmbedBuilder()
+        .setTitle("/gamedb commands")
+        .setDescription("Choose a GameDB subcommand button to view details.");
+    const components = buildGamedbHelpButtons(activeTopicId);
     return { embeds: [embed], components };
 }
 function chunkArray(items, chunkSize) {
@@ -497,6 +555,11 @@ let BotHelp = class BotHelp {
         }
         if (topicId === "profile") {
             const response = buildProfileHelpResponse();
+            await safeUpdate(interaction, response);
+            return;
+        }
+        if (topicId === "gamedb") {
+            const response = buildGamedbHelpResponse();
             await safeUpdate(interaction, response);
             return;
         }
@@ -604,6 +667,23 @@ let BotHelp = class BotHelp {
             components: buildProfileHelpButtons(topic.id),
         });
     }
+    async handleGamedbHelpButton(interaction) {
+        const topicId = interaction.customId.replace("gamedb-help-", "");
+        const topic = GAMEDB_HELP_TOPICS.find((entry) => entry.id === topicId);
+        if (!topic) {
+            const response = buildGamedbHelpResponse();
+            await safeUpdate(interaction, {
+                ...response,
+                content: "Sorry, I don't recognize that gamedb help topic. Showing the gamedb help menu.",
+            });
+            return;
+        }
+        const embed = buildGamedbHelpEmbed(topic);
+        await safeUpdate(interaction, {
+            embeds: [embed],
+            components: buildGamedbHelpButtons(topic.id),
+        });
+    }
 };
 __decorate([
     Slash({ description: "Show help for all bot commands", name: "help" })
@@ -626,6 +706,9 @@ __decorate([
 __decorate([
     ButtonComponent({ id: /^profile-help-.+/ })
 ], BotHelp.prototype, "handleProfileHelpButton", null);
+__decorate([
+    ButtonComponent({ id: /^gamedb-help-.+/ })
+], BotHelp.prototype, "handleGamedbHelpButton", null);
 BotHelp = __decorate([
     Discord()
 ], BotHelp);

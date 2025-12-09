@@ -23,6 +23,7 @@ type HelpTopicId =
   | "rss"
   | "mp-info"
   | "profile"
+  | "gamedb"
   | "admin"
   | "mod"
   | "superadmin";
@@ -70,6 +71,16 @@ type ProfileHelpTopicId = "view" | "edit" | "search";
 
 type ProfileHelpTopic = {
   id: ProfileHelpTopicId;
+  label: string;
+  summary: string;
+  syntax: string;
+  notes?: string;
+};
+
+type GameDbHelpTopicId = "add" | "search" | "view";
+
+type GameDbHelpTopic = {
+  id: GameDbHelpTopicId;
   label: string;
   summary: string;
   syntax: string;
@@ -156,6 +167,12 @@ const HELP_TOPICS: HelpTopic[] = [
     summary:
       "View, edit, or search stored RPG_CLUB_USERS profiles (view/search are ephemeral by default).",
     syntax: "Use /profile help for subcommands (view/edit/search) and parameters.",
+  },
+  {
+    id: "gamedb",
+    label: "/gamedb",
+    summary: "Game database tools powered by IGDB search, import, and paging results.",
+    syntax: "Use /gamedb help for subcommands: add, search, view.",
   },
   {
     id: "rss",
@@ -363,6 +380,42 @@ function buildProfileHelpEmbed(topic: ProfileHelpTopic): EmbedBuilder {
   return embed;
 }
 
+function buildGamedbHelpButtons(activeId?: GameDbHelpTopicId): ActionRowBuilder<ButtonBuilder>[] {
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      GAMEDB_HELP_TOPICS.map((topic) =>
+        new ButtonBuilder()
+          .setCustomId(`gamedb-help-${topic.id}`)
+          .setLabel(topic.label)
+          .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary),
+      ),
+    ),
+  );
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("help-main")
+        .setLabel("Back to Help Main Menu")
+        .setStyle(ButtonStyle.Secondary),
+    ),
+  );
+  return rows;
+}
+
+function buildGamedbHelpEmbed(topic: GameDbHelpTopic): EmbedBuilder {
+  const embed = new EmbedBuilder()
+    .setTitle(`${topic.label} help`)
+    .setDescription(topic.summary)
+    .addFields({ name: "Syntax", value: topic.syntax });
+
+  if (topic.notes) {
+    embed.addFields({ name: "Notes", value: topic.notes });
+  }
+
+  return embed;
+}
+
 const NR_GOTM_HELP_TOPICS: NrGotmHelpTopic[] = [
   {
     id: "search",
@@ -529,6 +582,32 @@ const PROFILE_HELP_TOPICS: ProfileHelpTopic[] = [
   },
 ];
 
+const GAMEDB_HELP_TOPICS: GameDbHelpTopic[] = [
+  {
+    id: "add",
+    label: "/gamedb add",
+    summary: "Search IGDB and import a game into GameDB (open to all users).",
+    syntax: "Syntax: /gamedb add title:<string>",
+    notes:
+      "Returns a dropdown of IGDB matches; if only one result, it imports automatically. Duplicate titles already in GameDB show an 'already imported' message.",
+  },
+  {
+    id: "search",
+    label: "/gamedb search",
+    summary: "Search GameDB titles with paged dropdown navigation.",
+    syntax: "Syntax: /gamedb search [query:<string>]",
+    notes:
+      "Query is optional; omit to list all games. Results show a dropdown and Previous/Next buttons; selecting a game shows its profile.",
+  },
+  {
+    id: "view",
+    label: "/gamedb view",
+    summary: "View a GameDB entry by id.",
+    syntax: "Syntax: /gamedb view game_id:<number>",
+    notes: "Shows cover art, metadata, releases, and IGDB link when available.",
+  },
+];
+
 function buildRssHelpButtons(activeId?: RssHelpTopicId): ActionRowBuilder<ButtonBuilder>[] {
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   rows.push(
@@ -630,6 +709,17 @@ export function buildProfileHelpResponse(
   return { embeds: [embed], components };
 }
 
+export function buildGamedbHelpResponse(
+  activeTopicId?: GameDbHelpTopicId,
+): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
+  const embed = new EmbedBuilder()
+    .setTitle("/gamedb commands")
+    .setDescription("Choose a GameDB subcommand button to view details.");
+
+  const components = buildGamedbHelpButtons(activeTopicId);
+  return { embeds: [embed], components };
+}
+
 function chunkArray<T>(items: T[], chunkSize: number): T[][] {
   const chunks: T[][] = [];
   let current: T[] = [];
@@ -724,6 +814,12 @@ export class BotHelp {
 
     if (topicId === "profile") {
       const response = buildProfileHelpResponse();
+      await safeUpdate(interaction, response);
+      return;
+    }
+
+    if (topicId === "gamedb") {
+      const response = buildGamedbHelpResponse();
       await safeUpdate(interaction, response);
       return;
     }
@@ -854,6 +950,27 @@ export class BotHelp {
     await safeUpdate(interaction, {
       embeds: [embed],
       components: buildProfileHelpButtons(topic.id),
+    });
+  }
+
+  @ButtonComponent({ id: /^gamedb-help-.+/ })
+  async handleGamedbHelpButton(interaction: ButtonInteraction): Promise<void> {
+    const topicId = interaction.customId.replace("gamedb-help-", "") as GameDbHelpTopicId;
+    const topic = GAMEDB_HELP_TOPICS.find((entry) => entry.id === topicId);
+
+    if (!topic) {
+      const response = buildGamedbHelpResponse();
+      await safeUpdate(interaction, {
+        ...response,
+        content: "Sorry, I don't recognize that gamedb help topic. Showing the gamedb help menu.",
+      });
+      return;
+    }
+
+    const embed = buildGamedbHelpEmbed(topic);
+    await safeUpdate(interaction, {
+      embeds: [embed],
+      components: buildGamedbHelpButtons(topic.id),
     });
   }
 }
