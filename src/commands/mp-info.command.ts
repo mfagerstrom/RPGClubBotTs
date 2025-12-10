@@ -189,7 +189,7 @@ export class MultiplayerInfoCommand {
 
     try {
       const user = await interaction.client.users.fetch(userId);
-      const result = await buildProfileViewPayload(user);
+      const result = await buildProfileViewPayload(user, interaction.guildId ?? undefined);
 
       if (result.errorMessage) {
         await safeReply(interaction, {

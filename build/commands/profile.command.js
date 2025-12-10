@@ -81,7 +81,7 @@ function formatDiscordTimestamp(value) {
     const seconds = Math.floor(value.getTime() / 1000);
     return `<t:${seconds}:F>`;
 }
-function buildProfileFields(record, nickHistory, nowPlaying) {
+function buildProfileFields(record, nickHistory, nowPlaying, guildId) {
     if (!record) {
         return [];
     }
@@ -139,8 +139,8 @@ function buildProfileFields(record, nickHistory, nowPlaying) {
     }
     if (nowPlaying.length) {
         const lines = nowPlaying.map((entry) => {
-            if (entry.threadId) {
-                return `[${entry.title}](<#${entry.threadId}>)`;
+            if (entry.threadId && guildId) {
+                return `[${entry.title}](https://discord.com/channels/${guildId}/${entry.threadId})`;
             }
             return entry.title;
         });
@@ -201,7 +201,7 @@ function buildBaseMemberRecord(user) {
         profileImageAt: null,
     };
 }
-export async function buildProfileViewPayload(target) {
+export async function buildProfileViewPayload(target, guildId) {
     try {
         let record = await Member.getByUserId(target.id);
         const nowPlaying = await Member.getNowPlaying(target.id);
@@ -245,7 +245,7 @@ export async function buildProfileViewPayload(target) {
             if (nickHistory.length >= 5)
                 break;
         }
-        const fields = buildProfileFields(record, nickHistory, nowPlaying).map((f) => ({
+        const fields = buildProfileFields(record, nickHistory, nowPlaying, guildId).map((f) => ({
             name: f.label,
             value: f.value,
             inline: f.inline ?? false,
@@ -278,7 +278,7 @@ let ProfileCommand = class ProfileCommand {
         const target = member ?? interaction.user;
         const ephemeral = !showInChat;
         await safeDeferReply(interaction, { ephemeral });
-        const result = await buildProfileViewPayload(target);
+        const result = await buildProfileViewPayload(target, interaction.guildId ?? undefined);
         if (result.errorMessage) {
             await safeReply(interaction, {
                 content: result.errorMessage,
@@ -468,7 +468,7 @@ let ProfileCommand = class ProfileCommand {
         await safeDeferReply(interaction, { ephemeral: true });
         try {
             const user = await interaction.client.users.fetch(userId);
-            const result = await buildProfileViewPayload(user);
+            const result = await buildProfileViewPayload(user, interaction.guildId ?? undefined);
             if (result.errorMessage) {
                 await safeReply(interaction, {
                     content: result.errorMessage,

@@ -95,6 +95,7 @@ function buildProfileFields(
   record: Awaited<ReturnType<typeof Member.getByUserId>>,
   nickHistory: string[],
   nowPlaying: { title: string; threadId: string | null }[],
+  guildId?: string,
 ): ProfileField[] {
   if (!record) {
     return [];
@@ -166,8 +167,8 @@ function buildProfileFields(
 
   if (nowPlaying.length) {
     const lines = nowPlaying.map((entry) => {
-      if (entry.threadId) {
-        return `[${entry.title}](<#${entry.threadId}>)`;
+      if (entry.threadId && guildId) {
+        return `[${entry.title}](https://discord.com/channels/${guildId}/${entry.threadId})`;
       }
       return entry.title;
     });
@@ -232,6 +233,7 @@ function buildBaseMemberRecord(user: User): IMemberRecord {
 
 export async function buildProfileViewPayload(
   target: User,
+  guildId?: string,
 ): Promise<ProfileViewPayload> {
   try {
     let record = await Member.getByUserId(target.id);
@@ -276,7 +278,7 @@ export async function buildProfileViewPayload(
       if (nickHistory.length >= 5) break;
     }
 
-    const fields = buildProfileFields(record, nickHistory, nowPlaying).map((f) => ({
+    const fields = buildProfileFields(record, nickHistory, nowPlaying, guildId).map((f) => ({
       name: f.label,
       value: f.value,
       inline: f.inline ?? false,
@@ -331,7 +333,7 @@ export class ProfileCommand {
     const ephemeral = !showInChat;
     await safeDeferReply(interaction, { ephemeral });
 
-    const result = await buildProfileViewPayload(target);
+    const result = await buildProfileViewPayload(target, interaction.guildId ?? undefined);
 
     if (result.errorMessage) {
       await safeReply(interaction, {
@@ -562,7 +564,7 @@ export class ProfileCommand {
 
     try {
       const user = await interaction.client.users.fetch(userId);
-      const result = await buildProfileViewPayload(user);
+      const result = await buildProfileViewPayload(user, interaction.guildId ?? undefined);
 
       if (result.errorMessage) {
         await safeReply(interaction, {

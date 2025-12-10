@@ -123,7 +123,7 @@ let MultiplayerInfoCommand = class MultiplayerInfoCommand {
         await safeDeferReply(interaction, { ephemeral: true });
         try {
             const user = await interaction.client.users.fetch(userId);
-            const result = await buildProfileViewPayload(user);
+            const result = await buildProfileViewPayload(user, interaction.guildId ?? undefined);
             if (result.errorMessage) {
                 await safeReply(interaction, {
                     content: result.errorMessage,
