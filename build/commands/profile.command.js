@@ -12,6 +12,7 @@ import { Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption } from "di
 import axios from "axios";
 import Member from "../classes/Member.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+const MAX_NOW_PLAYING = 10;
 function parseDateInput(value) {
     if (!value)
         return null;
@@ -79,7 +80,7 @@ function formatDiscordTimestamp(value) {
     const seconds = Math.floor(value.getTime() / 1000);
     return `<t:${seconds}:F>`;
 }
-function buildProfileFields(record, nickHistory) {
+function buildProfileFields(record, nickHistory, nowPlaying) {
     if (!record) {
         return [];
     }
@@ -134,6 +135,12 @@ function buildProfileFields(record, nickHistory) {
     }
     if (record.nswFriendCode) {
         fields.push({ label: "Switch", value: record.nswFriendCode, inline: true });
+    }
+    if (nowPlaying.length) {
+        fields.push({
+            label: "Now Playing",
+            value: nowPlaying.join("\n"),
+        });
     }
     return fields;
 }
@@ -190,6 +197,7 @@ function buildBaseMemberRecord(user) {
 export async function buildProfileViewPayload(target) {
     try {
         let record = await Member.getByUserId(target.id);
+        const nowPlaying = await Member.getNowPlaying(target.id);
         const nickHistoryEntries = await Member.getRecentNickHistory(target.id, 6);
         const avatarUrl = target.displayAvatarURL({
             extension: "png",
@@ -230,7 +238,7 @@ export async function buildProfileViewPayload(target) {
             if (nickHistory.length >= 5)
                 break;
         }
-        const fields = buildProfileFields(record, nickHistory).map((f) => ({
+        const fields = buildProfileFields(record, nickHistory, nowPlaying).map((f) => ({
             name: f.label,
             value: f.value,
             inline: f.inline ?? false,
@@ -282,6 +290,49 @@ let ProfileCommand = class ProfileCommand {
             ...result.payload,
             ephemeral,
         });
+    }
+    async addNowPlaying(title, interaction) {
+        await safeDeferReply(interaction, { ephemeral: true });
+        try {
+            await Member.addNowPlaying(interaction.user.id, title);
+            const list = await Member.getNowPlaying(interaction.user.id);
+            await safeReply(interaction, {
+                content: `Added **${title.trim()}** to your Now Playing list (${list.length}/${MAX_NOW_PLAYING}).`,
+                ephemeral: true,
+            });
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeReply(interaction, {
+                content: `Could not add to Now Playing: ${msg}`,
+                ephemeral: true,
+            });
+        }
+    }
+    async removeNowPlaying(title, interaction) {
+        await safeDeferReply(interaction, { ephemeral: true });
+        try {
+            const removed = await Member.removeNowPlaying(interaction.user.id, title);
+            if (!removed) {
+                await safeReply(interaction, {
+                    content: `No Now Playing entry found matching "${title}".`,
+                    ephemeral: true,
+                });
+                return;
+            }
+            const list = await Member.getNowPlaying(interaction.user.id);
+            await safeReply(interaction, {
+                content: `Removed **${title.trim()}** from your Now Playing list (${list.length}/${MAX_NOW_PLAYING}).`,
+                ephemeral: true,
+            });
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeReply(interaction, {
+                content: `Could not remove from Now Playing: ${msg}`,
+                ephemeral: true,
+            });
+        }
     }
     async handleProfileSearchSelect(interaction) {
         const userId = interaction.values?.[0];
@@ -506,6 +557,26 @@ __decorate([
         type: ApplicationCommandOptionType.Boolean,
     }))
 ], ProfileCommand.prototype, "profileView", null);
+__decorate([
+    Slash({ description: "Add a game to your Now Playing list", name: "nowplaying-add" }),
+    SlashGroup("profile"),
+    __param(0, SlashOption({
+        description: "Title of the game you are currently playing",
+        name: "title",
+        required: true,
+        type: ApplicationCommandOptionType.String,
+    }))
+], ProfileCommand.prototype, "addNowPlaying", null);
+__decorate([
+    Slash({ description: "Remove a game from your Now Playing list", name: "nowplaying-remove" }),
+    SlashGroup("profile"),
+    __param(0, SlashOption({
+        description: "Title of the game to remove",
+        name: "title",
+        required: true,
+        type: ApplicationCommandOptionType.String,
+    }))
+], ProfileCommand.prototype, "removeNowPlaying", null);
 __decorate([
     SelectMenuComponent({ id: /^profile-search-select-\d+$/ })
 ], ProfileCommand.prototype, "handleProfileSearchSelect", null);

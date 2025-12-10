@@ -85,6 +85,7 @@ export interface IMemberNickHistory {
 }
 
 type Connection = oracledb.Connection;
+const MAX_NOW_PLAYING = 10;
 
 function buildParams(record: IMemberRecord) {
   return {
@@ -124,6 +125,79 @@ export default class Member {
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       console.error(`[Member] Failed to update last seen for ${userId}: ${msg}`);
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async getNowPlaying(userId: string): Promise<string[]> {
+    const connection = await getOraclePool().getConnection();
+    try {
+      const res = await connection.execute<{ TITLE: string }>(
+        `SELECT TITLE
+           FROM USER_NOW_PLAYING
+          WHERE USER_ID = :userId
+          ORDER BY ADDED_AT DESC, ENTRY_ID DESC`,
+        { userId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+      return (res.rows ?? []).map((r) => r.TITLE).slice(0, MAX_NOW_PLAYING);
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async addNowPlaying(userId: string, title: string): Promise<void> {
+    const connection = await getOraclePool().getConnection();
+    const cleaned = title.trim();
+    if (!cleaned) {
+      throw new Error("Title cannot be empty.");
+    }
+    const truncated = cleaned.slice(0, 200);
+
+    try {
+      const countRes = await connection.execute<{ CNT: number }>(
+        `SELECT COUNT(*) AS CNT FROM USER_NOW_PLAYING WHERE USER_ID = :userId`,
+        { userId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+      const count = Number((countRes.rows ?? [])[0]?.CNT ?? 0);
+      if (count >= MAX_NOW_PLAYING) {
+        throw new Error(`You can only track up to ${MAX_NOW_PLAYING} Now Playing titles.`);
+      }
+
+      await connection.execute(
+        `INSERT INTO USER_NOW_PLAYING (USER_ID, TITLE) VALUES (:userId, :title)`,
+        { userId, title: truncated },
+        { autoCommit: true },
+      );
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      if (/unique/i.test(msg) || /UQ_USER_NOW_PLAYING/i.test(msg)) {
+        throw new Error("That title is already in your Now Playing list.");
+      }
+      throw err;
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async removeNowPlaying(userId: string, title: string): Promise<boolean> {
+    const connection = await getOraclePool().getConnection();
+    const cleaned = title.trim();
+    if (!cleaned) {
+      throw new Error("Title cannot be empty.");
+    }
+    const truncated = cleaned.slice(0, 200);
+
+    try {
+      const res = await connection.execute(
+        `DELETE FROM USER_NOW_PLAYING WHERE USER_ID = :userId AND UPPER(TITLE) = UPPER(:title)`,
+        { userId, title: truncated },
+        { autoCommit: true },
+      );
+      const rows = (res as any).rowsAffected ?? 0;
+      return rows > 0;
     } finally {
       await connection.close();
     }

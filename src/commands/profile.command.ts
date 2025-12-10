@@ -18,6 +18,8 @@ import Member, {
 } from "../classes/Member.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 
+const MAX_NOW_PLAYING = 10;
+
 type ProfileField = {
   label: string;
   value: string;
@@ -87,6 +89,7 @@ function formatDiscordTimestamp(value: Date | null): string {
 function buildProfileFields(
   record: Awaited<ReturnType<typeof Member.getByUserId>>,
   nickHistory: string[],
+  nowPlaying: string[],
 ): ProfileField[] {
   if (!record) {
     return [];
@@ -156,6 +159,13 @@ function buildProfileFields(
     fields.push({ label: "Switch", value: record.nswFriendCode, inline: true });
   }
 
+  if (nowPlaying.length) {
+    fields.push({
+      label: "Now Playing",
+      value: nowPlaying.join("\n"),
+    });
+  }
+
   return fields;
 }
 
@@ -214,6 +224,7 @@ export async function buildProfileViewPayload(
 ): Promise<ProfileViewPayload> {
   try {
     let record = await Member.getByUserId(target.id);
+    const nowPlaying = await Member.getNowPlaying(target.id);
     const nickHistoryEntries = await Member.getRecentNickHistory(target.id, 6);
     const avatarUrl = target.displayAvatarURL({
       extension: "png",
@@ -254,7 +265,7 @@ export async function buildProfileViewPayload(
       if (nickHistory.length >= 5) break;
     }
 
-    const fields = buildProfileFields(record, nickHistory).map((f) => ({
+    const fields = buildProfileFields(record, nickHistory, nowPlaying).map((f) => ({
       name: f.label,
       value: f.value,
       inline: f.inline ?? false,
@@ -332,6 +343,71 @@ export class ProfileCommand {
       ...result.payload,
       ephemeral,
     });
+  }
+
+  @Slash({ description: "Add a game to your Now Playing list", name: "nowplaying-add" })
+  @SlashGroup("profile")
+  async addNowPlaying(
+    @SlashOption({
+      description: "Title of the game you are currently playing",
+      name: "title",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    title: string,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction, { ephemeral: true });
+    try {
+      await Member.addNowPlaying(interaction.user.id, title);
+      const list = await Member.getNowPlaying(interaction.user.id);
+      await safeReply(interaction, {
+        content: `Added **${title.trim()}** to your Now Playing list (${list.length}/${MAX_NOW_PLAYING}).`,
+        ephemeral: true,
+      });
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      await safeReply(interaction, {
+        content: `Could not add to Now Playing: ${msg}`,
+        ephemeral: true,
+      });
+    }
+  }
+
+  @Slash({ description: "Remove a game from your Now Playing list", name: "nowplaying-remove" })
+  @SlashGroup("profile")
+  async removeNowPlaying(
+    @SlashOption({
+      description: "Title of the game to remove",
+      name: "title",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    title: string,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction, { ephemeral: true });
+    try {
+      const removed = await Member.removeNowPlaying(interaction.user.id, title);
+      if (!removed) {
+        await safeReply(interaction, {
+          content: `No Now Playing entry found matching "${title}".`,
+          ephemeral: true,
+        });
+        return;
+      }
+      const list = await Member.getNowPlaying(interaction.user.id);
+      await safeReply(interaction, {
+        content: `Removed **${title.trim()}** from your Now Playing list (${list.length}/${MAX_NOW_PLAYING}).`,
+        ephemeral: true,
+      });
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      await safeReply(interaction, {
+        content: `Could not remove from Now Playing: ${msg}`,
+        ephemeral: true,
+      });
+    }
   }
 
   @SelectMenuComponent({ id: /^profile-search-select-\d+$/ })
