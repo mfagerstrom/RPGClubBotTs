@@ -57,18 +57,22 @@ export interface IGameSearchResult {
 }
 
 class IgdbService {
-  private clientId: string;
-  private clientSecret: string;
   private accessToken: string | null = null;
   private tokenExpiry: number = 0; // Unix timestamp
 
   constructor() {
-    this.clientId = process.env.IGDB_CLIENT_ID || "";
-    this.clientSecret = process.env.IGDB_CLIENT_SECRET || "";
-
-    if (!this.clientId || !this.clientSecret) {
+    // Config is read lazily via getters to allow dotenv to populate env before use
+    if (!process.env.IGDB_CLIENT_ID || !process.env.IGDB_CLIENT_SECRET) {
       console.error("IGDB_CLIENT_ID or IGDB_CLIENT_SECRET not set in environment variables.");
     }
+  }
+
+  private get clientId(): string {
+    return process.env.IGDB_CLIENT_ID || "";
+  }
+
+  private get clientSecret(): string {
+    return process.env.IGDB_CLIENT_SECRET || "";
   }
 
   private async getAccessToken(): Promise<string> {

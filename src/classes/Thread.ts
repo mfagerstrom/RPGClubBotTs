@@ -1,3 +1,4 @@
+import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
 
 type NullableDate = Date | null;
@@ -91,6 +92,23 @@ export async function setThreadSkipLinking(threadId: string, skip: boolean): Pro
       { skip: toYN(skip), threadId },
       { autoCommit: true },
     );
+  } finally {
+    await connection.close();
+  }
+}
+
+export async function getThreadSkipLinking(threadId: string): Promise<boolean> {
+  const pool = getOraclePool();
+  const connection = await pool.getConnection();
+  try {
+    const res = await connection.execute<{ SKIP_LINKING: string }>(
+      `SELECT SKIP_LINKING FROM THREADS WHERE THREAD_ID = :threadId`,
+      { threadId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+    );
+    const row = (res.rows ?? [])[0] as any;
+    const flag = row?.SKIP_LINKING ?? "N";
+    return String(flag).toUpperCase() === "Y";
   } finally {
     await connection.close();
   }

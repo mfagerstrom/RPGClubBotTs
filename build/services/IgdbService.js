@@ -1,15 +1,18 @@
 import axios from "axios";
 class IgdbService {
-    clientId;
-    clientSecret;
     accessToken = null;
     tokenExpiry = 0; // Unix timestamp
     constructor() {
-        this.clientId = process.env.IGDB_CLIENT_ID || "";
-        this.clientSecret = process.env.IGDB_CLIENT_SECRET || "";
-        if (!this.clientId || !this.clientSecret) {
+        // Config is read lazily via getters to allow dotenv to populate env before use
+        if (!process.env.IGDB_CLIENT_ID || !process.env.IGDB_CLIENT_SECRET) {
             console.error("IGDB_CLIENT_ID or IGDB_CLIENT_SECRET not set in environment variables.");
         }
+    }
+    get clientId() {
+        return process.env.IGDB_CLIENT_ID || "";
+    }
+    get clientSecret() {
+        return process.env.IGDB_CLIENT_SECRET || "";
     }
     async getAccessToken() {
         if (this.accessToken && Date.now() < this.tokenExpiry) {

@@ -1,3 +1,4 @@
+import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
 function toYN(flag) {
     return flag ? "Y" : "N";
@@ -67,6 +68,19 @@ export async function setThreadSkipLinking(threadId, skip) {
       SET SKIP_LINKING = :skip
       WHERE THREAD_ID = :threadId
       `, { skip: toYN(skip), threadId }, { autoCommit: true });
+    }
+    finally {
+        await connection.close();
+    }
+}
+export async function getThreadSkipLinking(threadId) {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+    try {
+        const res = await connection.execute(`SELECT SKIP_LINKING FROM THREADS WHERE THREAD_ID = :threadId`, { threadId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const row = (res.rows ?? [])[0];
+        const flag = row?.SKIP_LINKING ?? "N";
+        return String(flag).toUpperCase() === "Y";
     }
     finally {
         await connection.close();

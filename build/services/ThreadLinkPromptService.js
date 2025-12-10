@@ -1,10 +1,13 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, } from "discord.js";
-import { setThreadGameLink, setThreadSkipLinking } from "../classes/Thread.js";
+import { setThreadGameLink, setThreadSkipLinking, getThreadSkipLinking, } from "../classes/Thread.js";
 import Game from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
 const NOW_PLAYING_FORUM_ID = "1059875931356938240";
 const PROMPT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24h
 const promptCache = new Map();
+function hasIgdbConfig() {
+    return Boolean(process.env.IGDB_CLIENT_ID && process.env.IGDB_CLIENT_SECRET);
+}
 function shouldPrompt(threadId) {
     const last = promptCache.get(threadId) ?? 0;
     return Date.now() - last > PROMPT_COOLDOWN_MS;
@@ -31,6 +34,11 @@ function buildButtons(threadId) {
         .setStyle(ButtonStyle.Secondary));
 }
 async function promptThread(thread) {
+    if (!hasIgdbConfig())
+        return; // Don't prompt when IGDB is not configured
+    const skip = await getThreadSkipLinking(thread.id).catch(() => false);
+    if (skip)
+        return;
     if (!shouldPrompt(thread.id))
         return;
     markPrompted(thread.id);
@@ -44,65 +52,66 @@ async function promptThread(thread) {
 async function handleLinkButton(interaction, threadId) {
     if (!interaction.guild || !interaction.channel)
         return;
-    // Ask for game title
-    await interaction.deferReply({ ephemeral: true });
-    await interaction.followUp({
-        content: "Please enter the game title to search (reply in this channel). Waiting 60s...",
-        ephemeral: true,
-    });
-    const channel = interaction.channel;
-    let title = null;
-    try {
-        const collected = await channel.awaitMessages({
-            filter: (m) => m.author?.id === interaction.user.id,
-            max: 1,
-            time: 60_000,
+    if (!hasIgdbConfig()) {
+        await interaction.reply({
+            content: "IGDB service is not configured. Please set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET in the environment.",
+            ephemeral: true,
         });
-        title = collected.first()?.content?.trim() ?? null;
-    }
-    catch {
-        // ignore
-    }
-    if (!title) {
-        await interaction.followUp({ content: "No title received. Cancelled.", ephemeral: true });
         return;
     }
-    // Use existing IGDB search
+    const threadName = interaction.channel?.name ?? "Unknown Thread";
+    const title = threadName.split("(")[0].trim() || threadName;
+    await interaction.deferReply({ ephemeral: false });
     try {
-        const searchRes = await igdbService.searchGames(title, 5, false);
-        const results = searchRes.results;
-        if (!results.length) {
-            await interaction.followUp({ content: "No results found.", ephemeral: true });
-            return;
-        }
-        // If one result, auto-link; otherwise pick first for now (keep simple)
-        const chosen = results[0];
-        // Ensure game exists in GameDB or import
-        let gameId = null;
-        const existing = await Game.getGameByIgdbId(chosen.id);
-        if (existing) {
-            gameId = existing.id;
-        }
-        else {
-            const details = await igdbService.getGameDetails(chosen.id);
-            if (!details) {
-                await interaction.followUp({ content: "Failed to load game details from IGDB.", ephemeral: true });
+        // First try existing GameDB by title
+        const localMatches = (await Game.searchGames(title)).filter((g) => g.title.toLowerCase() === title.toLowerCase());
+        let gameId = localMatches[0]?.id ?? null;
+        let chosenName = localMatches[0]?.title ?? null;
+        if (!gameId) {
+            // Fallback to IGDB search
+            const searchRes = await igdbService.searchGames(title, 5, false);
+            const results = searchRes.results;
+            if (!results.length) {
+                await interaction.followUp({
+                    content: `No GameDB/IGDB results found for "${title}". Tagging @admin to review.`,
+                    ephemeral: false,
+                });
                 return;
             }
-            const newGame = await Game.createGame(details.name, details.summary ?? "", null, details.id, details.slug ?? null, details.total_rating ?? null, details.url ?? null);
-            gameId = newGame.id;
-            await Game.saveFullGameMetadata(gameId, details);
+            const chosen = results[0];
+            chosenName = chosen.name;
+            const existing = await Game.getGameByIgdbId(chosen.id);
+            if (existing) {
+                gameId = existing.id;
+            }
+            else {
+                const details = await igdbService.getGameDetails(chosen.id);
+                if (!details) {
+                    await interaction.followUp({ content: "Failed to load game details from IGDB.", ephemeral: false });
+                    return;
+                }
+                const newGame = await Game.createGame(details.name, details.summary ?? "", null, details.id, details.slug ?? null, details.total_rating ?? null, details.url ?? null);
+                gameId = newGame.id;
+                await Game.saveFullGameMetadata(gameId, details);
+            }
         }
         await setThreadGameLink(threadId, gameId);
         await interaction.followUp({
-            content: `Linked this thread to GameDB #${gameId} (${chosen.name}).\n` +
+            content: `Linked this thread to GameDB #${gameId}${chosenName ? ` (${chosenName})` : ""}.\n` +
                 "Thank you! If the wrong game was linked by mistake, please contact @merph.",
-            ephemeral: true,
+            ephemeral: false,
         });
+        // Delete the original prompt message if we can
+        try {
+            await interaction.message.delete().catch(() => { });
+        }
+        catch {
+            // ignore
+        }
     }
     catch (err) {
         const msg = err?.message ?? String(err);
-        await interaction.followUp({ content: `Failed to link game: ${msg}`, ephemeral: true });
+        await interaction.followUp({ content: `Failed to link game: ${msg}`, ephemeral: false });
     }
 }
 async function handleSkipButton(interaction, threadId) {
@@ -119,6 +128,9 @@ async function handleSkipButton(interaction, threadId) {
     }
 }
 export function startThreadLinkPromptService(client) {
+    if (!hasIgdbConfig()) {
+        console.warn("[ThreadLinkPrompt] IGDB_CLIENT_ID/SECRET not set; skipping thread link prompts.");
+    }
     client.on("threadCreate", async (thread) => {
         if (thread.parentId !== NOW_PLAYING_FORUM_ID)
             return;
