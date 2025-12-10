@@ -106,7 +106,7 @@ export class GameDb {
     }
 
     for (const t of allTitles) {
-      await this.processTitle(interaction, t, includeRaw ?? true);
+      await this.processTitle(interaction, t, includeRaw ?? false);
     }
   }
 
@@ -138,7 +138,7 @@ export class GameDb {
       if (!results.length) {
         await safeReply(interaction, {
           content:
-            `No games found on IGDB matching "${query}". Please use /gamedb add to import it (tag @merph518 if you need help).`,
+            `No games found on IGDB matching "${query}".`,
           __forceFollowUp: true,
         });
         return;

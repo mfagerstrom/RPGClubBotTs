@@ -46,7 +46,7 @@ let GameDb = class GameDb {
             return;
         }
         for (const t of allTitles) {
-            await this.processTitle(interaction, t, includeRaw ?? true);
+            await this.processTitle(interaction, t, includeRaw ?? false);
         }
     }
     async handleNoResults(interaction, query) {
@@ -70,7 +70,7 @@ let GameDb = class GameDb {
             const results = searchRes.results;
             if (!results.length) {
                 await safeReply(interaction, {
-                    content: `No games found on IGDB matching "${query}". Please use /gamedb add to import it (tag @merph518 if you need help).`,
+                    content: `No games found on IGDB matching "${query}".`,
                     __forceFollowUp: true,
                 });
                 return;
