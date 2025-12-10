@@ -1,36 +1,27 @@
-## build runner
-FROM node:lts-alpine as build-runner
-
-# Set temp directory
-WORKDIR /tmp/app
-
-# Move package.json
-COPY package.json .
-
-# Install dependencies
-RUN npm install
-
-# Move source files
-COPY src ./src
-COPY tsconfig.json   .
-
-# Build project
-RUN npm run build
-
-## production runner
-FROM node:lts-alpine as prod-runner
-
-# Set work directory
+## Builder stage: install deps + compile TypeScript
+FROM node:20-bullseye-slim AS build-runner
 WORKDIR /app
 
-# Copy package.json from build-runner
-COPY --from=build-runner /tmp/app/package.json /app/package.json
+# Install dependencies (uses lockfile for reproducibility)
+COPY package*.json ./
+RUN npm ci
 
-# Install dependencies
-RUN npm install --omit=dev
+# Copy source and build
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
 
-# Move build files
-COPY --from=build-runner /tmp/app/build /app/build
+## Runtime stage: smaller image with only production deps + compiled output
+FROM node:20-bullseye-slim AS prod-runner
+WORKDIR /app
+ENV NODE_ENV=production
 
-# Start bot
-CMD [ "npm", "run", "start" ]
+# Install production dependencies
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+# Copy compiled code
+COPY --from=build-runner /app/build ./build
+
+# Start bot (expects env vars like BOT_TOKEN provided at runtime)
+CMD ["node", "build/RPGClubBotTS.js"]

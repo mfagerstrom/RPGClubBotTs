@@ -382,7 +382,7 @@ let GameDb = class GameDb {
         await this.showGameProfile(interaction, gameId);
     }
     async showGameProfile(interaction, gameId) {
-        const profile = await this.buildGameProfile(gameId);
+        const profile = await this.buildGameProfile(gameId, interaction);
         if (!profile) {
             await safeReply(interaction, {
                 content: `No game found with ID ${gameId}.`,
@@ -391,11 +391,11 @@ let GameDb = class GameDb {
             return;
         }
         await safeReply(interaction, {
-            embeds: [profile.embed],
+            embeds: profile.embeds,
             files: profile.files,
         });
     }
-    async buildGameProfile(gameId) {
+    async buildGameProfile(gameId, interaction) {
         try {
             const game = await Game.getGameById(gameId);
             if (!game) {
@@ -407,14 +407,55 @@ let GameDb = class GameDb {
             const associations = await Game.getGameAssociations(gameId);
             const platformMap = new Map(platforms.map((p) => [p.id, p.name]));
             const regionMap = new Map(regions.map((r) => [r.id, r.name]));
+            const description = game.description || "No description available.";
             const embed = new EmbedBuilder()
                 .setTitle(`${game.title} (GameDB #${game.id})`)
-                .setDescription(game.description || "No description available.")
                 .setColor(0x0099ff);
-            if (game.imageData) {
-                embed.setImage("attachment://game_image.png");
+            if (game.igdbUrl) {
+                embed.setURL(game.igdbUrl);
             }
-            this.appendAssociationFields(embed, associations);
+            // Keep the win/round info up top in the single embed
+            if (associations.gotmWins.length) {
+                const lines = associations.gotmWins.map((win) => `Round ${win.round}`);
+                embed.addFields({ name: "GOTM Round(s)", value: lines.join("\n"), inline: true });
+            }
+            if (associations.nrGotmWins.length) {
+                const lines = associations.nrGotmWins.map((win) => `Round ${win.round}`);
+                embed.addFields({ name: "NR-GOTM Round(s)", value: lines.join("\n"), inline: true });
+            }
+            // Thread / Reddit links as their own fields
+            const threadId = associations.gotmWins.find((w) => w.threadId)?.threadId ??
+                associations.nrGotmWins.find((w) => w.threadId)?.threadId ??
+                null;
+            if (threadId) {
+                const threadLabel = await this.buildThreadLink(threadId, interaction?.guildId ?? null, interaction?.client);
+                embed.addFields({
+                    name: "Game Discussion Thread",
+                    value: threadLabel ?? `[Thread Link](https://discord.com/channels/@me/${threadId})`,
+                    inline: true,
+                });
+            }
+            const redditUrl = associations.gotmWins.find((w) => w.redditUrl)?.redditUrl ??
+                associations.nrGotmWins.find((w) => w.redditUrl)?.redditUrl ??
+                null;
+            if (redditUrl) {
+                embed.addFields({ name: "Reddit Discussion Thread", value: `[Reddit Link](${redditUrl})`, inline: true });
+            }
+            // Remaining association info (nominations) goes here before description
+            this.appendAssociationFields(embed, {
+                ...associations,
+                gotmWins: [],
+                nrGotmWins: [],
+            });
+            // Description comes after rounds/links/nominations to keep those at the top
+            const descChunks = this.chunkText(description, 1024);
+            descChunks.forEach((chunk, idx) => {
+                embed.addFields({
+                    name: idx === 0 ? "Description" : `Description (cont. ${idx + 1})`,
+                    value: chunk,
+                    inline: false,
+                });
+            });
             if (releases.length > 0) {
                 const releaseField = releases
                     .map((r) => {
@@ -474,16 +515,35 @@ let GameDb = class GameDb {
                     inline: true,
                 });
             }
-            if (game.igdbUrl) {
-                embed.setURL(game.igdbUrl);
-            }
             const files = game.imageData
                 ? [{ attachment: game.imageData, name: "game_image.png" }]
                 : [];
-            return { embed, files };
+            return { embeds: [embed], files };
         }
         catch (error) {
             console.error("Failed to build game profile:", error);
+            return null;
+        }
+    }
+    chunkText(text, size) {
+        if (!text)
+            return ["No description available."];
+        const chunks = [];
+        for (let i = 0; i < text.length; i += size) {
+            chunks.push(text.slice(i, i + size));
+        }
+        return chunks;
+    }
+    async buildThreadLink(threadId, guildId, client) {
+        if (!client || !guildId) {
+            return null;
+        }
+        try {
+            const channel = await client.channels.fetch(threadId);
+            const name = channel?.name || "Thread Link";
+            return `[${name}](https://discord.com/channels/${guildId}/${threadId})`;
+        }
+        catch {
             return null;
         }
     }
@@ -522,7 +582,7 @@ let GameDb = class GameDb {
                 const reddit = win.redditUrl ? ` — [Reddit](${win.redditUrl})` : "";
                 return `Round ${win.round}${thread}${reddit}`;
             });
-            embed.addFields({ name: "GOTM Round(s)", value: lines.join("\n"), inline: false });
+            embed.addFields({ name: "GOTM Round(s)", value: lines.join("\n"), inline: true });
         }
         if (assoc.nrGotmWins.length) {
             const lines = assoc.nrGotmWins.map((win) => {
@@ -530,15 +590,15 @@ let GameDb = class GameDb {
                 const reddit = win.redditUrl ? ` — [Reddit](${win.redditUrl})` : "";
                 return `Round ${win.round}${thread}${reddit}`;
             });
-            embed.addFields({ name: "NR-GOTM Round(s)", value: lines.join("\n"), inline: false });
+            embed.addFields({ name: "NR-GOTM Round(s)", value: lines.join("\n"), inline: true });
         }
         if (assoc.gotmNominations.length) {
             const lines = assoc.gotmNominations.map((nom) => `Round ${nom.round} — ${nom.username} (<@${nom.userId}>)`);
-            embed.addFields({ name: "GOTM Nominations", value: lines.join("\n"), inline: false });
+            embed.addFields({ name: "GOTM Nominations", value: lines.join("\n"), inline: true });
         }
         if (assoc.nrGotmNominations.length) {
             const lines = assoc.nrGotmNominations.map((nom) => `Round ${nom.round} — ${nom.username} (<@${nom.userId}>)`);
-            embed.addFields({ name: "NR-GOTM Nominations", value: lines.join("\n"), inline: false });
+            embed.addFields({ name: "NR-GOTM Nominations", value: lines.join("\n"), inline: true });
         }
     }
     async search(query, interaction) {
@@ -610,7 +670,7 @@ let GameDb = class GameDb {
         catch {
             // ignore
         }
-        const profile = await this.buildGameProfile(gameId);
+        const profile = await this.buildGameProfile(gameId, interaction);
         if (!profile) {
             await interaction
                 .followUp({
@@ -623,7 +683,7 @@ let GameDb = class GameDb {
         const response = this.buildSearchResponse(sessionId, session, page);
         try {
             await interaction.editReply({
-                embeds: [profile.embed],
+                embeds: profile.embeds,
                 files: profile.files,
                 components: response.components,
                 content: null,
