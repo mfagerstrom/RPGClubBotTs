@@ -9,10 +9,10 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 import { ApplicationCommandOptionType, EmbedBuilder, StringSelectMenuBuilder, ActionRowBuilder, ComponentType, ButtonBuilder, ButtonStyle, AttachmentBuilder, escapeCodeBlock, } from "discord.js";
 import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption, } from "discordx";
-import { safeDeferReply, safeReply } from "../../src/functions/InteractionUtils.js";
-import Game from "../../src/classes/Game.js";
+import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import Game from "../classes/Game.js";
 import axios from "axios"; // For downloading image attachments
-import { igdbService } from "../../src/services/IgdbService.js";
+import { igdbService } from "../services/IgdbService.js";
 const GAME_SEARCH_PAGE_SIZE = 25;
 const GAME_SEARCH_SESSIONS = new Map();
 function isUniqueConstraintError(err) {

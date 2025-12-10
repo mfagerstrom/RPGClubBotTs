@@ -84,8 +84,10 @@ const HELP_TOPICS = [
     {
         id: "gamedb",
         label: "/gamedb",
-        summary: "Game database tools powered by IGDB search, import, and paging results.",
-        syntax: "Use /gamedb help for subcommands: add, search, view.",
+        summary: "Game database tools powered by IGDB search/import and GameDB round/nomination associations.",
+        syntax: "Use /gamedb help for subcommands: add, search, view, help.",
+        notes: "Imports pull titles/covers from IGDB. View now surfaces GOTM/NR-GOTM wins, threads, and " +
+            "nominations tied to the GameDB id.",
     },
     {
         id: "rss",
@@ -154,7 +156,8 @@ const GOTM_HELP_TOPICS = [
         label: "/gotm nominate",
         summary: "Submit or update your GOTM nomination for the upcoming round.",
         syntax: "Syntax: /gotm nominate title:<string>",
-        notes: "Ephemeral feedback; changes are announced publicly with the refreshed list.",
+        notes: "Ephemeral feedback; changes are announced publicly with the refreshed list. " +
+            "Game must exist in GameDB; if not, you'll be prompted to import from IGDB first.",
     },
     {
         id: "delete-nomination",
@@ -273,7 +276,8 @@ const NR_GOTM_HELP_TOPICS = [
         label: "/nr-gotm nominate",
         summary: "Submit or update your NR-GOTM nomination for the upcoming round.",
         syntax: "Syntax: /nr-gotm nominate title:<string>",
-        notes: "Ephemeral feedback; changes are announced publicly with the refreshed list.",
+        notes: "Ephemeral feedback; changes are announced publicly with the refreshed list. " +
+            "Game must exist in GameDB; if not, you'll be prompted to import from IGDB first.",
     },
     {
         id: "delete-nomination",
@@ -389,22 +393,27 @@ const GAMEDB_HELP_TOPICS = [
         id: "add",
         label: "/gamedb add",
         summary: "Search IGDB and import a game into GameDB (open to all users).",
-        syntax: "Syntax: /gamedb add title:<string>",
-        notes: "Returns a dropdown of IGDB matches; if only one result, it imports automatically. Duplicate titles already in GameDB show an 'already imported' message.",
+        syntax: "Syntax: /gamedb add title:<string> [igdb_id:<int>] [bulk_titles:<string>]",
+        notes: "Returns a dropdown of IGDB matches; if only one result, it imports automatically. " +
+            "Use igdb_id to skip search or bulk_titles (comma-separated) to import up to 5 at once. " +
+            "Duplicate titles already in GameDB show an 'already imported' message.",
     },
     {
         id: "search",
         label: "/gamedb search",
         summary: "Search GameDB titles with paged dropdown navigation.",
         syntax: "Syntax: /gamedb search [query:<string>]",
-        notes: "Query is optional; omit to list all games. Results show a dropdown and Previous/Next buttons; selecting a game shows its profile.",
+        notes: "Query is optional; omit to list all games. Results show a dropdown and Previous/Next " +
+            "buttons; selecting a game shows its profile.",
     },
     {
         id: "view",
         label: "/gamedb view",
         summary: "View a GameDB entry by id.",
         syntax: "Syntax: /gamedb view game_id:<number>",
-        notes: "Shows cover art, metadata, releases, and IGDB link when available.",
+        notes: "Shows cover art, metadata, releases, and IGDB link when available, plus GOTM/NR-GOTM " +
+            "associations: winning rounds (with thread/Reddit links) and nomination rounds with " +
+            "nominator mentions.",
     },
 ];
 function buildRssHelpButtons(activeId) {
