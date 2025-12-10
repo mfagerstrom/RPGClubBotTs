@@ -435,11 +435,16 @@ let GameDb = class GameDb {
                     inline: true,
                 });
             }
-            const redditUrl = associations.gotmWins.find((w) => w.redditUrl)?.redditUrl ??
+            const redditUrlRaw = associations.gotmWins.find((w) => w.redditUrl)?.redditUrl ??
                 associations.nrGotmWins.find((w) => w.redditUrl)?.redditUrl ??
                 null;
+            const redditUrl = redditUrlRaw === "__NO_VALUE__" ? null : redditUrlRaw;
             if (redditUrl) {
-                embed.addFields({ name: "Reddit Discussion Thread", value: `[Reddit Link](${redditUrl})`, inline: true });
+                embed.addFields({
+                    name: "Reddit Discussion Thread",
+                    value: `[Reddit Link](${redditUrl})`,
+                    inline: true,
+                });
             }
             // Remaining association info (nominations) goes here before description
             this.appendAssociationFields(embed, {

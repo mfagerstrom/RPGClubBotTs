@@ -1,0 +1,76 @@
+import { getOraclePool } from "../db/oracleClient.js";
+
+type NullableDate = Date | null;
+
+function toYN(flag: boolean): string {
+  return flag ? "Y" : "N";
+}
+
+export async function upsertThreadRecord(params: {
+  threadId: string;
+  forumChannelId: string;
+  threadName: string;
+  isArchived: boolean;
+  createdAt: Date;
+  lastSeenAt: NullableDate;
+}): Promise<void> {
+  const pool = getOraclePool();
+  const connection = await pool.getConnection();
+  try {
+    await connection.execute(
+      `
+      MERGE INTO THREADS t
+      USING (
+        SELECT
+          :threadId       AS THREAD_ID,
+          :forumChannelId AS FORUM_CHANNEL_ID,
+          :threadName     AS THREAD_NAME,
+          :isArchived     AS IS_ARCHIVED,
+          :createdAt      AS CREATED_AT,
+          :lastSeenAt     AS LAST_SEEN_AT
+        FROM DUAL
+      ) s
+      ON (t.THREAD_ID = s.THREAD_ID)
+      WHEN MATCHED THEN UPDATE SET
+        t.THREAD_NAME      = s.THREAD_NAME,
+        t.FORUM_CHANNEL_ID = s.FORUM_CHANNEL_ID,
+        t.IS_ARCHIVED      = s.IS_ARCHIVED,
+        t.LAST_SEEN_AT     = s.LAST_SEEN_AT
+      WHEN NOT MATCHED THEN INSERT (
+        THREAD_ID, FORUM_CHANNEL_ID, THREAD_NAME, IS_ARCHIVED, CREATED_AT, LAST_SEEN_AT
+      ) VALUES (
+        s.THREAD_ID, s.FORUM_CHANNEL_ID, s.THREAD_NAME, s.IS_ARCHIVED, s.CREATED_AT, s.LAST_SEEN_AT
+      )
+      `,
+      {
+        threadId: params.threadId,
+        forumChannelId: params.forumChannelId,
+        threadName: params.threadName,
+        isArchived: toYN(params.isArchived),
+        createdAt: params.createdAt,
+        lastSeenAt: params.lastSeenAt,
+      },
+      { autoCommit: true },
+    );
+  } finally {
+    await connection.close();
+  }
+}
+
+export async function setThreadGameLink(threadId: string, gameId: number | null): Promise<void> {
+  const pool = getOraclePool();
+  const connection = await pool.getConnection();
+  try {
+    await connection.execute(
+      `
+      UPDATE THREADS
+      SET GAMEDB_GAME_ID = :gameId
+      WHERE THREAD_ID = :threadId
+      `,
+      { gameId, threadId },
+      { autoCommit: true },
+    );
+  } finally {
+    await connection.close();
+  }
+}

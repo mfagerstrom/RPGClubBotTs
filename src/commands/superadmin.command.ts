@@ -59,6 +59,7 @@ import Game, { type IGame } from "../classes/Game.js";
 import { igdbService, type IGDBGame, type IGDBGameDetails } from "../services/IgdbService.js";
 import { loadGotmFromDb } from "../classes/Gotm.js";
 import { loadNrGotmFromDb } from "../classes/NrGotm.js";
+import { setThreadGameLink } from "../classes/Thread.js";
 
 type SuperAdminHelpTopicId =
   | "presence"
@@ -72,7 +73,8 @@ type SuperAdminHelpTopicId =
   | "delete-gotm-nomination"
   | "delete-nr-gotm-nomination"
   | "set-nextvote"
-  | "gamedb-backfill";
+  | "gamedb-backfill"
+  | "thread-game-link-backfill";
 
 type SuperAdminHelpTopic = {
   id: SuperAdminHelpTopicId;
@@ -192,6 +194,13 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
     summary: "Import all GOTM and NR-GOTM titles into the GameDB using IGDB lookups.",
     syntax: "Syntax: /superadmin gamedb-backfill",
     notes: "Prompts for choice when IGDB returns multiple matches; skips titles already in GameDB.",
+  },
+  {
+    id: "thread-game-link-backfill",
+    label: "/superadmin thread-game-link-backfill",
+    summary: "Backfill THREADS.GAMEDB_GAME_ID from existing GOTM / NR-GOTM thread links.",
+    syntax: "Syntax: /superadmin thread-game-link-backfill",
+    notes: "Uses GOTM/NR-GOTM tables to set GAMEDB_GAME_ID on THREADS where thread ids are present.",
   },
 ];
 
@@ -1672,6 +1681,78 @@ export class SuperAdmin {
     }
 
     await this.editStatusMessage(interaction, statusMessage, status, true);
+  }
+
+  @Slash({
+    description: "Backfill THREADS.GAMEDB_GAME_ID from GOTM / NR-GOTM thread links",
+    name: "thread-game-link-backfill",
+  })
+  async threadGameLinkBackfill(interaction: CommandInteraction): Promise<void> {
+    await safeDeferReply(interaction, { ephemeral: true });
+
+    const okToUseCommand: boolean = await isSuperAdmin(interaction);
+    if (!okToUseCommand) return;
+
+    try {
+      await loadGotmFromDb();
+      await loadNrGotmFromDb();
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      await safeReply(interaction, {
+        content: `Failed to load GOTM/NR-GOTM data: ${msg}`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const assignments: { threadId: string; gamedbGameId: number; source: string }[] = [];
+
+    Gotm.all().forEach((entry) => {
+      entry.gameOfTheMonth.forEach((game) => {
+        if (game.threadId && game.gamedbGameId) {
+          assignments.push({ threadId: game.threadId, gamedbGameId: game.gamedbGameId, source: "GOTM" });
+        }
+      });
+    });
+
+    NrGotm.all().forEach((entry) => {
+      entry.gameOfTheMonth.forEach((game) => {
+        if (game.threadId && game.gamedbGameId) {
+          assignments.push({ threadId: game.threadId, gamedbGameId: game.gamedbGameId, source: "NR-GOTM" });
+        }
+      });
+    });
+
+    if (!assignments.length) {
+      await safeReply(interaction, {
+        content: "No GOTM or NR-GOTM entries have both thread id and GameDB id set.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    let success = 0;
+    const failures: string[] = [];
+
+    for (const a of assignments) {
+      try {
+        await setThreadGameLink(a.threadId, a.gamedbGameId);
+        success++;
+      } catch (err: any) {
+        failures.push(`${a.source} thread ${a.threadId} -> game ${a.gamedbGameId}: ${err?.message ?? err}`);
+      }
+    }
+
+    const lines: string[] = [`Updated ${success} thread link(s).`];
+    if (failures.length) {
+      lines.push("Failures:");
+      lines.push(...failures.map((f) => `• ${f}`));
+    }
+
+    await safeReply(interaction, {
+      content: lines.join("\n"),
+      ephemeral: true,
+    });
   }
 
   private buildGamedbSeeds(): GameDbSeed[] {

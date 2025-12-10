@@ -1,0 +1,16 @@
+Thread sync and linking (Now Playing forum 1059875931356938240)
+- Build THREADS sync service:
+  - Periodic poll (e.g., 5–10 min) of active + archived threads in the forum; paginate.
+  - Upsert THREAD_ID, FORUM_CHANNEL_ID, THREAD_NAME, IS_ARCHIVED, CREATED_AT, LAST_SEEN_AT; do not touch GAMEDB_GAME_ID.
+  - Derive LAST_SEEN_AT from last message timestamp when available; otherwise leave null.
+  - Soft reconcile: if a thread vanishes from API, mark archived (optional).
+  - Guard for missing perms; rate-limit requests.
+- Event hooks to reduce lag:
+  - ThreadCreated: insert immediately.
+  - MessageCreated in that forum: bump LAST_SEEN_AT for that thread.
+- Admin command to link/unlink GAMEDB_GAME_ID to a thread:
+  - Find thread by id/name/autocomplete; set/unset GAMEDB_GAME_ID.
+  - Sync service never overwrites this column.
+- Wire into bot startup:
+  - Start poller on boot (configurable interval) and register event listeners.
+  - Make forum channel id, interval, batch size configurable.

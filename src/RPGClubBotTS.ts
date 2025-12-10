@@ -19,6 +19,7 @@ import Member from "./classes/Member.js";
 import { joinAllTargetForumThreads } from "./services/ForumThreadJoinService.js";
 import { startRssFeedService } from "./services/RssFeedService.js";
 import { startPublicReminderService } from "./services/PublicReminderService.js";
+import { startThreadSyncService } from "./services/ThreadSyncService.js";
 
 dotenv.config();
 installConsoleLogging();
@@ -99,6 +100,7 @@ bot.once("clientReady", async () => {
   startNominationReminderService(bot);
   startReminderService(bot);
   startPublicReminderService(bot);
+  startThreadSyncService(bot);
   await joinAllTargetForumThreads(bot);
   startRssFeedService(bot);
   console.log("Startup sequence completed.");
