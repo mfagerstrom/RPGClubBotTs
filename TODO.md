@@ -11,6 +11,7 @@ Thread sync and linking (Now Playing forum 1059875931356938240)
 - Admin command to link/unlink GAMEDB_GAME_ID to a thread:
   - Find thread by id/name/autocomplete; set/unset GAMEDB_GAME_ID.
   - Sync service never overwrites this column.
+- Add SKIP_LINKING flag to THREADS to avoid repeated prompts on threads that shouldn't be linked.
 - Wire into bot startup:
   - Start poller on boot (configurable interval) and register event listeners.
   - Make forum channel id, interval, batch size configurable.

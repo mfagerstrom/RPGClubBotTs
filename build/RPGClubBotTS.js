@@ -14,6 +14,7 @@ import { joinAllTargetForumThreads } from "./services/ForumThreadJoinService.js"
 import { startRssFeedService } from "./services/RssFeedService.js";
 import { startPublicReminderService } from "./services/PublicReminderService.js";
 import { startThreadSyncService } from "./services/ThreadSyncService.js";
+import { startThreadLinkPromptService } from "./services/ThreadLinkPromptService.js";
 dotenv.config();
 installConsoleLogging();
 const PRESENCE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
@@ -76,6 +77,7 @@ bot.once("clientReady", async () => {
     startReminderService(bot);
     startPublicReminderService(bot);
     startThreadSyncService(bot);
+    startThreadLinkPromptService(bot);
     await joinAllTargetForumThreads(bot);
     startRssFeedService(bot);
     console.log("Startup sequence completed.");
