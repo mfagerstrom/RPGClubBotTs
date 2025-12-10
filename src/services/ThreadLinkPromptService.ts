@@ -137,7 +137,7 @@ async function handleLinkButton(interaction: ButtonInteraction, threadId: string
     await interaction.followUp({
       content:
         `Linked this thread to GameDB #${gameId}${chosenName ? ` (${chosenName})` : ""}.\n` +
-        "Thank you! If the wrong game was linked by mistake, please contact @merph.",
+        "Thank you! If the wrong game was linked by mistake, please contact @merph518.",
       ephemeral: false,
     });
 
