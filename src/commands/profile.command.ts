@@ -9,6 +9,7 @@ import {
   ActionRowBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
+  ComponentType,
 } from "discord.js";
 import { Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption } from "discordx";
 import axios from "axios";
@@ -16,6 +17,7 @@ import Member, {
   type IMemberRecord,
   type IMemberSearchFilters,
 } from "../classes/Member.js";
+import Game from "../classes/Game.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 
 const MAX_NOW_PLAYING = 10;
@@ -349,20 +351,83 @@ export class ProfileCommand {
   @SlashGroup("profile")
   async addNowPlaying(
     @SlashOption({
-      description: "Title of the game you are currently playing",
-      name: "title",
+      description: "Search text to find the game in GameDB",
+      name: "query",
       required: true,
       type: ApplicationCommandOptionType.String,
     })
-    title: string,
+    query: string,
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction, { ephemeral: true });
     try {
-      await Member.addNowPlaying(interaction.user.id, title);
+      const results = await Game.searchGames(query);
+      if (!results.length) {
+        await safeReply(interaction, {
+          content: "No GameDB results found. Use /gamedb add first, then try again.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const options = results.slice(0, 24).map((g) => ({
+        label: g.title.substring(0, 100),
+        value: String(g.id),
+        description: `GameDB #${g.id}`,
+      }));
+
+      const selectRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId("nowplaying-add-select")
+          .setPlaceholder("Select the game to add")
+          .addOptions(options),
+      );
+
+      const selectMessage = await safeReply(interaction, {
+        content: "Select the game to add to your Now Playing list:",
+        components: [selectRow],
+        ephemeral: true,
+        fetchReply: true,
+      });
+
+      if (!selectMessage) return;
+
+      const selection = await (selectMessage as any)
+        .awaitMessageComponent({
+          componentType: ComponentType.StringSelect,
+          time: 60_000,
+          filter: (i: any) => i.user.id === interaction.user.id,
+        })
+        .catch(() => null);
+
+      if (!selection) {
+        await safeReply(interaction, {
+          content: "Timed out waiting for a selection. No changes made.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      try {
+        await selection.deferUpdate();
+      } catch {
+        // ignore
+      }
+
+      const gameId = Number(selection.values[0]);
+      const game = await Game.getGameById(gameId);
+      if (!game) {
+        await safeReply(interaction, {
+          content: "Selected game not found. Please try again.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      await Member.addNowPlaying(interaction.user.id, gameId);
       const list = await Member.getNowPlaying(interaction.user.id);
       await safeReply(interaction, {
-        content: `Added **${title.trim()}** to your Now Playing list (${list.length}/${MAX_NOW_PLAYING}).`,
+        content: `Added **${game.title}** to your Now Playing list (${list.length}/${MAX_NOW_PLAYING}).`,
         ephemeral: true,
       });
     } catch (err: any) {
@@ -378,27 +443,46 @@ export class ProfileCommand {
   @SlashGroup("profile")
   async removeNowPlaying(
     @SlashOption({
-      description: "Title of the game to remove",
-      name: "title",
+      description: "GameDB game to remove (choose from your current list)",
+      name: "game",
       required: true,
       type: ApplicationCommandOptionType.String,
     })
-    title: string,
+    game: string,
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction, { ephemeral: true });
     try {
-      const removed = await Member.removeNowPlaying(interaction.user.id, title);
+      const current = await Member.getNowPlayingEntries(interaction.user.id);
+      if (!current.length) {
+        await safeReply(interaction, {
+          content: "Your Now Playing list is empty.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const gameId = Number(game);
+      const entry = current.find((e) => e.gameId === gameId);
+      if (!entry) {
+        await safeReply(interaction, {
+          content: "That game is not in your Now Playing list.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const removed = await Member.removeNowPlaying(interaction.user.id, gameId);
       if (!removed) {
         await safeReply(interaction, {
-          content: `No Now Playing entry found matching "${title}".`,
+          content: "Failed to remove the selected game.",
           ephemeral: true,
         });
         return;
       }
       const list = await Member.getNowPlaying(interaction.user.id);
       await safeReply(interaction, {
-        content: `Removed **${title.trim()}** from your Now Playing list (${list.length}/${MAX_NOW_PLAYING}).`,
+        content: `Removed **${entry.title}** from your Now Playing list (${list.length}/${MAX_NOW_PLAYING}).`,
         ephemeral: true,
       });
     } catch (err: any) {

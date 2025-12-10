@@ -134,10 +134,12 @@ export default class Member {
     const connection = await getOraclePool().getConnection();
     try {
       const res = await connection.execute<{ TITLE: string }>(
-        `SELECT TITLE
-           FROM USER_NOW_PLAYING
-          WHERE USER_ID = :userId
-          ORDER BY ADDED_AT DESC, ENTRY_ID DESC`,
+        `SELECT g.TITLE
+           FROM USER_NOW_PLAYING u
+           JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
+          WHERE u.USER_ID = :userId
+            AND u.GAMEDB_GAME_ID IS NOT NULL
+          ORDER BY u.ADDED_AT DESC, u.ENTRY_ID DESC`,
         { userId },
         { outFormat: oracledb.OUT_FORMAT_OBJECT },
       );
@@ -147,13 +149,35 @@ export default class Member {
     }
   }
 
-  static async addNowPlaying(userId: string, title: string): Promise<void> {
+  static async getNowPlayingEntries(
+    userId: string,
+  ): Promise<{ gameId: number; title: string }[]> {
     const connection = await getOraclePool().getConnection();
-    const cleaned = title.trim();
-    if (!cleaned) {
-      throw new Error("Title cannot be empty.");
+    try {
+      const res = await connection.execute<{ GAME_ID: number; TITLE: string }>(
+        `SELECT u.GAMEDB_GAME_ID AS GAME_ID, g.TITLE
+           FROM USER_NOW_PLAYING u
+           JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
+          WHERE u.USER_ID = :userId
+            AND u.GAMEDB_GAME_ID IS NOT NULL
+          ORDER BY u.ADDED_AT DESC, u.ENTRY_ID DESC`,
+        { userId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+      return (res.rows ?? []).map((r) => ({
+        gameId: Number(r.GAME_ID),
+        title: r.TITLE,
+      }));
+    } finally {
+      await connection.close();
     }
-    const truncated = cleaned.slice(0, 200);
+  }
+
+  static async addNowPlaying(userId: string, gameId: number): Promise<void> {
+    if (!Number.isInteger(gameId) || gameId <= 0) {
+      throw new Error("Invalid GameDB id.");
+    }
+    const connection = await getOraclePool().getConnection();
 
     try {
       const countRes = await connection.execute<{ CNT: number }>(
@@ -167,8 +191,8 @@ export default class Member {
       }
 
       await connection.execute(
-        `INSERT INTO USER_NOW_PLAYING (USER_ID, TITLE) VALUES (:userId, :title)`,
-        { userId, title: truncated },
+        `INSERT INTO USER_NOW_PLAYING (USER_ID, GAMEDB_GAME_ID) VALUES (:userId, :gameId)`,
+        { userId, gameId },
         { autoCommit: true },
       );
     } catch (err: any) {
@@ -182,18 +206,16 @@ export default class Member {
     }
   }
 
-  static async removeNowPlaying(userId: string, title: string): Promise<boolean> {
-    const connection = await getOraclePool().getConnection();
-    const cleaned = title.trim();
-    if (!cleaned) {
-      throw new Error("Title cannot be empty.");
+  static async removeNowPlaying(userId: string, gameId: number): Promise<boolean> {
+    if (!Number.isInteger(gameId) || gameId <= 0) {
+      throw new Error("Invalid GameDB id.");
     }
-    const truncated = cleaned.slice(0, 200);
+    const connection = await getOraclePool().getConnection();
 
     try {
       const res = await connection.execute(
-        `DELETE FROM USER_NOW_PLAYING WHERE USER_ID = :userId AND UPPER(TITLE) = UPPER(:title)`,
-        { userId, title: truncated },
+        `DELETE FROM USER_NOW_PLAYING WHERE USER_ID = :userId AND GAMEDB_GAME_ID = :gameId`,
+        { userId, gameId },
         { autoCommit: true },
       );
       const rows = (res as any).rowsAffected ?? 0;
