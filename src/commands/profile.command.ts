@@ -10,8 +10,11 @@ import {
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
   ComponentType,
+  ButtonBuilder,
+  ButtonStyle,
+  ButtonInteraction,
 } from "discord.js";
-import { Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption } from "discordx";
+import { Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption, ButtonComponent } from "discordx";
 import axios from "axios";
 import Member, {
   type IMemberRecord,
@@ -91,7 +94,7 @@ function formatDiscordTimestamp(value: Date | null): string {
 function buildProfileFields(
   record: Awaited<ReturnType<typeof Member.getByUserId>>,
   nickHistory: string[],
-  nowPlaying: string[],
+  nowPlaying: { title: string; threadId: string | null }[],
 ): ProfileField[] {
   if (!record) {
     return [];
@@ -162,9 +165,15 @@ function buildProfileFields(
   }
 
   if (nowPlaying.length) {
+    const lines = nowPlaying.map((entry) => {
+      if (entry.threadId) {
+        return `[${entry.title}](<#${entry.threadId}>)`;
+      }
+      return entry.title;
+    });
     fields.push({
       label: "Now Playing",
-      value: nowPlaying.join("\n"),
+      value: lines.join("\n"),
     });
   }
 
@@ -441,16 +450,7 @@ export class ProfileCommand {
 
   @Slash({ description: "Remove a game from your Now Playing list", name: "nowplaying-remove" })
   @SlashGroup("profile")
-  async removeNowPlaying(
-    @SlashOption({
-      description: "GameDB game to remove (choose from your current list)",
-      name: "game",
-      required: true,
-      type: ApplicationCommandOptionType.String,
-    })
-    game: string,
-    interaction: CommandInteraction,
-  ): Promise<void> {
+  async removeNowPlaying(interaction: CommandInteraction): Promise<void> {
     await safeDeferReply(interaction, { ephemeral: true });
     try {
       const current = await Member.getNowPlayingEntries(interaction.user.id);
@@ -462,27 +462,29 @@ export class ProfileCommand {
         return;
       }
 
-      const gameId = Number(game);
-      const entry = current.find((e) => e.gameId === gameId);
-      if (!entry) {
-        await safeReply(interaction, {
-          content: "That game is not in your Now Playing list.",
-          ephemeral: true,
-        });
-        return;
+      const emojis = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"];
+      const lines = current.slice(0, emojis.length).map((entry, idx) => `${emojis[idx]} ${entry.title} (GameDB #${entry.gameId})`);
+
+      const buttons = current.slice(0, emojis.length).map((entry, idx) =>
+        new ButtonBuilder()
+          .setCustomId(`np-remove:${interaction.user.id}:${entry.gameId}`)
+          .setLabel(emojis[idx])
+          .setStyle(ButtonStyle.Danger),
+      );
+
+      const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+      for (let i = 0; i < buttons.length; i += 5) {
+        rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(buttons.slice(i, i + 5)));
       }
 
-      const removed = await Member.removeNowPlaying(interaction.user.id, gameId);
-      if (!removed) {
-        await safeReply(interaction, {
-          content: "Failed to remove the selected game.",
-          ephemeral: true,
-        });
-        return;
-      }
-      const list = await Member.getNowPlaying(interaction.user.id);
       await safeReply(interaction, {
-        content: `Removed **${entry.title}** from your Now Playing list (${list.length}/${MAX_NOW_PLAYING}).`,
+        content: "Select a game to remove from your Now Playing list:",
+        embeds: [
+          new EmbedBuilder()
+            .setTitle("Now Playing")
+            .setDescription(lines.join("\n")),
+        ],
+        components: rows,
         ephemeral: true,
       });
     } catch (err: any) {
@@ -490,6 +492,55 @@ export class ProfileCommand {
       await safeReply(interaction, {
         content: `Could not remove from Now Playing: ${msg}`,
         ephemeral: true,
+      });
+    }
+  }
+
+  @ButtonComponent({ id: /^np-remove:[^:]+:\d+$/ })
+  async handleRemoveNowPlayingButton(interaction: ButtonInteraction): Promise<void> {
+    const [, ownerId, gameIdRaw] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await interaction.reply({
+        content: "This remove prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const gameId = Number(gameIdRaw);
+    if (!Number.isInteger(gameId) || gameId <= 0) {
+      await interaction.reply({
+        content: "Invalid selection.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    try {
+      const removed = await Member.removeNowPlaying(ownerId, gameId);
+      if (!removed) {
+        await interaction.reply({
+          content: "Failed to remove that game (it may have been removed already).",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      const list = await Member.getNowPlaying(ownerId);
+      await interaction.reply({
+        content: `Removed GameDB #${gameId} from your Now Playing list (${list.length}/${MAX_NOW_PLAYING}).`,
+        flags: MessageFlags.Ephemeral,
+      });
+
+      try {
+        await interaction.message.edit({ components: [] }).catch(() => {});
+      } catch {
+        // ignore
+      }
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      await interaction.reply({
+        content: `Could not remove from Now Playing: ${msg}`,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }

@@ -67,7 +67,7 @@ type RemindMeHelpTopic = {
   notes?: string;
 };
 
-type ProfileHelpTopicId = "view" | "edit" | "search";
+type ProfileHelpTopicId = "view" | "edit" | "search" | "nowplaying-add" | "nowplaying-remove";
 
 type ProfileHelpTopic = {
   id: ProfileHelpTopicId;
@@ -165,8 +165,8 @@ const HELP_TOPICS: HelpTopic[] = [
     id: "profile",
     label: "/profile",
     summary:
-      "View, edit, or search stored RPG_CLUB_USERS profiles (view/search are ephemeral by default).",
-    syntax: "Use /profile help for subcommands (view/edit/search) and parameters.",
+      "View, edit, search profiles, and manage your GameDB-backed Now Playing list (view/search are ephemeral by default).",
+    syntax: "Use /profile help for subcommands (view/edit/search/nowplaying-add/nowplaying-remove) and parameters.",
   },
   {
     id: "gamedb",
@@ -587,6 +587,22 @@ const PROFILE_HELP_TOPICS: ProfileHelpTopic[] = [
       "Syntax: /profile search [userId:<string>] [username:<string>] [globalname:<string>] [completionator:<string>] [steam:<string>] [psn:<string>] [xbl:<string>] [nsw:<string>] [role flags...] [limit:<int>] [include-departed-members:<boolean>] [showinchat:<boolean>]",
     notes:
       "Filters default to partial matches; date/times use ISO formats; limit max 100; departed members are excluded unless include-departed-members is true.",
+  },
+  {
+    id: "nowplaying-add",
+    label: "/profile nowplaying-add",
+    summary: "Add a GameDB title to your Now Playing list (max 10).",
+    syntax: "Syntax: /profile nowplaying-add query:<string>",
+    notes:
+      "Searches GameDB; choose from up to 24 results. Only GameDB titles are allowed; no free text.",
+  },
+  {
+    id: "nowplaying-remove",
+    label: "/profile nowplaying-remove",
+    summary: "Remove a GameDB title from your Now Playing list.",
+    syntax: "Syntax: /profile nowplaying-remove game:<GameDB id from your list>",
+    notes:
+      "Remove by selecting a GameDB id that is already in your Now Playing list. List is capped at 10 entries.",
   },
 ];
 

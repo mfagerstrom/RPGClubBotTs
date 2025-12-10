@@ -43,30 +43,55 @@ export default class Member {
     static async getNowPlaying(userId) {
         const connection = await getOraclePool().getConnection();
         try {
-            const res = await connection.execute(`SELECT TITLE
-           FROM USER_NOW_PLAYING
-          WHERE USER_ID = :userId
-          ORDER BY ADDED_AT DESC, ENTRY_ID DESC`, { userId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-            return (res.rows ?? []).map((r) => r.TITLE).slice(0, MAX_NOW_PLAYING);
+            const res = await connection.execute(`SELECT g.TITLE,
+                (
+                  SELECT MIN(th.THREAD_ID)
+                  FROM THREADS th
+                  WHERE th.GAMEDB_GAME_ID = u.GAMEDB_GAME_ID
+                ) AS THREAD_ID
+           FROM USER_NOW_PLAYING u
+           JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
+          WHERE u.USER_ID = :userId
+            AND u.GAMEDB_GAME_ID IS NOT NULL
+          ORDER BY u.ADDED_AT DESC, u.ENTRY_ID DESC`, { userId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+            return (res.rows ?? [])
+                .map((r) => ({ title: r.TITLE, threadId: r.THREAD_ID ?? null }))
+                .slice(0, MAX_NOW_PLAYING);
         }
         finally {
             await connection.close();
         }
     }
-    static async addNowPlaying(userId, title) {
+    static async getNowPlayingEntries(userId) {
         const connection = await getOraclePool().getConnection();
-        const cleaned = title.trim();
-        if (!cleaned) {
-            throw new Error("Title cannot be empty.");
+        try {
+            const res = await connection.execute(`SELECT u.GAMEDB_GAME_ID AS GAME_ID, g.TITLE
+           FROM USER_NOW_PLAYING u
+           JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
+          WHERE u.USER_ID = :userId
+            AND u.GAMEDB_GAME_ID IS NOT NULL
+          ORDER BY u.ADDED_AT DESC, u.ENTRY_ID DESC`, { userId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+            return (res.rows ?? []).map((r) => ({
+                gameId: Number(r.GAME_ID),
+                title: r.TITLE,
+            }));
         }
-        const truncated = cleaned.slice(0, 200);
+        finally {
+            await connection.close();
+        }
+    }
+    static async addNowPlaying(userId, gameId) {
+        if (!Number.isInteger(gameId) || gameId <= 0) {
+            throw new Error("Invalid GameDB id.");
+        }
+        const connection = await getOraclePool().getConnection();
         try {
             const countRes = await connection.execute(`SELECT COUNT(*) AS CNT FROM USER_NOW_PLAYING WHERE USER_ID = :userId`, { userId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
             const count = Number((countRes.rows ?? [])[0]?.CNT ?? 0);
             if (count >= MAX_NOW_PLAYING) {
                 throw new Error(`You can only track up to ${MAX_NOW_PLAYING} Now Playing titles.`);
             }
-            await connection.execute(`INSERT INTO USER_NOW_PLAYING (USER_ID, TITLE) VALUES (:userId, :title)`, { userId, title: truncated }, { autoCommit: true });
+            await connection.execute(`INSERT INTO USER_NOW_PLAYING (USER_ID, GAMEDB_GAME_ID) VALUES (:userId, :gameId)`, { userId, gameId }, { autoCommit: true });
         }
         catch (err) {
             const msg = err?.message ?? String(err);
@@ -79,15 +104,13 @@ export default class Member {
             await connection.close();
         }
     }
-    static async removeNowPlaying(userId, title) {
-        const connection = await getOraclePool().getConnection();
-        const cleaned = title.trim();
-        if (!cleaned) {
-            throw new Error("Title cannot be empty.");
+    static async removeNowPlaying(userId, gameId) {
+        if (!Number.isInteger(gameId) || gameId <= 0) {
+            throw new Error("Invalid GameDB id.");
         }
-        const truncated = cleaned.slice(0, 200);
+        const connection = await getOraclePool().getConnection();
         try {
-            const res = await connection.execute(`DELETE FROM USER_NOW_PLAYING WHERE USER_ID = :userId AND UPPER(TITLE) = UPPER(:title)`, { userId, title: truncated }, { autoCommit: true });
+            const res = await connection.execute(`DELETE FROM USER_NOW_PLAYING WHERE USER_ID = :userId AND GAMEDB_GAME_ID = :gameId`, { userId, gameId }, { autoCommit: true });
             const rows = res.rowsAffected ?? 0;
             return rows > 0;
         }

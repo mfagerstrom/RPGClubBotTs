@@ -130,11 +130,18 @@ export default class Member {
     }
   }
 
-  static async getNowPlaying(userId: string): Promise<string[]> {
+  static async getNowPlaying(
+    userId: string,
+  ): Promise<{ title: string; threadId: string | null }[]> {
     const connection = await getOraclePool().getConnection();
     try {
-      const res = await connection.execute<{ TITLE: string }>(
-        `SELECT g.TITLE
+      const res = await connection.execute<{ TITLE: string; THREAD_ID: string | null }>(
+        `SELECT g.TITLE,
+                (
+                  SELECT MIN(th.THREAD_ID)
+                  FROM THREADS th
+                  WHERE th.GAMEDB_GAME_ID = u.GAMEDB_GAME_ID
+                ) AS THREAD_ID
            FROM USER_NOW_PLAYING u
            JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
           WHERE u.USER_ID = :userId
@@ -143,7 +150,9 @@ export default class Member {
         { userId },
         { outFormat: oracledb.OUT_FORMAT_OBJECT },
       );
-      return (res.rows ?? []).map((r) => r.TITLE).slice(0, MAX_NOW_PLAYING);
+      return (res.rows ?? [])
+        .map((r) => ({ title: r.TITLE, threadId: r.THREAD_ID ?? null }))
+        .slice(0, MAX_NOW_PLAYING);
     } finally {
       await connection.close();
     }
