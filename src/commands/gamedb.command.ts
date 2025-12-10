@@ -13,6 +13,8 @@ import {
   AttachmentBuilder,
   escapeCodeBlock,
 } from "discord.js";
+import { readFileSync } from "fs";
+import path from "path";
 import {
   ButtonComponent,
   Discord,
@@ -40,6 +42,24 @@ function isUniqueConstraintError(err: any): boolean {
 function isUnknownWebhookError(err: any): boolean {
   const code = err?.code ?? err?.rawError?.code;
   return code === 10015;
+}
+
+const GAME_DB_THUMB_NAME = "gameDB.png";
+const GAME_DB_THUMB_PATH = path.join(
+  process.cwd(),
+  "src",
+  "assets",
+  "images",
+  GAME_DB_THUMB_NAME,
+);
+const gameDbThumbBuffer = readFileSync(GAME_DB_THUMB_PATH);
+
+function buildGameDbThumbAttachment(): AttachmentBuilder {
+  return new AttachmentBuilder(gameDbThumbBuffer, { name: GAME_DB_THUMB_NAME });
+}
+
+function applyGameDbThumbnail(embed: EmbedBuilder): EmbedBuilder {
+  return embed.setThumbnail(`attachment://${GAME_DB_THUMB_NAME}`);
 }
 
 @Discord()
@@ -475,19 +495,20 @@ export class GameDb {
     }
 
     // 7. Final Success Message with embed left in chat
-    const files = imageData ? [{ attachment: imageData, name: "cover.jpg" }] : [];
     const embed = new EmbedBuilder()
       .setTitle(`Added to GameDB: ${newGame.title}`)
       .setDescription(`GameDB ID: ${newGame.id}${igdbUrl ? `\nIGDB: ${igdbUrl}` : ""}`)
       .setColor(0x0099ff);
-    if (files.length) {
+    applyGameDbThumbnail(embed);
+    const attachments: AttachmentBuilder[] = [buildGameDbThumbAttachment()];
+    if (imageData) {
       embed.setImage("attachment://cover.jpg");
+      attachments.push(new AttachmentBuilder(imageData, { name: "cover.jpg" }));
     }
-
     await safeReply(interaction, {
       content: `Successfully added **${newGame.title}** (ID: ${newGame.id}) to the database!`,
       embeds: [embed],
-      files: files.length ? files : undefined,
+      files: attachments,
       __forceFollowUp: true,
     });
   }
@@ -497,15 +518,36 @@ export class GameDb {
     @SlashOption({
       description: "ID of the game to view",
       name: "game_id",
-      required: true,
+      required: false,
       type: ApplicationCommandOptionType.Number,
     })
     gameId: number,
+    @SlashOption({
+      description: "Search query (falls back to search flow if no ID provided)",
+      name: "query",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    query: string | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction);
 
-    await this.showGameProfile(interaction, gameId);
+    if (Number.isFinite(gameId)) {
+      await this.showGameProfile(interaction, gameId);
+      return;
+    }
+
+    const searchTerm = (query ?? "").trim();
+    if (!searchTerm) {
+      await safeReply(interaction, {
+        content: "Provide a game_id or a search query.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await this.runSearchFlow(interaction, searchTerm);
   }
 
   private async showGameProfile(
@@ -530,7 +572,7 @@ export class GameDb {
   private async buildGameProfile(
     gameId: number,
     interaction?: CommandInteraction | StringSelectMenuInteraction,
-  ): Promise<{ embeds: EmbedBuilder[]; files: { attachment: Buffer; name: string }[] } | null> {
+  ): Promise<{ embeds: EmbedBuilder[]; files: AttachmentBuilder[] } | null> {
     try {
       const game = await Game.getGameById(gameId);
       if (!game) {
@@ -554,6 +596,7 @@ export class GameDb {
       if (game.igdbUrl) {
         embed.setURL(game.igdbUrl);
       }
+      applyGameDbThumbnail(embed);
 
       // Keep the win/round info up top in the single embed
       if (associations.gotmWins.length) {
@@ -684,9 +727,10 @@ export class GameDb {
         });
       }
 
-      const files = game.imageData
-        ? [{ attachment: game.imageData, name: "game_image.png" }]
-        : [];
+      const files: AttachmentBuilder[] = [buildGameDbThumbAttachment()];
+      if (game.imageData) {
+        files.push(new AttachmentBuilder(game.imageData, { name: "game_image.png" }));
+      }
 
       return { embeds: [embed], files };
     } catch (error: any) {
@@ -813,34 +857,42 @@ export class GameDb {
 
     try {
       const searchTerm = (query ?? "").trim();
-      const results = await Game.searchGames(searchTerm);
-
-      if (results.length === 0) {
-        await this.handleNoResults(interaction, searchTerm || query || "Unknown");
-        return;
-      }
-
-      if (results.length === 1) {
-        await this.showGameProfile(interaction, results[0].id);
-        return;
-      }
-
-      const sessionId = interaction.id;
-      GAME_SEARCH_SESSIONS.set(sessionId, {
-        userId: interaction.user.id,
-        results,
-        query: searchTerm,
-      });
-
-      const response = this.buildSearchResponse(sessionId, GAME_SEARCH_SESSIONS.get(sessionId)!, 0);
-
-      await safeReply(interaction, response);
+      await this.runSearchFlow(interaction, searchTerm, query);
     } catch (error: any) {
       await safeReply(interaction, {
         content: `Failed to search games. Error: ${error.message}`,
         ephemeral: true,
       });
     }
+  }
+
+  private async runSearchFlow(
+    interaction: CommandInteraction,
+    searchTerm: string,
+    rawQuery?: string,
+  ): Promise<void> {
+    const results = await Game.searchGames(searchTerm);
+
+    if (results.length === 0) {
+      await this.handleNoResults(interaction, searchTerm || rawQuery || "Unknown");
+      return;
+    }
+
+    if (results.length === 1) {
+      await this.showGameProfile(interaction, results[0].id);
+      return;
+    }
+
+    const sessionId = interaction.id;
+    GAME_SEARCH_SESSIONS.set(sessionId, {
+      userId: interaction.user.id,
+      results,
+      query: searchTerm,
+    });
+
+    const response = this.buildSearchResponse(sessionId, GAME_SEARCH_SESSIONS.get(sessionId)!, 0);
+
+    await safeReply(interaction, response);
   }
 
   @SelectMenuComponent({ id: /^gamedb-search-select:[^:]+:\d+:\d+$/ })
@@ -960,7 +1012,7 @@ export class GameDb {
     try {
       await interaction.editReply({
         ...response,
-        files: [],
+        files: response.files,
         content: null as any,
       });
     } catch {
@@ -972,7 +1024,7 @@ export class GameDb {
     sessionId: string,
     session: { userId: string; results: any[]; query: string },
     page: number,
-  ): { embeds: EmbedBuilder[]; components: any[] } {
+  ): { embeds: EmbedBuilder[]; components: any[]; files: AttachmentBuilder[] } {
     const totalPages = Math.max(
       1,
       Math.ceil(session.results.length / GAME_SEARCH_PAGE_SIZE),
@@ -995,6 +1047,7 @@ export class GameDb {
       .setFooter({
         text: `${session.results.length} results total`,
       });
+    applyGameDbThumbnail(embed);
 
     const selectCustomId = `gamedb-search-select:${sessionId}:${session.userId}:${safePage}`;
     const options = displayedResults.map((g) => ({
@@ -1027,6 +1080,7 @@ export class GameDb {
     return {
       embeds: [embed],
       components: [selectRow, buttonRow],
+      files: [buildGameDbThumbAttachment()],
     };
   }
 }

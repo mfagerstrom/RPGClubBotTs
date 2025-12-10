@@ -84,6 +84,18 @@ export interface IMemberNickHistory {
   changedAt: Date;
 }
 
+export interface IMemberNowPlayingEntry {
+  title: string;
+  threadId: string | null;
+}
+
+export interface IMemberNowPlayingList {
+  userId: string;
+  username: string | null;
+  globalName: string | null;
+  entries: IMemberNowPlayingEntry[];
+}
+
 type Connection = oracledb.Connection;
 const MAX_NOW_PLAYING = 10;
 
@@ -153,6 +165,70 @@ export default class Member {
       return (res.rows ?? [])
         .map((r) => ({ title: r.TITLE, threadId: r.THREAD_ID ?? null }))
         .slice(0, MAX_NOW_PLAYING);
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async getAllNowPlaying(): Promise<IMemberNowPlayingList[]> {
+    const connection = await getOraclePool().getConnection();
+    try {
+      const res = await connection.execute<{
+        USER_ID: string;
+        USERNAME: string | null;
+        GLOBAL_NAME: string | null;
+        TITLE: string;
+        THREAD_ID: string | null;
+      }>(
+        `SELECT u.USER_ID,
+                ru.USERNAME,
+                ru.GLOBAL_NAME,
+                g.TITLE,
+                (
+                  SELECT MIN(th.THREAD_ID)
+                  FROM THREADS th
+                  WHERE th.GAMEDB_GAME_ID = u.GAMEDB_GAME_ID
+                ) AS THREAD_ID,
+                u.ADDED_AT,
+                u.ENTRY_ID
+           FROM USER_NOW_PLAYING u
+           JOIN RPG_CLUB_USERS ru ON ru.USER_ID = u.USER_ID
+           JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
+          WHERE NVL(ru.IS_BOT, 0) = 0
+            AND ru.SERVER_LEFT_AT IS NULL
+          ORDER BY COALESCE(ru.GLOBAL_NAME, ru.USERNAME, ru.USER_ID),
+                   u.ADDED_AT DESC,
+                   u.ENTRY_ID DESC`,
+        {},
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      const grouped = new Map<string, IMemberNowPlayingList>();
+      for (const row of res.rows ?? []) {
+        let record = grouped.get(row.USER_ID);
+        if (!record) {
+          record = {
+            userId: row.USER_ID,
+            username: row.USERNAME ?? null,
+            globalName: row.GLOBAL_NAME ?? null,
+            entries: [],
+          };
+          grouped.set(row.USER_ID, record);
+        }
+
+        if (record.entries.length < MAX_NOW_PLAYING) {
+          record.entries.push({
+            title: row.TITLE,
+            threadId: row.THREAD_ID ?? null,
+          });
+        }
+      }
+
+      return Array.from(grouped.values()).sort((a, b) => {
+        const aName = (a.globalName ?? a.username ?? a.userId).toLowerCase();
+        const bName = (b.globalName ?? b.username ?? b.userId).toLowerCase();
+        return aName.localeCompare(bName);
+      });
     } finally {
       await connection.close();
     }
