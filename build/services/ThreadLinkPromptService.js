@@ -1,5 +1,5 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, } from "discord.js";
-import { setThreadGameLink, setThreadSkipLinking, getThreadSkipLinking, } from "../classes/Thread.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, EmbedBuilder, MessageFlags, StringSelectMenuBuilder, } from "discord.js";
+import { setThreadGameLink, setThreadSkipLinking, getThreadLinkInfo, } from "../classes/Thread.js";
 import Game from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
 const NOW_PLAYING_FORUM_ID = "1059875931356938240";
@@ -36,9 +36,11 @@ function buildButtons(threadId) {
 async function promptThread(thread) {
     if (!hasIgdbConfig())
         return; // Don't prompt when IGDB is not configured
-    const skip = await getThreadSkipLinking(thread.id).catch(() => false);
-    if (skip)
+    const info = await getThreadLinkInfo(thread.id).catch(() => ({ skipLinking: false, gamedbGameId: null }));
+    if (info.skipLinking)
         return;
+    if (info.gamedbGameId)
+        return; // Already linked
     if (!shouldPrompt(thread.id))
         return;
     markPrompted(thread.id);
@@ -55,7 +57,7 @@ async function handleLinkButton(interaction, threadId) {
     if (!hasIgdbConfig()) {
         await interaction.reply({
             content: "IGDB service is not configured. Please set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET in the environment.",
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
         return;
     }
@@ -69,7 +71,7 @@ async function handleLinkButton(interaction, threadId) {
         let chosenName = localMatches[0]?.title ?? null;
         if (!gameId) {
             // Fallback to IGDB search
-            const searchRes = await igdbService.searchGames(title, 5, false);
+            const searchRes = await igdbService.searchGames(title, 24, false);
             const results = searchRes.results;
             if (!results.length) {
                 await interaction.followUp({
@@ -78,7 +80,56 @@ async function handleLinkButton(interaction, threadId) {
                 });
                 return;
             }
-            const chosen = results[0];
+            let chosen = results[0];
+            if (results.length > 1) {
+                const options = results.slice(0, 24).map((game) => {
+                    const year = game.first_release_date
+                        ? new Date(game.first_release_date * 1000).getFullYear()
+                        : "TBD";
+                    return {
+                        label: `${game.name} (${year})`.slice(0, 100),
+                        value: String(game.id),
+                        description: (game.summary || "No summary").slice(0, 100),
+                    };
+                });
+                const selectRow = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
+                    .setCustomId("thread-link-select")
+                    .setPlaceholder(`Select game for "${title}"`)
+                    .addOptions(options));
+                const selectMessage = await interaction.followUp({
+                    content: `Select the correct game for "${title}".`,
+                    components: [selectRow],
+                    flags: MessageFlags.Ephemeral,
+                });
+                const selection = await selectMessage
+                    .awaitMessageComponent({
+                    componentType: ComponentType.StringSelect,
+                    time: 60_000,
+                    filter: (i) => i.user.id === interaction.user.id,
+                })
+                    .catch(() => null);
+                if (!selection) {
+                    await interaction.followUp({
+                        content: "No selection made; leaving thread unlinked.",
+                        flags: MessageFlags.Ephemeral,
+                    });
+                    return;
+                }
+                try {
+                    await selection.deferUpdate();
+                }
+                catch {
+                    // ignore
+                }
+                const selectedId = Number(selection.values[0]);
+                chosen = results.find((g) => g.id === selectedId) ?? chosen;
+                try {
+                    await selection.message.edit({ components: [] }).catch(() => { });
+                }
+                catch {
+                    // ignore
+                }
+            }
             chosenName = chosen.name;
             const existing = await Game.getGameByIgdbId(chosen.id);
             if (existing) {
@@ -99,7 +150,6 @@ async function handleLinkButton(interaction, threadId) {
         await interaction.followUp({
             content: `Linked this thread to GameDB #${gameId}${chosenName ? ` (${chosenName})` : ""}.\n` +
                 "Thank you! If the wrong game was linked by mistake, please contact @merph518.",
-            ephemeral: false,
         });
         // Delete the original prompt message if we can
         try {
@@ -111,7 +161,7 @@ async function handleLinkButton(interaction, threadId) {
     }
     catch (err) {
         const msg = err?.message ?? String(err);
-        await interaction.followUp({ content: `Failed to link game: ${msg}`, ephemeral: false });
+        await interaction.followUp({ content: `Failed to link game: ${msg}` });
     }
 }
 async function handleSkipButton(interaction, threadId) {
@@ -119,12 +169,12 @@ async function handleSkipButton(interaction, threadId) {
         await setThreadSkipLinking(threadId, true);
         await interaction.reply({
             content: "Okay, I'll skip linking a game for this thread going forward.",
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
     catch (err) {
         const msg = err?.message ?? String(err);
-        await interaction.reply({ content: `Failed to update skip flag: ${msg}`, ephemeral: true });
+        await interaction.reply({ content: `Failed to update skip flag: ${msg}`, flags: MessageFlags.Ephemeral });
     }
 }
 export function startThreadLinkPromptService(client) {

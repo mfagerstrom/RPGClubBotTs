@@ -113,3 +113,24 @@ export async function getThreadSkipLinking(threadId: string): Promise<boolean> {
     await connection.close();
   }
 }
+
+export async function getThreadLinkInfo(
+  threadId: string,
+): Promise<{ skipLinking: boolean; gamedbGameId: number | null }> {
+  const pool = getOraclePool();
+  const connection = await pool.getConnection();
+  try {
+    const res = await connection.execute<{ SKIP_LINKING: string; GAMEDB_GAME_ID: number | null }>(
+      `SELECT SKIP_LINKING, GAMEDB_GAME_ID FROM THREADS WHERE THREAD_ID = :threadId`,
+      { threadId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+    );
+    const row = (res.rows ?? [])[0] as any;
+    const skipFlag = String(row?.SKIP_LINKING ?? "N").toUpperCase() === "Y";
+    const gameId =
+      row && row.GAMEDB_GAME_ID != null ? Number(row.GAMEDB_GAME_ID) : null;
+    return { skipLinking: skipFlag, gamedbGameId: gameId };
+  } finally {
+    await connection.close();
+  }
+}
