@@ -99,7 +99,7 @@ const HELP_TOPICS: HelpTopic[] = [
     id: "gotm",
     label: "/gotm",
     summary:
-      "Browse GOTM history, see current nominations, and add or change your pick.",
+      "Browse GOTM history, see current nominations, and add or change your nomination.",
     syntax:
       "Syntax: /gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>] | /gotm noms | /gotm nominate title:<string> | /gotm delete-nomination",
     notes:
@@ -109,7 +109,7 @@ const HELP_TOPICS: HelpTopic[] = [
     id: "nr-gotm",
     label: "/nr-gotm",
     summary:
-      "Browse NR-GOTM history, see current nominations, and add or change your pick.",
+      "Browse NR-GOTM history, see current nominations, and add or change your nomination.",
     syntax:
       "Syntax: /nr-gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>] | /nr-gotm noms | /nr-gotm nominate title:<string> | /nr-gotm delete-nomination",
     notes:
@@ -701,8 +701,8 @@ export function buildMainHelpResponse(): {
     .setDescription(
       "Use the category dropdowns below to jump straight to a command’s details.\n\n" +
         "**Monthly Games**\n" +
-        `${formatCommandLine("gotm", "GOTM history, nominations, and your pick.")}\n` +
-        `${formatCommandLine("nr-gotm", "NR-GOTM history, nominations, and your pick.")}\n` +
+        `${formatCommandLine("gotm", "GOTM history and nominations")}\n` +
+        `${formatCommandLine("nr-gotm", "NR-GOTM history and nominations")}\n` +
         `${formatCommandLine("noms", "See current GOTM and NR-GOTM nominations.")}\n` +
         `${formatCommandLine("round", "See the current round and winners.")}\n` +
         `${formatCommandLine("nextvote", "Check when the next vote happens.")}\n\n` +

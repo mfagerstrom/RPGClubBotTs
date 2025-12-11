@@ -184,3 +184,8 @@
 2025-12-11 - Commit ID: b1c2cf5 - chore: updated todos, generated commit history file
 2025-12-11 - Commit ID: a4e7cd3 - chore: small tweaks
 2025-12-11 - Commit ID: f3bdd83 - chore: removed unused and redundant code
+2025-12-11 - Commit ID: 79c8f66 - fix: various bug fixes
+2025-12-11 - Commit ID: 58f268d - chore: updated help menu
+2025-12-11 - Commit ID: 19c16cc - refactor: menu refactor, work in progress
+2025-12-11 - Commit ID: 403f030 - refactor: help overhaul completed
+2025-12-11 - Commit ID: 5b5565b - refactor: ok, help is really done now.
