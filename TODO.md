@@ -1,0 +1,26 @@
+- Normalize behavior between /gamedb add, search and view
+-  Add who's playing a game to its /gamedb view
+-  Change 1:1 thread:game relationship to 1:many
+-  Finish developing now-playing commands, the embeds could use some work, especially removing a now playing entry
+-  Move /profile nowplaying commands to /nowplaying
+-  Add paging to results from IGDB during game import
+-  Add parameters to /gamedb add to narrow down to certain categories
+- Add note(s) to now playing entries, that would only be visible using /now-playing, not in profile
+- Update <#927727584148611102>, also incorporate that content into the bot's help menu
+- Address this: ``[WARN] RPGClubBotTs >> select menu component handler not found, interactionId: 1448471960597168148 | customId: nowplaying-add-select``
+- Address this: ``[ERROR] (node:23592) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.``
+- Do a UI Pass over all embeds and try to make things look nicer, incorporate thumbnail images and/or emoji.  MP info emoji for platforms
+- Add game completion functionality, tie into profile and game view
+- Linking of different versions of same game in game view (remaster, remake, port, etc)
+- /now-playing create-thread, tag it, auto-source image and link to game all in one go
+- /mp-info all could reuse same embed while keeping the dropdown below it, like game search does
+- Add "Add to Now Playing" and "Add Completion" buttons below gamedb view embed
+- Implement voting functionality, replacing Subo and canceling my subscription to it
+- /superadmin todo functionality with sub commands to edit rank
+- model help after /statbot's help
+- Game backlog functionality
+- Game collection functionality
+- Bot release notes
+- User bug reports
+- Now playing / Game Collection / Completion data export to .csv / excel
+- Game Collection Imports - Steam, PSN, ???
