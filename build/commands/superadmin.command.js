@@ -49,27 +49,22 @@ export const SUPERADMIN_HELP_TOPICS = [
     },
 ];
 function buildSuperAdminHelpButtons(activeId) {
-    const rows = [];
-    for (const chunk of chunkArray(SUPERADMIN_HELP_TOPICS, 5)) {
-        rows.push(new ActionRowBuilder().addComponents(chunk.map((topic) => new ButtonBuilder()
-            .setCustomId(`superadmin-help-${topic.id}`)
-            .setLabel(topic.label)
-            .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary))));
-    }
-    return rows;
+    const select = new StringSelectMenuBuilder()
+        .setCustomId("superadmin-help-select")
+        .setPlaceholder("/superadmin help")
+        .addOptions(SUPERADMIN_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+    })))
+        .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+    return [new ActionRowBuilder().addComponents(select)];
 }
 async function downloadImageBuffer(url) {
     const resp = await axios.get(url, { responseType: "arraybuffer" });
     const mime = resp.headers?.["content-type"] ?? null;
     return { buffer: Buffer.from(resp.data), mimeType: mime ? String(mime) : null };
-}
-function extractSuperAdminTopicId(customId) {
-    const prefix = "superadmin-help-";
-    const startIndex = customId.indexOf(prefix);
-    if (startIndex === -1)
-        return null;
-    const raw = customId.slice(startIndex + prefix.length).trim();
-    return (SUPERADMIN_HELP_TOPICS.find((entry) => entry.id === raw)?.id ?? null);
 }
 export function buildSuperAdminHelpEmbed(topic) {
     const embed = new EmbedBuilder()
@@ -83,13 +78,6 @@ export function buildSuperAdminHelpEmbed(topic) {
         embed.addFields({ name: "Notes", value: topic.notes });
     }
     return embed;
-}
-function chunkArray(items, chunkSize) {
-    const chunks = [];
-    for (let i = 0; i < items.length; i += chunkSize) {
-        chunks.push(items.slice(i, i + chunkSize));
-    }
-    return chunks;
 }
 async function showSuperAdminPresenceHistory(interaction) {
     const limit = 5;
@@ -400,7 +388,13 @@ let SuperAdmin = class SuperAdmin {
         });
     }
     async handleSuperAdminHelpButton(interaction) {
-        const topicId = extractSuperAdminTopicId(interaction.customId);
+        const topicId = interaction.values?.[0];
+        if (topicId === "help-main") {
+            const { buildMainHelpResponse } = await import("./help.command.js");
+            const response = buildMainHelpResponse();
+            await safeUpdate(interaction, response);
+            return;
+        }
         const topic = topicId ? SUPERADMIN_HELP_TOPICS.find((entry) => entry.id === topicId) : null;
         if (!topic) {
             const response = buildSuperAdminHelpResponse();
@@ -926,7 +920,7 @@ __decorate([
     Slash({ description: "Show help for server owner commands", name: "help" })
 ], SuperAdmin.prototype, "help", null);
 __decorate([
-    ButtonComponent({ id: /^superadmin-help-.+/ })
+    SelectMenuComponent({ id: "superadmin-help-select" })
 ], SuperAdmin.prototype, "handleSuperAdminHelpButton", null);
 __decorate([
     Slash({
@@ -988,10 +982,6 @@ export function buildSuperAdminHelpResponse(activeTopicId) {
         .setTitle("Superadmin Commands Help")
         .setDescription("Pick a `/superadmin` command to see what it does and how to run it (server owner only).");
     const components = buildSuperAdminHelpButtons(activeTopicId);
-    components.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
-        .setCustomId("help-main")
-        .setLabel("Back to Help Main Menu")
-        .setStyle(ButtonStyle.Secondary)));
     return {
         embeds: [embed],
         components,

@@ -5,10 +5,10 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
 import { ActionRowBuilder, EmbedBuilder, StringSelectMenuBuilder, } from "discord.js";
-import { Discord, SelectMenuComponent, Slash } from "discordx";
-import { isAdmin } from "./admin.command.js";
-import { isModerator } from "./mod.command.js";
-import { isSuperAdmin } from "./superadmin.command.js";
+import { ButtonComponent, Discord, SelectMenuComponent, Slash } from "discordx";
+import { buildAdminHelpResponse, isAdmin } from "./admin.command.js";
+import { buildModHelpResponse, isModerator } from "./mod.command.js";
+import { buildSuperAdminHelpResponse, isSuperAdmin } from "./superadmin.command.js";
 import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 const HELP_TOPICS = [
     {
@@ -601,6 +601,14 @@ let BotHelp = class BotHelp {
             await safeUpdate(interaction, response);
             return;
         }
+        if (!topicId) {
+            const response = buildCategoryHelpResponse(category.id);
+            await safeUpdate(interaction, {
+                ...response,
+                content: "Please pick a command from the list.",
+            });
+            return;
+        }
         const topic = HELP_TOPICS.find((entry) => entry.id === topicId);
         if (topicId === "admin") {
             const ok = await isAdmin(interaction);
@@ -623,6 +631,11 @@ let BotHelp = class BotHelp {
                 ...response,
                 content: "Sorry, I don't recognize that help topic. Showing the category menu.",
             });
+            return;
+        }
+        const topicHelpResponse = buildTopicHelpResponse(topicId);
+        if (topicHelpResponse) {
+            await safeUpdate(interaction, topicHelpResponse);
             return;
         }
         const helpEmbed = buildHelpDetailsEmbed(topic);
@@ -763,6 +776,10 @@ let BotHelp = class BotHelp {
             components: buildGamedbHelpButtons(topic.id),
         });
     }
+    async handleHelpMainButton(interaction) {
+        const response = buildMainHelpResponse();
+        await safeUpdate(interaction, response);
+    }
 };
 __decorate([
     Slash({ description: "Show help for all bot commands", name: "help" })
@@ -791,10 +808,37 @@ __decorate([
 __decorate([
     SelectMenuComponent({ id: "gamedb-help-select" })
 ], BotHelp.prototype, "handleGamedbHelpButton", null);
+__decorate([
+    ButtonComponent({ id: "help-main" })
+], BotHelp.prototype, "handleHelpMainButton", null);
 BotHelp = __decorate([
     Discord()
 ], BotHelp);
 export { BotHelp };
+function buildTopicHelpResponse(topicId) {
+    switch (topicId) {
+        case "gotm":
+            return buildGotmHelpResponse();
+        case "nr-gotm":
+            return buildNrGotmHelpResponse();
+        case "remindme":
+            return buildRemindMeHelpResponse();
+        case "profile":
+            return buildProfileHelpResponse();
+        case "gamedb":
+            return buildGamedbHelpResponse();
+        case "rss":
+            return buildRssHelpResponse();
+        case "admin":
+            return buildAdminHelpResponse();
+        case "mod":
+            return buildModHelpResponse();
+        case "superadmin":
+            return buildSuperAdminHelpResponse();
+        default:
+            return null;
+    }
+}
 function buildCategoryComponents(categoryId, activeTopicId, includeBackToMain = true) {
     const category = getCategoryById(categoryId);
     if (!category)

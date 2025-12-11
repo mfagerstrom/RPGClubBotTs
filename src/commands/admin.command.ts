@@ -1,14 +1,15 @@
 import {
   ActionRowBuilder,
   ApplicationCommandOptionType,
-  ButtonBuilder,
-  ButtonStyle,
   EmbedBuilder,
   MessageFlags,
   PermissionsBitField,
+  StringSelectMenuBuilder,
+  type ButtonInteraction,
+  type StringSelectMenuInteraction,
 } from "discord.js";
-import type { ButtonInteraction, CommandInteraction, User } from "discord.js";
-import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
+import type { CommandInteraction, User } from "discord.js";
+import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption } from "discordx";
 import { DateTime } from "luxon";
 import { AnyRepliable, safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
@@ -123,34 +124,23 @@ export const ADMIN_HELP_TOPICS: AdminHelpTopic[] = [
   },
 ];
 
-function buildAdminHelpButtons(activeId?: AdminHelpTopicId): ActionRowBuilder<ButtonBuilder>[] {
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+function buildAdminHelpButtons(
+  activeId?: AdminHelpTopicId,
+): ActionRowBuilder<StringSelectMenuBuilder>[] {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("admin-help-select")
+    .setPlaceholder("/admin help")
+    .addOptions(
+      ADMIN_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+      })),
+    )
+    .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
 
-  for (const chunk of chunkArray(ADMIN_HELP_TOPICS, 5)) {
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        chunk.map((topic) =>
-          new ButtonBuilder()
-            .setCustomId(`admin-help-${topic.id}`)
-            .setLabel(topic.label)
-            .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary),
-        ),
-      ),
-    );
-  }
-
-  return rows;
-}
-
-function extractAdminTopicId(customId: string): AdminHelpTopicId | null {
-  const prefix = "admin-help-";
-  const startIndex = customId.indexOf(prefix);
-  if (startIndex === -1) return null;
-
-  const raw = customId.slice(startIndex + prefix.length).trim();
-  return (ADMIN_HELP_TOPICS.find((entry) => entry.id === raw)?.id ?? null) as
-    | AdminHelpTopicId
-    | null;
+  return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
 }
 
 export function buildAdminHelpEmbed(topic: AdminHelpTopic): EmbedBuilder {
@@ -170,33 +160,17 @@ export function buildAdminHelpEmbed(topic: AdminHelpTopic): EmbedBuilder {
   return embed;
 }
 
-function chunkArray<T>(items: T[], chunkSize: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += chunkSize) {
-    chunks.push(items.slice(i, i + chunkSize));
-  }
-  return chunks;
-}
-
 export function buildAdminHelpResponse(
   activeTopicId?: AdminHelpTopicId,
 ): {
   embeds: EmbedBuilder[];
-  components: ActionRowBuilder<ButtonBuilder>[];
+  components: ActionRowBuilder<StringSelectMenuBuilder>[];
 } {
   const embed = new EmbedBuilder()
     .setTitle("Admin Commands Help")
     .setDescription("Pick an `/admin` command below to see what it does and how to use it.");
 
   const components = buildAdminHelpButtons(activeTopicId);
-  components.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId("help-main")
-        .setLabel("Back to Help Main Menu")
-        .setStyle(ButtonStyle.Secondary),
-    ),
-  );
 
   return {
     embeds: [embed],
@@ -1194,10 +1168,18 @@ export class Admin {
     });
   }
 
-  @ButtonComponent({ id: /^admin-help-.+/ })
-  async handleAdminHelpButton(interaction: ButtonInteraction): Promise<void> {
-    const topicId = extractAdminTopicId(interaction.customId);
-    const topic = topicId ? ADMIN_HELP_TOPICS.find((entry) => entry.id === topicId) : null;
+  @SelectMenuComponent({ id: "admin-help-select" })
+  async handleAdminHelpMenu(interaction: StringSelectMenuInteraction): Promise<void> {
+    const topicId = interaction.values?.[0] as AdminHelpTopicId | "help-main" | undefined;
+
+    if (topicId === "help-main") {
+      const { buildMainHelpResponse } = await import("./help.command.js");
+      const response = buildMainHelpResponse();
+      await safeUpdate(interaction, response);
+      return;
+    }
+
+    const topic = ADMIN_HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (!topic) {
       const response = buildAdminHelpResponse();

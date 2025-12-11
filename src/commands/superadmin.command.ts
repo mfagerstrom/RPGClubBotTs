@@ -6,7 +6,7 @@ import {
   EmbedBuilder,
   MessageFlags,
   StringSelectMenuBuilder,
-  StringSelectMenuInteraction,
+  type StringSelectMenuInteraction,
 } from "discord.js";
 import type { ButtonInteraction, CommandInteraction, Message } from "discord.js";
 import axios from "axios";
@@ -99,23 +99,21 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
 
 function buildSuperAdminHelpButtons(
   activeId?: SuperAdminHelpTopicId,
-): ActionRowBuilder<ButtonBuilder>[] {
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+): ActionRowBuilder<StringSelectMenuBuilder>[] {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("superadmin-help-select")
+    .setPlaceholder("/superadmin help")
+    .addOptions(
+      SUPERADMIN_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+      })),
+    )
+    .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
 
-  for (const chunk of chunkArray(SUPERADMIN_HELP_TOPICS, 5)) {
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        chunk.map((topic) =>
-          new ButtonBuilder()
-            .setCustomId(`superadmin-help-${topic.id}`)
-            .setLabel(topic.label)
-            .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary),
-        ),
-      ),
-    );
-  }
-
-  return rows;
+  return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
 }
 
 type ImageBufferResult = { buffer: Buffer; mimeType: string | null };
@@ -124,17 +122,6 @@ async function downloadImageBuffer(url: string): Promise<ImageBufferResult> {
   const resp = await axios.get<ArrayBuffer>(url, { responseType: "arraybuffer" });
   const mime = resp.headers?.["content-type"] ?? null;
   return { buffer: Buffer.from(resp.data), mimeType: mime ? String(mime) : null };
-}
-
-function extractSuperAdminTopicId(customId: string): SuperAdminHelpTopicId | null {
-  const prefix = "superadmin-help-";
-  const startIndex = customId.indexOf(prefix);
-  if (startIndex === -1) return null;
-
-  const raw = customId.slice(startIndex + prefix.length).trim();
-  return (SUPERADMIN_HELP_TOPICS.find((entry) => entry.id === raw)?.id ?? null) as
-    | SuperAdminHelpTopicId
-    | null;
 }
 
 export function buildSuperAdminHelpEmbed(topic: SuperAdminHelpTopic): EmbedBuilder {
@@ -152,14 +139,6 @@ export function buildSuperAdminHelpEmbed(topic: SuperAdminHelpTopic): EmbedBuild
   }
 
   return embed;
-}
-
-function chunkArray<T>(items: T[], chunkSize: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += chunkSize) {
-    chunks.push(items.slice(i, i + chunkSize));
-  }
-  return chunks;
 }
 
 async function showSuperAdminPresenceHistory(interaction: CommandInteraction): Promise<void> {
@@ -540,9 +519,17 @@ export class SuperAdmin {
     });
   }
 
-  @ButtonComponent({ id: /^superadmin-help-.+/ })
-  async handleSuperAdminHelpButton(interaction: ButtonInteraction): Promise<void> {
-    const topicId = extractSuperAdminTopicId(interaction.customId);
+  @SelectMenuComponent({ id: "superadmin-help-select" })
+  async handleSuperAdminHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
+    const topicId = interaction.values?.[0] as SuperAdminHelpTopicId | "help-main" | undefined;
+
+    if (topicId === "help-main") {
+      const { buildMainHelpResponse } = await import("./help.command.js");
+      const response = buildMainHelpResponse();
+      await safeUpdate(interaction, response);
+      return;
+    }
+
     const topic = topicId ? SUPERADMIN_HELP_TOPICS.find((entry) => entry.id === topicId) : null;
 
     if (!topic) {
@@ -1190,7 +1177,7 @@ export function buildSuperAdminHelpResponse(
   activeTopicId?: SuperAdminHelpTopicId,
 ): {
   embeds: EmbedBuilder[];
-  components: ActionRowBuilder<ButtonBuilder>[];
+  components: ActionRowBuilder<StringSelectMenuBuilder>[];
 } {
   const embed = new EmbedBuilder()
     .setTitle("Superadmin Commands Help")
@@ -1199,14 +1186,6 @@ export function buildSuperAdminHelpResponse(
     );
 
   const components = buildSuperAdminHelpButtons(activeTopicId);
-  components.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId("help-main")
-        .setLabel("Back to Help Main Menu")
-        .setStyle(ButtonStyle.Secondary),
-    ),
-  );
 
   return {
     embeds: [embed],

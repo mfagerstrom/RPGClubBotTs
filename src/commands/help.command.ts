@@ -1,14 +1,18 @@
-import type { CommandInteraction } from "discord.js";
+import type {
+  ButtonInteraction,
+  CommandInteraction,
+  MessageActionRowComponentBuilder,
+} from "discord.js";
 import {
   ActionRowBuilder,
   EmbedBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
 } from "discord.js";
-import { Discord, SelectMenuComponent, Slash } from "discordx";
-import { isAdmin } from "./admin.command.js";
-import { isModerator } from "./mod.command.js";
-import { isSuperAdmin } from "./superadmin.command.js";
+import { ButtonComponent, Discord, SelectMenuComponent, Slash } from "discordx";
+import { buildAdminHelpResponse, isAdmin } from "./admin.command.js";
+import { buildModHelpResponse, isModerator } from "./mod.command.js";
+import { buildSuperAdminHelpResponse, isSuperAdmin } from "./superadmin.command.js";
 import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 
 type HelpTopicId =
@@ -826,6 +830,15 @@ export class BotHelp {
       return;
     }
 
+    if (!topicId) {
+      const response = buildCategoryHelpResponse(category.id);
+      await safeUpdate(interaction, {
+        ...response,
+        content: "Please pick a command from the list.",
+      });
+      return;
+    }
+
     const topic = HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (topicId === "admin") {
@@ -849,6 +862,12 @@ export class BotHelp {
         ...response,
         content: "Sorry, I don't recognize that help topic. Showing the category menu.",
       });
+      return;
+    }
+
+    const topicHelpResponse = buildTopicHelpResponse(topicId);
+    if (topicHelpResponse) {
+      await safeUpdate(interaction, topicHelpResponse);
       return;
     }
 
@@ -1014,6 +1033,42 @@ export class BotHelp {
       embeds: [embed],
       components: buildGamedbHelpButtons(topic.id),
     });
+  }
+
+  @ButtonComponent({ id: "help-main" })
+  async handleHelpMainButton(interaction: ButtonInteraction): Promise<void> {
+    const response = buildMainHelpResponse();
+    await safeUpdate(interaction, response);
+  }
+}
+
+function buildTopicHelpResponse(
+  topicId: HelpTopicId,
+): {
+  embeds: EmbedBuilder[];
+  components: ActionRowBuilder<MessageActionRowComponentBuilder>[];
+} | null {
+  switch (topicId) {
+    case "gotm":
+      return buildGotmHelpResponse();
+    case "nr-gotm":
+      return buildNrGotmHelpResponse();
+    case "remindme":
+      return buildRemindMeHelpResponse();
+    case "profile":
+      return buildProfileHelpResponse();
+    case "gamedb":
+      return buildGamedbHelpResponse();
+    case "rss":
+      return buildRssHelpResponse();
+    case "admin":
+      return buildAdminHelpResponse();
+    case "mod":
+      return buildModHelpResponse();
+    case "superadmin":
+      return buildSuperAdminHelpResponse();
+    default:
+      return null;
   }
 }
 function buildCategoryComponents(

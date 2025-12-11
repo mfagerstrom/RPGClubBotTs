@@ -1,14 +1,14 @@
 import {
   ActionRowBuilder,
   ApplicationCommandOptionType,
-  ButtonBuilder,
-  ButtonStyle,
   EmbedBuilder,
   MessageFlags,
   PermissionsBitField,
+  StringSelectMenuBuilder,
+  type StringSelectMenuInteraction,
 } from "discord.js";
-import type { ButtonInteraction, CommandInteraction } from "discord.js";
-import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
+import type { CommandInteraction } from "discord.js";
+import { Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption } from "discordx";
 import { getPresenceHistory, setPresence } from "../functions/SetPresence.js";
 import { AnyRepliable, safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 
@@ -39,32 +39,23 @@ export const MOD_HELP_TOPICS: ModHelpTopic[] = [
   },
 ];
 
-function buildModHelpButtons(activeId?: ModHelpTopicId): ActionRowBuilder<ButtonBuilder>[] {
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+function buildModHelpButtons(
+  activeId?: ModHelpTopicId,
+): ActionRowBuilder<StringSelectMenuBuilder>[] {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("mod-help-select")
+    .setPlaceholder("/mod help")
+    .addOptions(
+      MOD_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+      })),
+    )
+    .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
 
-  for (const chunk of chunkArray(MOD_HELP_TOPICS, 5)) {
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        chunk.map((topic) =>
-          new ButtonBuilder()
-            .setCustomId(`mod-help-${topic.id}`)
-            .setLabel(topic.label)
-            .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary),
-        ),
-      ),
-    );
-  }
-
-  return rows;
-}
-
-function extractModTopicId(customId: string): ModHelpTopicId | null {
-  const prefix = "mod-help-";
-  const startIndex = customId.indexOf(prefix);
-  if (startIndex === -1) return null;
-
-  const raw = customId.slice(startIndex + prefix.length).trim();
-  return (MOD_HELP_TOPICS.find((entry) => entry.id === raw)?.id ?? null) as ModHelpTopicId | null;
+  return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
 }
 
 export function buildModHelpEmbed(topic: ModHelpTopic): EmbedBuilder {
@@ -78,14 +69,6 @@ export function buildModHelpEmbed(topic: ModHelpTopic): EmbedBuilder {
   }
 
   return embed;
-}
-
-function chunkArray<T>(items: T[], chunkSize: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += chunkSize) {
-    chunks.push(items.slice(i, i + chunkSize));
-  }
-  return chunks;
 }
 
 @Discord()
@@ -183,9 +166,17 @@ export class Mod {
     });
   }
 
-  @ButtonComponent({ id: /^mod-help-.+/ })
-  async handleModHelpButton(interaction: ButtonInteraction): Promise<void> {
-    const topicId = extractModTopicId(interaction.customId);
+  @SelectMenuComponent({ id: "mod-help-select" })
+  async handleModHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
+    const topicId = interaction.values?.[0] as ModHelpTopicId | "help-main" | undefined;
+
+    if (topicId === "help-main") {
+      const { buildMainHelpResponse } = await import("./help.command.js");
+      const response = buildMainHelpResponse();
+      await safeUpdate(interaction, response);
+      return;
+    }
+
     const topic = topicId ? MOD_HELP_TOPICS.find((entry) => entry.id === topicId) : null;
 
     if (!topic) {
@@ -249,21 +240,13 @@ export function buildModHelpResponse(
   activeTopicId?: ModHelpTopicId,
 ): {
   embeds: EmbedBuilder[];
-  components: ActionRowBuilder<ButtonBuilder>[];
+  components: ActionRowBuilder<StringSelectMenuBuilder>[];
 } {
   const embed = new EmbedBuilder()
     .setTitle("Moderator Commands Help")
     .setDescription("Pick a `/mod` command to see what it does and how to run it.");
 
   const components = buildModHelpButtons(activeTopicId);
-  components.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId("help-main")
-        .setLabel("Back to Help Main Menu")
-        .setStyle(ButtonStyle.Secondary),
-    ),
-  );
 
   return {
     embeds: [embed],
