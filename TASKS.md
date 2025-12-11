@@ -1,4 +1,5 @@
 # Task Checklist
+- Every time a new session is started, update COMMIT-HISTORY.md using git history.
 - never edit existing .sql files.  They have already been run.  Just add new files with changes.
 - name sql files starting with today's date with datestamp (ie 20251210_sql_script_name)
 - Research best practices for Discord.js and DiscordX, along with Typescript, so your coding mindset isn't out of date
