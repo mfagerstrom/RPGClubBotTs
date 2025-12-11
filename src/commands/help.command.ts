@@ -1,14 +1,14 @@
-import type { ButtonInteraction, CommandInteraction } from "discord.js";
+import type { CommandInteraction } from "discord.js";
 import {
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   EmbedBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuInteraction,
 } from "discord.js";
-import { ButtonComponent, Discord, Slash } from "discordx";
-import { buildAdminHelpResponse, isAdmin } from "./admin.command.js";
-import { buildModHelpResponse, isModerator } from "./mod.command.js";
-import { buildSuperAdminHelpResponse, isSuperAdmin } from "./superadmin.command.js";
+import { Discord, SelectMenuComponent, Slash } from "discordx";
+import { isAdmin } from "./admin.command.js";
+import { isModerator } from "./mod.command.js";
+import { isSuperAdmin } from "./superadmin.command.js";
 import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 
 type HelpTopicId =
@@ -229,23 +229,59 @@ const HELP_TOPICS: HelpTopic[] = [
   },
 ];
 
-function buildHelpButtons(activeId?: HelpTopicId): ActionRowBuilder<ButtonBuilder>[] {
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+const HELP_CATEGORIES: { id: string; name: string; topicIds: HelpTopicId[] }[] = [
+  {
+    id: "monthly-games",
+    name: "Monthly Games",
+    topicIds: ["gotm", "nr-gotm", "noms", "round", "nextvote"],
+  },
+  {
+    id: "members",
+    name: "Members",
+    topicIds: ["profile", "mp-info"],
+  },
+  {
+    id: "gamedb",
+    name: "GameDB",
+    topicIds: ["gamedb", "now-playing"],
+  },
+  {
+    id: "utilities",
+    name: "Utilities",
+    topicIds: ["hltb", "coverart", "remindme"],
+  },
+  {
+    id: "server-admin",
+    name: "Server Administration",
+    topicIds: ["mod", "admin", "superadmin", "publicreminder", "thread", "rss"],
+  },
+];
 
-  for (const chunk of chunkArray(HELP_TOPICS, 5)) {
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        chunk.map((topic) =>
-          new ButtonBuilder()
-            .setCustomId(`help-${topic.id}`)
-            .setLabel(topic.label)
-            .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary),
-        ),
-      ),
+function getCategoryById(id: string): (typeof HELP_CATEGORIES)[number] | undefined {
+  return HELP_CATEGORIES.find((cat) => cat.id === id);
+}
+
+function padCommandName(label: string, width = 15): string {
+  const name = label.startsWith("/") ? label.slice(1) : label;
+  return name.padEnd(width, " ");
+}
+
+function formatCommandLine(label: string, summary: string): string {
+  return `> **${padCommandName(label)}** ${summary}`;
+}
+
+function buildHelpButtons(): ActionRowBuilder<StringSelectMenuBuilder>[] {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("help-main-select")
+    .setPlaceholder("Select a category")
+    .addOptions(
+      HELP_CATEGORIES.map((category) => ({
+        label: category.name,
+        value: category.id,
+      })),
     );
-  }
 
-  return rows;
+  return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
 }
 
 function buildHelpDetailsEmbed(topic: HelpTopic): EmbedBuilder {
@@ -298,32 +334,21 @@ const GOTM_HELP_TOPICS: GotmHelpTopic[] = [
   },
 ];
 
-function buildGotmHelpButtons(activeId?: GotmHelpTopicId): ActionRowBuilder<ButtonBuilder>[] {
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+function buildGotmHelpButtons(activeId?: GotmHelpTopicId): ActionRowBuilder<StringSelectMenuBuilder>[] {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("gotm-help-select")
+    .setPlaceholder("/gotm help")
+    .addOptions(
+      GOTM_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+      })),
+    )
+    .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
 
-  for (const chunk of chunkArray(GOTM_HELP_TOPICS, 5)) {
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        chunk.map((topic) =>
-          new ButtonBuilder()
-            .setCustomId(`gotm-help-${topic.id}`)
-            .setLabel(topic.label)
-            .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary),
-        ),
-      ),
-    );
-  }
-
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId("help-main")
-        .setLabel("Back to Help Main Menu")
-        .setStyle(ButtonStyle.Secondary),
-    ),
-  );
-
-  return rows;
+  return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
 }
 
 function buildGotmHelpEmbed(topic: GotmHelpTopic): EmbedBuilder {
@@ -339,27 +364,23 @@ function buildGotmHelpEmbed(topic: GotmHelpTopic): EmbedBuilder {
   return embed;
 }
 
-function buildRemindMeHelpButtons(activeId?: RemindMeHelpTopicId): ActionRowBuilder<ButtonBuilder>[] {
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      REMINDME_HELP_TOPICS.map((topic) =>
-        new ButtonBuilder()
-          .setCustomId(`remindme-help-${topic.id}`)
-          .setLabel(topic.label)
-          .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary),
-      ),
-    ),
-  );
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId("help-main")
-        .setLabel("Back to Help Main Menu")
-        .setStyle(ButtonStyle.Secondary),
-    ),
-  );
-  return rows;
+function buildRemindMeHelpButtons(
+  activeId?: RemindMeHelpTopicId,
+): ActionRowBuilder<StringSelectMenuBuilder>[] {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("remindme-help-select")
+    .setPlaceholder("/remindme help")
+    .addOptions(
+      REMINDME_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+      })),
+    )
+    .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+
+  return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
 }
 
 function buildRemindMeHelpEmbed(topic: RemindMeHelpTopic): EmbedBuilder {
@@ -375,27 +396,23 @@ function buildRemindMeHelpEmbed(topic: RemindMeHelpTopic): EmbedBuilder {
   return embed;
 }
 
-function buildProfileHelpButtons(activeId?: ProfileHelpTopicId): ActionRowBuilder<ButtonBuilder>[] {
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      PROFILE_HELP_TOPICS.map((topic) =>
-        new ButtonBuilder()
-          .setCustomId(`profile-help-${topic.id}`)
-          .setLabel(topic.label)
-          .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary),
-      ),
-    ),
-  );
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId("help-main")
-        .setLabel("Back to Help Main Menu")
-        .setStyle(ButtonStyle.Secondary),
-    ),
-  );
-  return rows;
+function buildProfileHelpButtons(
+  activeId?: ProfileHelpTopicId,
+): ActionRowBuilder<StringSelectMenuBuilder>[] {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("profile-help-select")
+    .setPlaceholder("/profile help")
+    .addOptions(
+      PROFILE_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+      })),
+    )
+    .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+
+  return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
 }
 
 function buildProfileHelpEmbed(topic: ProfileHelpTopic): EmbedBuilder {
@@ -411,27 +428,23 @@ function buildProfileHelpEmbed(topic: ProfileHelpTopic): EmbedBuilder {
   return embed;
 }
 
-function buildGamedbHelpButtons(activeId?: GameDbHelpTopicId): ActionRowBuilder<ButtonBuilder>[] {
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      GAMEDB_HELP_TOPICS.map((topic) =>
-        new ButtonBuilder()
-          .setCustomId(`gamedb-help-${topic.id}`)
-          .setLabel(topic.label)
-          .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary),
-      ),
-    ),
-  );
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId("help-main")
-        .setLabel("Back to Help Main Menu")
-        .setStyle(ButtonStyle.Secondary),
-    ),
-  );
-  return rows;
+function buildGamedbHelpButtons(
+  activeId?: GameDbHelpTopicId,
+): ActionRowBuilder<StringSelectMenuBuilder>[] {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("gamedb-help-select")
+    .setPlaceholder("/gamedb help")
+    .addOptions(
+      GAMEDB_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+      })),
+    )
+    .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+
+  return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
 }
 
 function buildGamedbHelpEmbed(topic: GameDbHelpTopic): EmbedBuilder {
@@ -480,32 +493,23 @@ const NR_GOTM_HELP_TOPICS: NrGotmHelpTopic[] = [
   },
 ];
 
-function buildNrGotmHelpButtons(activeId?: NrGotmHelpTopicId): ActionRowBuilder<ButtonBuilder>[] {
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+function buildNrGotmHelpButtons(
+  activeId?: NrGotmHelpTopicId,
+): ActionRowBuilder<StringSelectMenuBuilder>[] {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("nr-gotm-help-select")
+    .setPlaceholder("/nr-gotm help")
+    .addOptions(
+      NR_GOTM_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+      })),
+    )
+    .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
 
-  for (const chunk of chunkArray(NR_GOTM_HELP_TOPICS, 5)) {
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        chunk.map((topic) =>
-          new ButtonBuilder()
-            .setCustomId(`nr-gotm-help-${topic.id}`)
-            .setLabel(topic.label)
-            .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary),
-        ),
-      ),
-    );
-  }
-
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId("help-main")
-        .setLabel("Back to Help Main Menu")
-        .setStyle(ButtonStyle.Secondary),
-    ),
-  );
-
-  return rows;
+  return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
 }
 
 function buildNrGotmHelpEmbed(topic: NrGotmHelpTopic): EmbedBuilder {
@@ -663,27 +667,21 @@ const GAMEDB_HELP_TOPICS: GameDbHelpTopic[] = [
   },
 ];
 
-function buildRssHelpButtons(activeId?: RssHelpTopicId): ActionRowBuilder<ButtonBuilder>[] {
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      RSS_HELP_TOPICS.map((topic) =>
-        new ButtonBuilder()
-          .setCustomId(`rss-help-${topic.id}`)
-          .setLabel(topic.label)
-          .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary),
-      ),
-    ),
-  );
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId("help-main")
-        .setLabel("Back to Help Main Menu")
-        .setStyle(ButtonStyle.Secondary),
-    ),
-  );
-  return rows;
+function buildRssHelpButtons(activeId?: RssHelpTopicId): ActionRowBuilder<StringSelectMenuBuilder>[] {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("rss-help-select")
+    .setPlaceholder("/rss help")
+    .addOptions(
+      RSS_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+      })),
+    )
+    .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+
+  return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
 }
 
 function buildRssHelpEmbed(topic: RssHelpTopic): EmbedBuilder {
@@ -695,37 +693,60 @@ function buildRssHelpEmbed(topic: RssHelpTopic): EmbedBuilder {
 
 export function buildRssHelpResponse(
   activeTopicId?: RssHelpTopicId,
-): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
+): { embeds: EmbedBuilder[]; components: ActionRowBuilder<StringSelectMenuBuilder>[] } {
   const embed = new EmbedBuilder()
     .setTitle("/rss commands")
-    .setDescription("Choose an RSS subcommand button to view details.");
+    .setDescription("Choose an RSS subcommand from the dropdown to view details.");
 
   const components = buildRssHelpButtons(activeTopicId);
   return { embeds: [embed], components };
 }
 
-export function buildMainHelpResponse(
-  activeTopicId?: HelpTopicId,
-): {
+export function buildMainHelpResponse(): {
   embeds: EmbedBuilder[];
-  components: ActionRowBuilder<ButtonBuilder>[];
+  components: ActionRowBuilder<StringSelectMenuBuilder>[];
 } {
   const embed = new EmbedBuilder()
-    .setTitle("RPG Club Bot Help")
-    .setDescription("Choose a command button below to see its syntax and notes.");
+    .setTitle("RPGClubUtils Commands")
+    .setDescription(
+      "Pick a category from the dropdown to see its commands.\n\n" +
+        "**Monthly Games**\n" +
+        `${formatCommandLine("``gotm``", "GOTM history, nominations, and your pick.")}\n` +
+        `${formatCommandLine("``nr-gotm``", "NR-GOTM history, nominations, and your pick.")}\n` +
+        `${formatCommandLine("``noms``", "See current GOTM and NR-GOTM nominations.")}\n` +
+        `${formatCommandLine("``round``", "See the current round and winners.")}\n` +
+        `${formatCommandLine("``nextvote``", "Check when the next vote happens.")}\n\n` +
+        "**Members**\n" +
+        `${formatCommandLine("``profile``", "View and edit member profiles and Now Playing.")}\n` +
+        `${formatCommandLine("``mp-info``", "Find who has shared multiplayer info.")}\n\n` +
+        "**GameDB**\n" +
+        `${formatCommandLine("``gamedb``", "Search/import games and view GameDB details.")}\n` +
+        `${formatCommandLine("``now-playing``", "Show Now Playing lists and thread links.")}\n\n` +
+        "**Utilities**\n" +
+        `${formatCommandLine("``hltb``", "Look up HowLongToBeat playtimes.")}\n` +
+        `${formatCommandLine("``coverart``", "Grab cover art for a game.")}\n` +
+        `${formatCommandLine("``remindme``", "Set personal reminders with snooze.")}\n\n` +
+        "**Server Administration**\n" +
+        `${formatCommandLine("``mod``", "Moderator tools.")}\n` +
+        `${formatCommandLine("``admin``", "Admin tools.")}\n` +
+        `${formatCommandLine("``superadmin``", "Server Owner tools.")}\n` +
+        `${formatCommandLine("``publicreminder``", "Schedule public reminders.")}\n` +
+        `${formatCommandLine("``thread``", "Link threads to GameDB games.")}\n` +
+        `${formatCommandLine("``rss``", "Manage RSS relays with filters.")}`,
+    );
 
   return {
     embeds: [embed],
-    components: buildHelpButtons(activeTopicId),
+    components: buildHelpButtons(),
   };
 }
 
 export function buildGotmHelpResponse(
   activeTopicId?: GotmHelpTopicId,
-): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
+): { embeds: EmbedBuilder[]; components: ActionRowBuilder<StringSelectMenuBuilder>[] } {
   const embed = new EmbedBuilder()
     .setTitle("/gotm commands")
-    .setDescription("Choose a GOTM subcommand button to view details.");
+    .setDescription("Choose a GOTM subcommand from the dropdown to view details.");
 
   const components = buildGotmHelpButtons(activeTopicId);
   return { embeds: [embed], components };
@@ -733,10 +754,10 @@ export function buildGotmHelpResponse(
 
 export function buildNrGotmHelpResponse(
   activeTopicId?: NrGotmHelpTopicId,
-): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
+): { embeds: EmbedBuilder[]; components: ActionRowBuilder<StringSelectMenuBuilder>[] } {
   const embed = new EmbedBuilder()
     .setTitle("/nr-gotm commands")
-    .setDescription("Choose an NR-GOTM subcommand button to view details.");
+    .setDescription("Choose an NR-GOTM subcommand from the dropdown to view details.");
 
   const components = buildNrGotmHelpButtons(activeTopicId);
   return { embeds: [embed], components };
@@ -744,10 +765,10 @@ export function buildNrGotmHelpResponse(
 
 export function buildRemindMeHelpResponse(
   activeTopicId?: RemindMeHelpTopicId,
-): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
+): { embeds: EmbedBuilder[]; components: ActionRowBuilder<StringSelectMenuBuilder>[] } {
   const embed = new EmbedBuilder()
     .setTitle("/remindme commands")
-    .setDescription("Choose a remindme subcommand button to view details.");
+    .setDescription("Choose a remindme subcommand from the dropdown to view details.");
 
   const components = buildRemindMeHelpButtons(activeTopicId);
   return { embeds: [embed], components };
@@ -755,10 +776,10 @@ export function buildRemindMeHelpResponse(
 
 export function buildProfileHelpResponse(
   activeTopicId?: ProfileHelpTopicId,
-): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
+): { embeds: EmbedBuilder[]; components: ActionRowBuilder<StringSelectMenuBuilder>[] } {
   const embed = new EmbedBuilder()
     .setTitle("/profile commands")
-    .setDescription("Choose a profile subcommand button to view details.");
+    .setDescription("Choose a profile subcommand from the dropdown to view details.");
 
   const components = buildProfileHelpButtons(activeTopicId);
   return { embeds: [embed], components };
@@ -766,29 +787,13 @@ export function buildProfileHelpResponse(
 
 export function buildGamedbHelpResponse(
   activeTopicId?: GameDbHelpTopicId,
-): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
+): { embeds: EmbedBuilder[]; components: ActionRowBuilder<StringSelectMenuBuilder>[] } {
   const embed = new EmbedBuilder()
     .setTitle("/gamedb commands")
-    .setDescription("Choose a GameDB subcommand button to view details.");
+    .setDescription("Choose a GameDB subcommand from the dropdown to view details.");
 
   const components = buildGamedbHelpButtons(activeTopicId);
   return { embeds: [embed], components };
-}
-
-function chunkArray<T>(items: T[], chunkSize: number): T[][] {
-  const chunks: T[][] = [];
-  let current: T[] = [];
-  for (const item of items) {
-    current.push(item);
-    if (current.length === chunkSize) {
-      chunks.push(current);
-      current = [];
-    }
-  }
-  if (current.length) {
-    chunks.push(current);
-  }
-  return chunks;
 }
 
 @Discord()
@@ -805,106 +810,77 @@ export class BotHelp {
     });
   }
 
-  @ButtonComponent({ id: /^help-.+/ })
-  async handleHelpButton(interaction: ButtonInteraction): Promise<void> {
-    if (interaction.customId === "help-main") {
+  @SelectMenuComponent({ id: "help-main-select" })
+  async handleHelpCategory(interaction: StringSelectMenuInteraction): Promise<void> {
+    const categoryId = interaction.values?.[0];
+    const category = categoryId ? getCategoryById(categoryId) : undefined;
+
+    if (!category) {
+      const response = buildMainHelpResponse();
+      await safeUpdate(interaction, {
+        ...response,
+        content: "Sorry, I don't recognize that help category. Showing the main menu.",
+      });
+      return;
+    }
+
+    const response = buildCategoryHelpResponse(category.id);
+    await safeUpdate(interaction, response);
+  }
+
+  @SelectMenuComponent({ id: /^help-category-select:.+/ })
+  async handleCategoryCommand(interaction: StringSelectMenuInteraction): Promise<void> {
+    const [, categoryId] = interaction.customId.split(":");
+    const category = getCategoryById(categoryId);
+    const topicId = interaction.values?.[0] as HelpTopicId | "help-main" | undefined;
+
+    if (!category || topicId === "help-main") {
       const response = buildMainHelpResponse();
       await safeUpdate(interaction, response);
       return;
     }
 
-    const topicId = interaction.customId.replace("help-", "") as HelpTopicId;
     const topic = HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (topicId === "admin") {
       const ok = await isAdmin(interaction);
       if (!ok) return;
-
-      const response = buildAdminHelpResponse();
-      await safeUpdate(interaction, {
-        ...response,
-      });
-      return;
     }
 
     if (topicId === "mod") {
       const ok = await isModerator(interaction);
       if (!ok) return;
-
-      const response = buildModHelpResponse();
-      await safeUpdate(interaction, {
-        ...response,
-      });
-      return;
     }
 
     if (topicId === "superadmin") {
       const ok = await isSuperAdmin(interaction);
       if (!ok) return;
-
-      const response = buildSuperAdminHelpResponse();
-      await safeUpdate(interaction, {
-        ...response,
-      });
-      return;
-    }
-
-    if (topicId === "gotm") {
-      const response = buildGotmHelpResponse();
-      await safeUpdate(interaction, response);
-      return;
-    }
-
-    if (topicId === "nr-gotm") {
-      const response = buildNrGotmHelpResponse();
-      await safeUpdate(interaction, response);
-      return;
-    }
-
-    if (topicId === "remindme") {
-      const response = buildRemindMeHelpResponse();
-      await safeUpdate(interaction, response);
-      return;
-    }
-
-    if (topicId === "profile") {
-      const response = buildProfileHelpResponse();
-      await safeUpdate(interaction, response);
-      return;
-    }
-
-    if (topicId === "gamedb") {
-      const response = buildGamedbHelpResponse();
-      await safeUpdate(interaction, response);
-      return;
-    }
-
-    if (topicId === "rss") {
-      const response = buildRssHelpResponse();
-      await safeUpdate(interaction, response);
-      return;
     }
 
     if (!topic) {
-      const response = buildMainHelpResponse();
+      const response = buildCategoryHelpResponse(category.id);
       await safeUpdate(interaction, {
         ...response,
-        content: "Sorry, I don't recognize that help topic. Showing the main help menu.",
+        content: "Sorry, I don't recognize that help topic. Showing the category menu.",
       });
       return;
     }
 
     const helpEmbed = buildHelpDetailsEmbed(topic);
-
     await safeUpdate(interaction, {
       embeds: [helpEmbed],
-      components: buildHelpButtons(topic.id),
+      components: buildCategoryComponents(category.id, topic.id),
     });
   }
 
-  @ButtonComponent({ id: /^gotm-help-.+/ })
-  async handleGotmHelpButton(interaction: ButtonInteraction): Promise<void> {
-    const topicId = interaction.customId.replace("gotm-help-", "") as GotmHelpTopicId;
+  @SelectMenuComponent({ id: "gotm-help-select" })
+  async handleGotmHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
+    const topicId = interaction.values?.[0] as GotmHelpTopicId | "help-main" | undefined;
+    if (topicId === "help-main") {
+      const response = buildMainHelpResponse();
+      await safeUpdate(interaction, response);
+      return;
+    }
     const topic = GOTM_HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (!topic) {
@@ -923,9 +899,14 @@ export class BotHelp {
     });
   }
 
-  @ButtonComponent({ id: /^nr-gotm-help-.+/ })
-  async handleNrGotmHelpButton(interaction: ButtonInteraction): Promise<void> {
-    const topicId = interaction.customId.replace("nr-gotm-help-", "") as NrGotmHelpTopicId;
+  @SelectMenuComponent({ id: "nr-gotm-help-select" })
+  async handleNrGotmHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
+    const topicId = interaction.values?.[0] as NrGotmHelpTopicId | "help-main" | undefined;
+    if (topicId === "help-main") {
+      const response = buildMainHelpResponse();
+      await safeUpdate(interaction, response);
+      return;
+    }
     const topic = NR_GOTM_HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (!topic) {
@@ -944,9 +925,14 @@ export class BotHelp {
     });
   }
 
-  @ButtonComponent({ id: /^rss-help-.+/ })
-  async handleRssHelpButton(interaction: ButtonInteraction): Promise<void> {
-    const topicId = interaction.customId.replace("rss-help-", "") as RssHelpTopicId;
+  @SelectMenuComponent({ id: "rss-help-select" })
+  async handleRssHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
+    const topicId = interaction.values?.[0] as RssHelpTopicId | "help-main" | undefined;
+    if (topicId === "help-main") {
+      const response = buildMainHelpResponse();
+      await safeUpdate(interaction, response);
+      return;
+    }
     const topic = RSS_HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (!topic) {
@@ -965,9 +951,14 @@ export class BotHelp {
     });
   }
 
-  @ButtonComponent({ id: /^remindme-help-.+/ })
-  async handleRemindMeHelpButton(interaction: ButtonInteraction): Promise<void> {
-    const topicId = interaction.customId.replace("remindme-help-", "") as RemindMeHelpTopicId;
+  @SelectMenuComponent({ id: "remindme-help-select" })
+  async handleRemindMeHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
+    const topicId = interaction.values?.[0] as RemindMeHelpTopicId | "help-main" | undefined;
+    if (topicId === "help-main") {
+      const response = buildMainHelpResponse();
+      await safeUpdate(interaction, response);
+      return;
+    }
     const topic = REMINDME_HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (!topic) {
@@ -987,9 +978,14 @@ export class BotHelp {
     });
   }
 
-  @ButtonComponent({ id: /^profile-help-.+/ })
-  async handleProfileHelpButton(interaction: ButtonInteraction): Promise<void> {
-    const topicId = interaction.customId.replace("profile-help-", "") as ProfileHelpTopicId;
+  @SelectMenuComponent({ id: "profile-help-select" })
+  async handleProfileHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
+    const topicId = interaction.values?.[0] as ProfileHelpTopicId | "help-main" | undefined;
+    if (topicId === "help-main") {
+      const response = buildMainHelpResponse();
+      await safeUpdate(interaction, response);
+      return;
+    }
     const topic = PROFILE_HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (!topic) {
@@ -1008,9 +1004,14 @@ export class BotHelp {
     });
   }
 
-  @ButtonComponent({ id: /^gamedb-help-.+/ })
-  async handleGamedbHelpButton(interaction: ButtonInteraction): Promise<void> {
-    const topicId = interaction.customId.replace("gamedb-help-", "") as GameDbHelpTopicId;
+  @SelectMenuComponent({ id: "gamedb-help-select" })
+  async handleGamedbHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
+    const topicId = interaction.values?.[0] as GameDbHelpTopicId | "help-main" | undefined;
+    if (topicId === "help-main") {
+      const response = buildMainHelpResponse();
+      await safeUpdate(interaction, response);
+      return;
+    }
     const topic = GAMEDB_HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (!topic) {
@@ -1028,4 +1029,53 @@ export class BotHelp {
       components: buildGamedbHelpButtons(topic.id),
     });
   }
+}
+function buildCategoryComponents(
+  categoryId: string,
+  activeTopicId?: HelpTopicId,
+): ActionRowBuilder<StringSelectMenuBuilder>[] {
+  const category = getCategoryById(categoryId);
+  if (!category) return buildHelpButtons();
+
+  const topics = category.topicIds
+    .map((id) => HELP_TOPICS.find((t) => t.id === id))
+    .filter((t): t is HelpTopic => Boolean(t));
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`help-category-select:${categoryId}`)
+    .setPlaceholder(`${category.name} commands`)
+    .addOptions(
+      topics.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeTopicId,
+      })),
+    )
+    .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+
+  return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
+}
+
+function buildCategoryHelpResponse(
+  categoryId: string,
+  activeTopicId?: HelpTopicId,
+): { embeds: EmbedBuilder[]; components: ActionRowBuilder<StringSelectMenuBuilder>[] } {
+  const category = getCategoryById(categoryId);
+  const topics = category?.topicIds
+    .map((id) => HELP_TOPICS.find((t) => t.id === id))
+    .filter((t): t is HelpTopic => Boolean(t));
+
+  const embed = new EmbedBuilder()
+    .setTitle(`${category?.name ?? "Commands"}`)
+    .setDescription(
+      topics && topics.length
+        ? topics.map((t) => formatCommandLine(t.label, t.summary)).join("\n")
+        : "No commands found for this category.",
+    );
+
+  return {
+    embeds: [embed],
+    components: buildCategoryComponents(categoryId, activeTopicId),
+  };
 }

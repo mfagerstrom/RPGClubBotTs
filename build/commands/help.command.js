@@ -4,11 +4,11 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, } from "discord.js";
-import { ButtonComponent, Discord, Slash } from "discordx";
-import { buildAdminHelpResponse, isAdmin } from "./admin.command.js";
-import { buildModHelpResponse, isModerator } from "./mod.command.js";
-import { buildSuperAdminHelpResponse, isSuperAdmin } from "./superadmin.command.js";
+import { ActionRowBuilder, EmbedBuilder, StringSelectMenuBuilder, } from "discord.js";
+import { Discord, SelectMenuComponent, Slash } from "discordx";
+import { isAdmin } from "./admin.command.js";
+import { isModerator } from "./mod.command.js";
+import { isSuperAdmin } from "./superadmin.command.js";
 import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 const HELP_TOPICS = [
     {
@@ -132,15 +132,52 @@ const HELP_TOPICS = [
         syntax: "Use /superadmin help to see the subcommands and details.",
     },
 ];
-function buildHelpButtons(activeId) {
-    const rows = [];
-    for (const chunk of chunkArray(HELP_TOPICS, 5)) {
-        rows.push(new ActionRowBuilder().addComponents(chunk.map((topic) => new ButtonBuilder()
-            .setCustomId(`help-${topic.id}`)
-            .setLabel(topic.label)
-            .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary))));
-    }
-    return rows;
+const HELP_CATEGORIES = [
+    {
+        id: "monthly-games",
+        name: "Monthly Games",
+        topicIds: ["gotm", "nr-gotm", "noms", "round", "nextvote"],
+    },
+    {
+        id: "members",
+        name: "Members",
+        topicIds: ["profile", "mp-info"],
+    },
+    {
+        id: "gamedb",
+        name: "GameDB",
+        topicIds: ["gamedb", "now-playing"],
+    },
+    {
+        id: "utilities",
+        name: "Utilities",
+        topicIds: ["hltb", "coverart", "remindme"],
+    },
+    {
+        id: "server-admin",
+        name: "Server Administration",
+        topicIds: ["mod", "admin", "superadmin", "publicreminder", "thread", "rss"],
+    },
+];
+function getCategoryById(id) {
+    return HELP_CATEGORIES.find((cat) => cat.id === id);
+}
+function padCommandName(label, width = 15) {
+    const name = label.startsWith("/") ? label.slice(1) : label;
+    return name.padEnd(width, " ");
+}
+function formatCommandLine(label, summary) {
+    return `> **${padCommandName(label)}** ${summary}`;
+}
+function buildHelpButtons() {
+    const select = new StringSelectMenuBuilder()
+        .setCustomId("help-main-select")
+        .setPlaceholder("Select a category")
+        .addOptions(HELP_CATEGORIES.map((category) => ({
+        label: category.name,
+        value: category.id,
+    })));
+    return [new ActionRowBuilder().addComponents(select)];
 }
 function buildHelpDetailsEmbed(topic) {
     const embed = new EmbedBuilder()
@@ -186,18 +223,17 @@ const GOTM_HELP_TOPICS = [
     },
 ];
 function buildGotmHelpButtons(activeId) {
-    const rows = [];
-    for (const chunk of chunkArray(GOTM_HELP_TOPICS, 5)) {
-        rows.push(new ActionRowBuilder().addComponents(chunk.map((topic) => new ButtonBuilder()
-            .setCustomId(`gotm-help-${topic.id}`)
-            .setLabel(topic.label)
-            .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary))));
-    }
-    rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
-        .setCustomId("help-main")
-        .setLabel("Back to Help Main Menu")
-        .setStyle(ButtonStyle.Secondary)));
-    return rows;
+    const select = new StringSelectMenuBuilder()
+        .setCustomId("gotm-help-select")
+        .setPlaceholder("/gotm help")
+        .addOptions(GOTM_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+    })))
+        .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+    return [new ActionRowBuilder().addComponents(select)];
 }
 function buildGotmHelpEmbed(topic) {
     const embed = new EmbedBuilder()
@@ -210,16 +246,17 @@ function buildGotmHelpEmbed(topic) {
     return embed;
 }
 function buildRemindMeHelpButtons(activeId) {
-    const rows = [];
-    rows.push(new ActionRowBuilder().addComponents(REMINDME_HELP_TOPICS.map((topic) => new ButtonBuilder()
-        .setCustomId(`remindme-help-${topic.id}`)
-        .setLabel(topic.label)
-        .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary))));
-    rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
-        .setCustomId("help-main")
-        .setLabel("Back to Help Main Menu")
-        .setStyle(ButtonStyle.Secondary)));
-    return rows;
+    const select = new StringSelectMenuBuilder()
+        .setCustomId("remindme-help-select")
+        .setPlaceholder("/remindme help")
+        .addOptions(REMINDME_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+    })))
+        .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+    return [new ActionRowBuilder().addComponents(select)];
 }
 function buildRemindMeHelpEmbed(topic) {
     const embed = new EmbedBuilder()
@@ -232,16 +269,17 @@ function buildRemindMeHelpEmbed(topic) {
     return embed;
 }
 function buildProfileHelpButtons(activeId) {
-    const rows = [];
-    rows.push(new ActionRowBuilder().addComponents(PROFILE_HELP_TOPICS.map((topic) => new ButtonBuilder()
-        .setCustomId(`profile-help-${topic.id}`)
-        .setLabel(topic.label)
-        .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary))));
-    rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
-        .setCustomId("help-main")
-        .setLabel("Back to Help Main Menu")
-        .setStyle(ButtonStyle.Secondary)));
-    return rows;
+    const select = new StringSelectMenuBuilder()
+        .setCustomId("profile-help-select")
+        .setPlaceholder("/profile help")
+        .addOptions(PROFILE_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+    })))
+        .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+    return [new ActionRowBuilder().addComponents(select)];
 }
 function buildProfileHelpEmbed(topic) {
     const embed = new EmbedBuilder()
@@ -254,16 +292,17 @@ function buildProfileHelpEmbed(topic) {
     return embed;
 }
 function buildGamedbHelpButtons(activeId) {
-    const rows = [];
-    rows.push(new ActionRowBuilder().addComponents(GAMEDB_HELP_TOPICS.map((topic) => new ButtonBuilder()
-        .setCustomId(`gamedb-help-${topic.id}`)
-        .setLabel(topic.label)
-        .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary))));
-    rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
-        .setCustomId("help-main")
-        .setLabel("Back to Help Main Menu")
-        .setStyle(ButtonStyle.Secondary)));
-    return rows;
+    const select = new StringSelectMenuBuilder()
+        .setCustomId("gamedb-help-select")
+        .setPlaceholder("/gamedb help")
+        .addOptions(GAMEDB_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+    })))
+        .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+    return [new ActionRowBuilder().addComponents(select)];
 }
 function buildGamedbHelpEmbed(topic) {
     const embed = new EmbedBuilder()
@@ -306,18 +345,17 @@ const NR_GOTM_HELP_TOPICS = [
     },
 ];
 function buildNrGotmHelpButtons(activeId) {
-    const rows = [];
-    for (const chunk of chunkArray(NR_GOTM_HELP_TOPICS, 5)) {
-        rows.push(new ActionRowBuilder().addComponents(chunk.map((topic) => new ButtonBuilder()
-            .setCustomId(`nr-gotm-help-${topic.id}`)
-            .setLabel(topic.label)
-            .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary))));
-    }
-    rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
-        .setCustomId("help-main")
-        .setLabel("Back to Help Main Menu")
-        .setStyle(ButtonStyle.Secondary)));
-    return rows;
+    const select = new StringSelectMenuBuilder()
+        .setCustomId("nr-gotm-help-select")
+        .setPlaceholder("/nr-gotm help")
+        .addOptions(NR_GOTM_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+    })))
+        .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+    return [new ActionRowBuilder().addComponents(select)];
 }
 function buildNrGotmHelpEmbed(topic) {
     const embed = new EmbedBuilder()
@@ -449,16 +487,17 @@ const GAMEDB_HELP_TOPICS = [
     },
 ];
 function buildRssHelpButtons(activeId) {
-    const rows = [];
-    rows.push(new ActionRowBuilder().addComponents(RSS_HELP_TOPICS.map((topic) => new ButtonBuilder()
-        .setCustomId(`rss-help-${topic.id}`)
-        .setLabel(topic.label)
-        .setStyle(topic.id === activeId ? ButtonStyle.Secondary : ButtonStyle.Primary))));
-    rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
-        .setCustomId("help-main")
-        .setLabel("Back to Help Main Menu")
-        .setStyle(ButtonStyle.Secondary)));
-    return rows;
+    const select = new StringSelectMenuBuilder()
+        .setCustomId("rss-help-select")
+        .setPlaceholder("/rss help")
+        .addOptions(RSS_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+    })))
+        .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+    return [new ActionRowBuilder().addComponents(select)];
 }
 function buildRssHelpEmbed(topic) {
     return new EmbedBuilder()
@@ -469,68 +508,76 @@ function buildRssHelpEmbed(topic) {
 export function buildRssHelpResponse(activeTopicId) {
     const embed = new EmbedBuilder()
         .setTitle("/rss commands")
-        .setDescription("Choose an RSS subcommand button to view details.");
+        .setDescription("Choose an RSS subcommand from the dropdown to view details.");
     const components = buildRssHelpButtons(activeTopicId);
     return { embeds: [embed], components };
 }
-export function buildMainHelpResponse(activeTopicId) {
+export function buildMainHelpResponse() {
     const embed = new EmbedBuilder()
-        .setTitle("RPG Club Bot Help")
-        .setDescription("Choose a command button below to see its syntax and notes.");
+        .setTitle("RPGClubUtils Commands")
+        .setDescription("Pick a category from the dropdown to see its commands.\n\n" +
+        "**Monthly Games**\n" +
+        `${formatCommandLine("/gotm", "GOTM history, nominations, and your pick.")}\n` +
+        `${formatCommandLine("/nr-gotm", "NR-GOTM history, nominations, and your pick.")}\n` +
+        `${formatCommandLine("/noms", "See current GOTM and NR-GOTM nominations.")}\n` +
+        `${formatCommandLine("/round", "See the current round and winners.")}\n` +
+        `${formatCommandLine("/nextvote", "Check when the next vote happens.")}\n\n` +
+        "**Members**\n" +
+        `${formatCommandLine("/profile", "View and edit member profiles and Now Playing.")}\n` +
+        `${formatCommandLine("/mp-info", "Find who has shared multiplayer info.")}\n\n` +
+        "**GameDB**\n" +
+        `${formatCommandLine("/gamedb", "Search/import games and view GameDB details.")}\n` +
+        `${formatCommandLine("/now-playing", "Show Now Playing lists and thread links.")}\n\n` +
+        "**Utilities**\n" +
+        `${formatCommandLine("/hltb", "Look up HowLongToBeat playtimes.")}\n` +
+        `${formatCommandLine("/coverart", "Grab cover art for a game.")}\n` +
+        `${formatCommandLine("/remindme", "Set personal reminders with snooze.")}\n\n` +
+        "**Server Administration**\n" +
+        `${formatCommandLine("/mod", "Moderator tools.")}\n` +
+        `${formatCommandLine("/admin", "Admin tools.")}\n` +
+        `${formatCommandLine("/superadmin", "Server Owner tools.")}\n` +
+        `${formatCommandLine("/publicreminder", "Schedule public reminders.")}\n` +
+        `${formatCommandLine("/thread", "Link threads to GameDB games.")}\n` +
+        `${formatCommandLine("/rss", "Manage RSS relays with filters.")}`);
     return {
         embeds: [embed],
-        components: buildHelpButtons(activeTopicId),
+        components: buildHelpButtons(),
     };
 }
 export function buildGotmHelpResponse(activeTopicId) {
     const embed = new EmbedBuilder()
         .setTitle("/gotm commands")
-        .setDescription("Choose a GOTM subcommand button to view details.");
+        .setDescription("Choose a GOTM subcommand from the dropdown to view details.");
     const components = buildGotmHelpButtons(activeTopicId);
     return { embeds: [embed], components };
 }
 export function buildNrGotmHelpResponse(activeTopicId) {
     const embed = new EmbedBuilder()
         .setTitle("/nr-gotm commands")
-        .setDescription("Choose an NR-GOTM subcommand button to view details.");
+        .setDescription("Choose an NR-GOTM subcommand from the dropdown to view details.");
     const components = buildNrGotmHelpButtons(activeTopicId);
     return { embeds: [embed], components };
 }
 export function buildRemindMeHelpResponse(activeTopicId) {
     const embed = new EmbedBuilder()
         .setTitle("/remindme commands")
-        .setDescription("Choose a remindme subcommand button to view details.");
+        .setDescription("Choose a remindme subcommand from the dropdown to view details.");
     const components = buildRemindMeHelpButtons(activeTopicId);
     return { embeds: [embed], components };
 }
 export function buildProfileHelpResponse(activeTopicId) {
     const embed = new EmbedBuilder()
         .setTitle("/profile commands")
-        .setDescription("Choose a profile subcommand button to view details.");
+        .setDescription("Choose a profile subcommand from the dropdown to view details.");
     const components = buildProfileHelpButtons(activeTopicId);
     return { embeds: [embed], components };
 }
 export function buildGamedbHelpResponse(activeTopicId) {
     const embed = new EmbedBuilder()
         .setTitle("/gamedb commands")
-        .setDescription("Choose a GameDB subcommand button to view details.");
+        .setDescription("Choose a GameDB subcommand from the dropdown to view details.");
     const components = buildGamedbHelpButtons(activeTopicId);
     return { embeds: [embed], components };
-}
-function chunkArray(items, chunkSize) {
-    const chunks = [];
-    let current = [];
-    for (const item of items) {
-        current.push(item);
-        if (current.length === chunkSize) {
-            chunks.push(current);
-            current = [];
-        }
-    }
-    if (current.length) {
-        chunks.push(current);
-    }
-    return chunks;
 }
 let BotHelp = class BotHelp {
     async help(interaction) {
@@ -541,90 +588,66 @@ let BotHelp = class BotHelp {
             ephemeral: true,
         });
     }
-    async handleHelpButton(interaction) {
-        if (interaction.customId === "help-main") {
+    async handleHelpCategory(interaction) {
+        const categoryId = interaction.values?.[0];
+        const category = categoryId ? getCategoryById(categoryId) : undefined;
+        if (!category) {
+            const response = buildMainHelpResponse();
+            await safeUpdate(interaction, {
+                ...response,
+                content: "Sorry, I don't recognize that help category. Showing the main menu.",
+            });
+            return;
+        }
+        const response = buildCategoryHelpResponse(category.id);
+        await safeUpdate(interaction, response);
+    }
+    async handleCategoryCommand(interaction) {
+        const [, categoryId] = interaction.customId.split(":");
+        const category = getCategoryById(categoryId);
+        const topicId = interaction.values?.[0];
+        if (!category || topicId === "help-main") {
             const response = buildMainHelpResponse();
             await safeUpdate(interaction, response);
             return;
         }
-        const topicId = interaction.customId.replace("help-", "");
         const topic = HELP_TOPICS.find((entry) => entry.id === topicId);
         if (topicId === "admin") {
             const ok = await isAdmin(interaction);
             if (!ok)
                 return;
-            const response = buildAdminHelpResponse();
-            await safeUpdate(interaction, {
-                ...response,
-            });
-            return;
         }
         if (topicId === "mod") {
             const ok = await isModerator(interaction);
             if (!ok)
                 return;
-            const response = buildModHelpResponse();
-            await safeUpdate(interaction, {
-                ...response,
-            });
-            return;
         }
         if (topicId === "superadmin") {
             const ok = await isSuperAdmin(interaction);
             if (!ok)
                 return;
-            const response = buildSuperAdminHelpResponse();
-            await safeUpdate(interaction, {
-                ...response,
-            });
-            return;
-        }
-        if (topicId === "gotm") {
-            const response = buildGotmHelpResponse();
-            await safeUpdate(interaction, response);
-            return;
-        }
-        if (topicId === "nr-gotm") {
-            const response = buildNrGotmHelpResponse();
-            await safeUpdate(interaction, response);
-            return;
-        }
-        if (topicId === "remindme") {
-            const response = buildRemindMeHelpResponse();
-            await safeUpdate(interaction, response);
-            return;
-        }
-        if (topicId === "profile") {
-            const response = buildProfileHelpResponse();
-            await safeUpdate(interaction, response);
-            return;
-        }
-        if (topicId === "gamedb") {
-            const response = buildGamedbHelpResponse();
-            await safeUpdate(interaction, response);
-            return;
-        }
-        if (topicId === "rss") {
-            const response = buildRssHelpResponse();
-            await safeUpdate(interaction, response);
-            return;
         }
         if (!topic) {
-            const response = buildMainHelpResponse();
+            const response = buildCategoryHelpResponse(category.id);
             await safeUpdate(interaction, {
                 ...response,
-                content: "Sorry, I don't recognize that help topic. Showing the main help menu.",
+                content: "Sorry, I don't recognize that help topic. Showing the category menu.",
             });
             return;
         }
         const helpEmbed = buildHelpDetailsEmbed(topic);
         await safeUpdate(interaction, {
             embeds: [helpEmbed],
-            components: buildHelpButtons(topic.id),
+            components: buildCategoryComponents(category.id, topic.id),
         });
     }
     async handleGotmHelpButton(interaction) {
-        const topicId = interaction.customId.replace("gotm-help-", "");
+        const topicId = interaction.values?.[0];
+        if (topicId === "help-main") {
+            const response = buildMainHelpResponse();
+            await safeUpdate(interaction, response);
+            return;
+        }
         const topic = GOTM_HELP_TOPICS.find((entry) => entry.id === topicId);
         if (!topic) {
             const response = buildGotmHelpResponse();
@@ -641,7 +664,12 @@ let BotHelp = class BotHelp {
         });
     }
     async handleNrGotmHelpButton(interaction) {
-        const topicId = interaction.customId.replace("nr-gotm-help-", "");
+        const topicId = interaction.values?.[0];
+        if (topicId === "help-main") {
+            const response = buildMainHelpResponse();
+            await safeUpdate(interaction, response);
+            return;
+        }
         const topic = NR_GOTM_HELP_TOPICS.find((entry) => entry.id === topicId);
         if (!topic) {
             const response = buildNrGotmHelpResponse();
@@ -658,7 +686,12 @@ let BotHelp = class BotHelp {
         });
     }
     async handleRssHelpButton(interaction) {
-        const topicId = interaction.customId.replace("rss-help-", "");
+        const topicId = interaction.values?.[0];
+        if (topicId === "help-main") {
+            const response = buildMainHelpResponse();
+            await safeUpdate(interaction, response);
+            return;
+        }
         const topic = RSS_HELP_TOPICS.find((entry) => entry.id === topicId);
         if (!topic) {
             const response = buildRssHelpResponse();
@@ -675,7 +708,12 @@ let BotHelp = class BotHelp {
         });
     }
     async handleRemindMeHelpButton(interaction) {
-        const topicId = interaction.customId.replace("remindme-help-", "");
+        const topicId = interaction.values?.[0];
+        if (topicId === "help-main") {
+            const response = buildMainHelpResponse();
+            await safeUpdate(interaction, response);
+            return;
+        }
         const topic = REMINDME_HELP_TOPICS.find((entry) => entry.id === topicId);
         if (!topic) {
             const response = buildRemindMeHelpResponse();
@@ -692,7 +730,12 @@ let BotHelp = class BotHelp {
         });
     }
     async handleProfileHelpButton(interaction) {
-        const topicId = interaction.customId.replace("profile-help-", "");
+        const topicId = interaction.values?.[0];
+        if (topicId === "help-main") {
+            const response = buildMainHelpResponse();
+            await safeUpdate(interaction, response);
+            return;
+        }
         const topic = PROFILE_HELP_TOPICS.find((entry) => entry.id === topicId);
         if (!topic) {
             const response = buildProfileHelpResponse();
@@ -709,7 +752,12 @@ let BotHelp = class BotHelp {
         });
     }
     async handleGamedbHelpButton(interaction) {
-        const topicId = interaction.customId.replace("gamedb-help-", "");
+        const topicId = interaction.values?.[0];
+        if (topicId === "help-main") {
+            const response = buildMainHelpResponse();
+            await safeUpdate(interaction, response);
+            return;
+        }
         const topic = GAMEDB_HELP_TOPICS.find((entry) => entry.id === topicId);
         if (!topic) {
             const response = buildGamedbHelpResponse();
@@ -730,27 +778,64 @@ __decorate([
     Slash({ description: "Show help for all bot commands", name: "help" })
 ], BotHelp.prototype, "help", null);
 __decorate([
-    ButtonComponent({ id: /^help-.+/ })
-], BotHelp.prototype, "handleHelpButton", null);
+    SelectMenuComponent({ id: "help-main-select" })
+], BotHelp.prototype, "handleHelpCategory", null);
 __decorate([
-    ButtonComponent({ id: /^gotm-help-.+/ })
+    SelectMenuComponent({ id: /^help-category-select:.+/ })
+], BotHelp.prototype, "handleCategoryCommand", null);
+__decorate([
+    SelectMenuComponent({ id: "gotm-help-select" })
 ], BotHelp.prototype, "handleGotmHelpButton", null);
 __decorate([
-    ButtonComponent({ id: /^nr-gotm-help-.+/ })
+    SelectMenuComponent({ id: "nr-gotm-help-select" })
 ], BotHelp.prototype, "handleNrGotmHelpButton", null);
 __decorate([
-    ButtonComponent({ id: /^rss-help-.+/ })
+    SelectMenuComponent({ id: "rss-help-select" })
 ], BotHelp.prototype, "handleRssHelpButton", null);
 __decorate([
-    ButtonComponent({ id: /^remindme-help-.+/ })
+    SelectMenuComponent({ id: "remindme-help-select" })
 ], BotHelp.prototype, "handleRemindMeHelpButton", null);
 __decorate([
-    ButtonComponent({ id: /^profile-help-.+/ })
+    SelectMenuComponent({ id: "profile-help-select" })
 ], BotHelp.prototype, "handleProfileHelpButton", null);
 __decorate([
-    ButtonComponent({ id: /^gamedb-help-.+/ })
+    SelectMenuComponent({ id: "gamedb-help-select" })
 ], BotHelp.prototype, "handleGamedbHelpButton", null);
 BotHelp = __decorate([
     Discord()
 ], BotHelp);
 export { BotHelp };
+function buildCategoryComponents(categoryId, activeTopicId) {
+    const category = getCategoryById(categoryId);
+    if (!category)
+        return buildHelpButtons();
+    const topics = category.topicIds
+        .map((id) => HELP_TOPICS.find((t) => t.id === id))
+        .filter((t) => Boolean(t));
+    const select = new StringSelectMenuBuilder()
+        .setCustomId(`help-category-select:${categoryId}`)
+        .setPlaceholder(`${category.name} commands`)
+        .addOptions(topics.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeTopicId,
+    })))
+        .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+    return [new ActionRowBuilder().addComponents(select)];
+}
+function buildCategoryHelpResponse(categoryId, activeTopicId) {
+    const category = getCategoryById(categoryId);
+    const topics = category?.topicIds
+        .map((id) => HELP_TOPICS.find((t) => t.id === id))
+        .filter((t) => Boolean(t));
+    const embed = new EmbedBuilder()
+        .setTitle(`${category?.name ?? "Commands"}`)
+        .setDescription(topics && topics.length
+        ? topics.map((t) => formatCommandLine(t.label, t.summary)).join("\n")
+        : "No commands found for this category.");
+    return {
+        embeds: [embed],
+        components: buildCategoryComponents(categoryId, activeTopicId),
+    };
+}
