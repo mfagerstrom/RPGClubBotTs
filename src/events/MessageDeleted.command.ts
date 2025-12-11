@@ -7,10 +7,5 @@ import { Discord, On } from "discordx";
     messageDelete([_message]: ArgsOf<"messageDelete">, _client: Client): void {
       void _message;
       void _client;
-      /* 
-      const userName: string | undefined =
-        message.member?.nickname?.length ? message.member?.nickname : message.member?.displayName;
-    console.log("Message Deleted", userName, message.content);
-    */
   }
 }

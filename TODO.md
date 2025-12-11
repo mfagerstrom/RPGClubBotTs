@@ -1,4 +1,5 @@
 - Create admin function for creating a new round and doing everything needed so that it's not a manual process.
+- Normalize all embed styles / colors / etc
 - Normalize behavior between /gamedb add, search and view
 -  Add who's playing a game to its /gamedb view
 -  Change 1:1 thread:game relationship to 1:many

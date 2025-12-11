@@ -176,7 +176,5 @@ export class ThreadCreated {
         }
       }
     }
-
-    // Join Live Event forum threads as well
   }
 }
