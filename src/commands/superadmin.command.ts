@@ -621,7 +621,7 @@ export class SuperAdmin {
   }
 
   @Slash({
-    description: "Backfill THREADS.GAMEDB_GAME_ID from GOTM / NR-GOTM thread links",
+    description: "Backfill thread/game links from GOTM / NR-GOTM data",
     name: "thread-game-link-backfill",
   })
   async threadGameLinkBackfill(interaction: CommandInteraction): Promise<void> {

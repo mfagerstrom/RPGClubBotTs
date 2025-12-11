@@ -2,7 +2,6 @@
 - Normalize all embed styles / colors / etc
 - Normalize behavior between /gamedb add, search and view
 - Add who's playing a game to its /gamedb view
-- Change 1:1 thread:game relationship to 1:many
 - Finish developing now-playing commands, the embeds could use some work, especially removing a now playing entry
 - Move /profile nowplaying commands to /nowplaying
 - Add paging to results from IGDB during game import

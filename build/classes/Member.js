@@ -44,10 +44,17 @@ export default class Member {
         const connection = await getOraclePool().getConnection();
         try {
             const res = await connection.execute(`SELECT g.TITLE,
-                (
-                  SELECT MIN(th.THREAD_ID)
-                  FROM THREADS th
-                  WHERE th.GAMEDB_GAME_ID = u.GAMEDB_GAME_ID
+                COALESCE(
+                  (
+                    SELECT MIN(tgl.THREAD_ID)
+                    FROM THREAD_GAME_LINKS tgl
+                    WHERE tgl.GAMEDB_GAME_ID = u.GAMEDB_GAME_ID
+                  ),
+                  (
+                    SELECT MIN(th.THREAD_ID)
+                    FROM THREADS th
+                    WHERE th.GAMEDB_GAME_ID = u.GAMEDB_GAME_ID
+                  )
                 ) AS THREAD_ID
            FROM USER_NOW_PLAYING u
            JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
@@ -69,10 +76,17 @@ export default class Member {
                 ru.USERNAME,
                 ru.GLOBAL_NAME,
                 g.TITLE,
-                (
-                  SELECT MIN(th.THREAD_ID)
-                  FROM THREADS th
-                  WHERE th.GAMEDB_GAME_ID = u.GAMEDB_GAME_ID
+                COALESCE(
+                  (
+                    SELECT MIN(tgl.THREAD_ID)
+                    FROM THREAD_GAME_LINKS tgl
+                    WHERE tgl.GAMEDB_GAME_ID = u.GAMEDB_GAME_ID
+                  ),
+                  (
+                    SELECT MIN(th.THREAD_ID)
+                    FROM THREADS th
+                    WHERE th.GAMEDB_GAME_ID = u.GAMEDB_GAME_ID
+                  )
                 ) AS THREAD_ID,
                 u.ADDED_AT,
                 u.ENTRY_ID

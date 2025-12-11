@@ -14,14 +14,14 @@ const HELP_TOPICS = [
     {
         id: "gotm",
         label: "/gotm",
-        summary: "Browse GOTM history, see current nominations, and add or change your pick.",
+        summary: "Browse GOTM history, see current nominations, and add or change your nomination.",
         syntax: "Syntax: /gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>] | /gotm noms | /gotm nominate title:<string> | /gotm delete-nomination",
         notes: "Search by round, month/year, or title. Set showinchat:true to share in channel; otherwise replies are private. Nominations are for the next round and close a day before voting.",
     },
     {
         id: "nr-gotm",
         label: "/nr-gotm",
-        summary: "Browse NR-GOTM history, see current nominations, and add or change your pick.",
+        summary: "Browse NR-GOTM history, see current nominations, and add or change your nomination.",
         syntax: "Syntax: /nr-gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>] | /nr-gotm noms | /nr-gotm nominate title:<string> | /nr-gotm delete-nomination",
         notes: "Search by round, month/year, or title. Set showinchat:true to share in channel; otherwise replies are private. Nominations are for the next round and close a day before voting.",
     },
@@ -103,9 +103,9 @@ const HELP_TOPICS = [
     {
         id: "thread",
         label: "/thread",
-        summary: "Link or unlink a thread to a GameDB game (requires Manage Threads).",
-        syntax: "Syntax: /thread link thread_id:<string> gamedb_game_id:<int> | /thread unlink thread_id:<string>",
-        notes: "Helps Now Playing entries point to the right thread. Replies are private.",
+        summary: "Link or unlink a thread to one or more GameDB games (requires Manage Threads).",
+        syntax: "Syntax: /thread link thread_id:<string> gamedb_game_id:<int> | /thread unlink thread_id:<string> [gamedb_game_id:<int>]",
+        notes: "Threads can have multiple linked games. Use unlink without gamedb_game_id to remove all links for the thread. Replies are private.",
     },
     {
         id: "rss",
@@ -507,8 +507,8 @@ export function buildMainHelpResponse() {
         .setTitle("RPGClubUtils Commands")
         .setDescription("Use the category dropdowns below to jump straight to a command’s details.\n\n" +
         "**Monthly Games**\n" +
-        `${formatCommandLine("gotm", "GOTM history, nominations, and your pick.")}\n` +
-        `${formatCommandLine("nr-gotm", "NR-GOTM history, nominations, and your pick.")}\n` +
+        `${formatCommandLine("gotm", "GOTM history and nominations")}\n` +
+        `${formatCommandLine("nr-gotm", "NR-GOTM history and nominations")}\n` +
         `${formatCommandLine("noms", "See current GOTM and NR-GOTM nominations.")}\n` +
         `${formatCommandLine("round", "See the current round and winners.")}\n` +
         `${formatCommandLine("nextvote", "Check when the next vote happens.")}\n\n` +

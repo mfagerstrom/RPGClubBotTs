@@ -62,9 +62,12 @@ function buildButtons(threadId: string): ActionRowBuilder<ButtonBuilder> {
 
 async function promptThread(thread: ThreadChannel): Promise<void> {
   if (!hasIgdbConfig()) return; // Don't prompt when IGDB is not configured
-  const info = await getThreadLinkInfo(thread.id).catch(() => ({ skipLinking: false, gamedbGameId: null }));
+  const info = await getThreadLinkInfo(thread.id).catch(() => ({
+    skipLinking: false,
+    gamedbGameIds: [],
+  }));
   if (info.skipLinking) return;
-  if (info.gamedbGameId) return; // Already linked
+  if (info.gamedbGameIds.length) return; // Already linked
   if (!shouldPrompt(thread.id)) return;
   markPrompted(thread.id);
 
@@ -202,7 +205,7 @@ async function handleLinkButton(interaction: ButtonInteraction, threadId: string
     await interaction.followUp({
       content:
         `Linked this thread to GameDB #${gameId}${chosenName ? ` (${chosenName})` : ""}.\n` +
-        "Thank you! If the wrong game was linked by mistake, please contact @merph518.",
+        "Threads can have multiple links; use /thread unlink to remove one or all.",
       flags: MessageFlags.Ephemeral,
     });
 

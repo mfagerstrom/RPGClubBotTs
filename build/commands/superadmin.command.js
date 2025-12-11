@@ -930,7 +930,7 @@ __decorate([
 ], SuperAdmin.prototype, "gamedbBackfill", null);
 __decorate([
     Slash({
-        description: "Backfill THREADS.GAMEDB_GAME_ID from GOTM / NR-GOTM thread links",
+        description: "Backfill thread/game links from GOTM / NR-GOTM data",
         name: "thread-game-link-backfill",
     })
 ], SuperAdmin.prototype, "threadGameLinkBackfill", null);

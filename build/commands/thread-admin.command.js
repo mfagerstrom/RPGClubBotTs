@@ -9,7 +9,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 import { ApplicationCommandOptionType, PermissionsBitField, } from "discord.js";
 import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
-import { setThreadGameLink } from "../classes/Thread.js";
+import { removeThreadGameLink, setThreadGameLink } from "../classes/Thread.js";
 import { safeReply } from "../functions/InteractionUtils.js";
 let ThreadAdminCommands = class ThreadAdminCommands {
     async link(threadId, gamedbGameId, interaction) {
@@ -26,7 +26,7 @@ let ThreadAdminCommands = class ThreadAdminCommands {
             ephemeral: true,
         });
     }
-    async unlink(threadId, interaction) {
+    async unlink(threadId, gamedbGameId, interaction) {
         if (!this.hasManageThreads(interaction)) {
             await safeReply(interaction, {
                 content: "You need Manage Threads permission to use this.",
@@ -34,9 +34,11 @@ let ThreadAdminCommands = class ThreadAdminCommands {
             });
             return;
         }
-        await setThreadGameLink(threadId, null);
+        const removed = await removeThreadGameLink(threadId, gamedbGameId);
+        const target = gamedbGameId ? `GameDB game ${gamedbGameId}` : "all GameDB links";
+        const suffix = removed === 0 ? " (no matching links were found)." : ".";
         await safeReply(interaction, {
-            content: `Unlinked thread ${threadId} from any GameDB game.`,
+            content: `Unlinked ${target} from thread ${threadId}${suffix}`,
             ephemeral: true,
         });
     }
@@ -69,6 +71,12 @@ __decorate([
         description: "Thread id to unlink",
         required: true,
         type: ApplicationCommandOptionType.String,
+    })),
+    __param(1, SlashOption({
+        name: "gamedb_game_id",
+        description: "Specific GameDB game id to unlink (omit to remove all)",
+        required: false,
+        type: ApplicationCommandOptionType.Integer,
     }))
 ], ThreadAdminCommands.prototype, "unlink", null);
 ThreadAdminCommands = __decorate([

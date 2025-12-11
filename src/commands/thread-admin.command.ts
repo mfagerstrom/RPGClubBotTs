@@ -4,7 +4,7 @@ import {
   PermissionsBitField,
 } from "discord.js";
 import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
-import { setThreadGameLink } from "../classes/Thread.js";
+import { removeThreadGameLink, setThreadGameLink } from "../classes/Thread.js";
 import { safeReply } from "../functions/InteractionUtils.js";
 
 @Discord()
@@ -53,6 +53,13 @@ export class ThreadAdminCommands {
       type: ApplicationCommandOptionType.String,
     })
     threadId: string,
+    @SlashOption({
+      name: "gamedb_game_id",
+      description: "Specific GameDB game id to unlink (omit to remove all)",
+      required: false,
+      type: ApplicationCommandOptionType.Integer,
+    })
+    gamedbGameId: number | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
     if (!this.hasManageThreads(interaction)) {
@@ -63,9 +70,11 @@ export class ThreadAdminCommands {
       return;
     }
 
-    await setThreadGameLink(threadId, null);
+    const removed = await removeThreadGameLink(threadId, gamedbGameId);
+    const target = gamedbGameId ? `GameDB game ${gamedbGameId}` : "all GameDB links";
+    const suffix = removed === 0 ? " (no matching links were found)." : ".";
     await safeReply(interaction, {
-      content: `Unlinked thread ${threadId} from any GameDB game.`,
+      content: `Unlinked ${target} from thread ${threadId}${suffix}`,
       ephemeral: true,
     });
   }

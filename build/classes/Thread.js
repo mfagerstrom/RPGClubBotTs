@@ -46,14 +46,69 @@ export async function upsertThreadRecord(params) {
     }
 }
 export async function setThreadGameLink(threadId, gameId) {
+    if (gameId !== null && (!Number.isInteger(gameId) || gameId <= 0)) {
+        throw new Error("Invalid GameDB game id.");
+    }
     const pool = getOraclePool();
     const connection = await pool.getConnection();
     try {
+        if (gameId === null) {
+            await connection.execute(`DELETE FROM THREAD_GAME_LINKS WHERE THREAD_ID = :threadId`, { threadId }, { autoCommit: false });
+        }
+        else {
+            await connection.execute(`
+        MERGE INTO THREAD_GAME_LINKS tgt
+        USING (
+          SELECT :threadId AS THREAD_ID, :gameId AS GAMEDB_GAME_ID FROM DUAL
+        ) src
+        ON (tgt.THREAD_ID = src.THREAD_ID AND tgt.GAMEDB_GAME_ID = src.GAMEDB_GAME_ID)
+        WHEN NOT MATCHED THEN
+          INSERT (THREAD_ID, GAMEDB_GAME_ID, LINKED_AT)
+          VALUES (src.THREAD_ID, src.GAMEDB_GAME_ID, SYSTIMESTAMP)
+        `, { threadId, gameId }, { autoCommit: false });
+        }
         await connection.execute(`
-      UPDATE THREADS
-      SET GAMEDB_GAME_ID = :gameId
+      UPDATE THREADS t
+      SET GAMEDB_GAME_ID = (
+        SELECT MIN(g.GAMEDB_GAME_ID) FROM THREAD_GAME_LINKS g WHERE g.THREAD_ID = t.THREAD_ID
+      )
+      WHERE t.THREAD_ID = :threadId
+      `, { threadId }, { autoCommit: false });
+        await connection.commit();
+    }
+    catch (err) {
+        await connection.rollback().catch(() => { });
+        throw err;
+    }
+    finally {
+        await connection.close();
+    }
+}
+export async function removeThreadGameLink(threadId, gameId) {
+    if (gameId !== undefined && (gameId === null || !Number.isInteger(gameId) || gameId <= 0)) {
+        throw new Error("Invalid GameDB game id.");
+    }
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+    try {
+        const res = await connection.execute(`
+      DELETE FROM THREAD_GAME_LINKS
       WHERE THREAD_ID = :threadId
-      `, { gameId, threadId }, { autoCommit: true });
+      ${gameId ? "AND GAMEDB_GAME_ID = :gameId" : ""}
+      `, gameId ? { threadId, gameId } : { threadId }, { autoCommit: false });
+        await connection.execute(`
+      UPDATE THREADS t
+      SET GAMEDB_GAME_ID = (
+        SELECT MIN(g.GAMEDB_GAME_ID) FROM THREAD_GAME_LINKS g WHERE g.THREAD_ID = t.THREAD_ID
+      )
+      WHERE t.THREAD_ID = :threadId
+      `, { threadId }, { autoCommit: false });
+        await connection.commit();
+        return res.rowsAffected ?? 0;
+    }
+    catch (err) {
+        await connection.rollback().catch(() => { });
+        throw err;
     }
     finally {
         await connection.close();
@@ -90,13 +145,26 @@ export async function getThreadLinkInfo(threadId) {
     const pool = getOraclePool();
     const connection = await pool.getConnection();
     try {
-        const res = await connection.execute(`SELECT SKIP_LINKING, GAMEDB_GAME_ID FROM THREADS WHERE THREAD_ID = :threadId`, { threadId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-        const row = (res.rows ?? [])[0];
+        const infoRes = await connection.execute(`SELECT SKIP_LINKING FROM THREADS WHERE THREAD_ID = :threadId`, { threadId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const row = (infoRes.rows ?? [])[0];
         const skipFlag = String(row?.SKIP_LINKING ?? "N").toUpperCase() === "Y";
-        const gameId = row && row.GAMEDB_GAME_ID != null ? Number(row.GAMEDB_GAME_ID) : null;
-        return { skipLinking: skipFlag, gamedbGameId: gameId };
+        const linksRes = await connection.execute(`SELECT GAMEDB_GAME_ID FROM THREAD_GAME_LINKS WHERE THREAD_ID = :threadId`, { threadId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const gameIds = (linksRes.rows ?? []).map((r) => Number(r.GAMEDB_GAME_ID));
+        if (!gameIds.length) {
+            const legacyRes = await connection.execute(`SELECT GAMEDB_GAME_ID FROM THREADS WHERE THREAD_ID = :threadId`, { threadId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+            const legacyRow = (legacyRes.rows ?? [])[0];
+            if (legacyRow?.GAMEDB_GAME_ID != null) {
+                gameIds.push(Number(legacyRow.GAMEDB_GAME_ID));
+            }
+        }
+        const uniqueIds = Array.from(new Set(gameIds));
+        return { skipLinking: skipFlag, gamedbGameIds: uniqueIds };
     }
     finally {
         await connection.close();
     }
+}
+export async function getThreadGameIds(threadId) {
+    const info = await getThreadLinkInfo(threadId);
+    return info.gamedbGameIds;
 }
