@@ -70,6 +70,13 @@ const HELP_TOPICS = [
             "their profile.",
     },
     {
+        id: "now-playing",
+        label: "/now-playing",
+        summary: "Show Now Playing entries for yourself, another member, or everyone.",
+        syntax: "Syntax: /now-playing [member:<user>] [all:<boolean>]",
+        notes: "Defaults to an ephemeral view for a single member. Set all:true to list everyone with Now Playing entries (sent publicly) with thread links when available.",
+    },
+    {
         id: "remindme",
         label: "/remindme",
         summary: "Personal reminders with quick snooze buttons (DM delivery).",
@@ -88,6 +95,20 @@ const HELP_TOPICS = [
         syntax: "Use /gamedb help for subcommands: add, search, view, help.",
         notes: "Imports pull titles/covers from IGDB. View now surfaces GOTM/NR-GOTM wins, threads, and " +
             "nominations tied to the GameDB id.",
+    },
+    {
+        id: "publicreminder",
+        label: "/publicreminder",
+        summary: "Admin-only scheduled public reminders with optional recurrence.",
+        syntax: "Syntax: /publicreminder create channel:<channel> date:<string> time:<string> message:<string> [recur:<int>] [recurunit:<minutes|hours|days|weeks|months|years>] | /publicreminder list | /publicreminder delete id:<int>",
+        notes: "Times parse in America/New_York. Recurrence requires both recur and recurunit and must be positive. Responses are ephemeral; creation posts confirmation with the scheduled timestamp.",
+    },
+    {
+        id: "thread",
+        label: "/thread",
+        summary: "Link or unlink a thread to a GameDB game id (requires Manage Threads).",
+        syntax: "Syntax: /thread link thread_id:<string> gamedb_game_id:<int> | /thread unlink thread_id:<string>",
+        notes: "Links help Now Playing entries point to the correct GameDB thread; replies are ephemeral.",
     },
     {
         id: "rss",

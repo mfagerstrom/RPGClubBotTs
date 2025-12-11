@@ -390,9 +390,21 @@ let GameDb = class GameDb {
             __forceFollowUp: true,
         });
     }
-    async view(gameId, interaction) {
+    async view(gameId, query, interaction) {
         await safeDeferReply(interaction);
-        await this.showGameProfile(interaction, gameId);
+        if (Number.isFinite(gameId)) {
+            await this.showGameProfile(interaction, gameId);
+            return;
+        }
+        const searchTerm = (query ?? "").trim();
+        if (!searchTerm) {
+            await safeReply(interaction, {
+                content: "Provide a game_id or a search query.",
+                ephemeral: true,
+            });
+            return;
+        }
+        await this.runSearchFlow(interaction, searchTerm);
     }
     async showGameProfile(interaction, gameId) {
         const profile = await this.buildGameProfile(gameId, interaction);
@@ -625,23 +637,7 @@ let GameDb = class GameDb {
         await safeDeferReply(interaction);
         try {
             const searchTerm = (query ?? "").trim();
-            const results = await Game.searchGames(searchTerm);
-            if (results.length === 0) {
-                await this.handleNoResults(interaction, searchTerm || query || "Unknown");
-                return;
-            }
-            if (results.length === 1) {
-                await this.showGameProfile(interaction, results[0].id);
-                return;
-            }
-            const sessionId = interaction.id;
-            GAME_SEARCH_SESSIONS.set(sessionId, {
-                userId: interaction.user.id,
-                results,
-                query: searchTerm,
-            });
-            const response = this.buildSearchResponse(sessionId, GAME_SEARCH_SESSIONS.get(sessionId), 0);
-            await safeReply(interaction, response);
+            await this.runSearchFlow(interaction, searchTerm, query);
         }
         catch (error) {
             await safeReply(interaction, {
@@ -649,6 +645,25 @@ let GameDb = class GameDb {
                 ephemeral: true,
             });
         }
+    }
+    async runSearchFlow(interaction, searchTerm, rawQuery) {
+        const results = await Game.searchGames(searchTerm);
+        if (results.length === 0) {
+            await this.handleNoResults(interaction, searchTerm || rawQuery || "Unknown");
+            return;
+        }
+        if (results.length === 1) {
+            await this.showGameProfile(interaction, results[0].id);
+            return;
+        }
+        const sessionId = interaction.id;
+        GAME_SEARCH_SESSIONS.set(sessionId, {
+            userId: interaction.user.id,
+            results,
+            query: searchTerm,
+        });
+        const response = this.buildSearchResponse(sessionId, GAME_SEARCH_SESSIONS.get(sessionId), 0);
+        await safeReply(interaction, response);
     }
     async handleSearchSelect(interaction) {
         const parts = interaction.customId.split(":");
@@ -845,8 +860,14 @@ __decorate([
     __param(0, SlashOption({
         description: "ID of the game to view",
         name: "game_id",
-        required: true,
+        required: false,
         type: ApplicationCommandOptionType.Number,
+    })),
+    __param(1, SlashOption({
+        description: "Search query (falls back to search flow if no ID provided)",
+        name: "query",
+        required: false,
+        type: ApplicationCommandOptionType.String,
     }))
 ], GameDb.prototype, "view", null);
 __decorate([
