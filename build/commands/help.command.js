@@ -166,18 +166,8 @@ function padCommandName(label, width = 15) {
     const name = label.startsWith("/") ? label.slice(1) : label;
     return name.padEnd(width, " ");
 }
-function formatCommandLine(label, summary) {
-    return `> **${padCommandName(label)}** ${summary}`;
-}
-function buildHelpButtons() {
-    const select = new StringSelectMenuBuilder()
-        .setCustomId("help-main-select")
-        .setPlaceholder("Select a category")
-        .addOptions(HELP_CATEGORIES.map((category) => ({
-        label: category.name,
-        value: category.id,
-    })));
-    return [new ActionRowBuilder().addComponents(select)];
+function formatCommandLine(label, summary, width = 15) {
+    return `> **\`\` ${padCommandName(label, width)}\`\`** ${summary}`;
 }
 function buildHelpDetailsEmbed(topic) {
     const embed = new EmbedBuilder()
@@ -515,33 +505,33 @@ export function buildRssHelpResponse(activeTopicId) {
 export function buildMainHelpResponse() {
     const embed = new EmbedBuilder()
         .setTitle("RPGClubUtils Commands")
-        .setDescription("Pick a category from the dropdown to see its commands.\n\n" +
+        .setDescription("Use the category dropdowns below to jump straight to a command’s details.\n\n" +
         "**Monthly Games**\n" +
-        `${formatCommandLine("/gotm", "GOTM history, nominations, and your pick.")}\n` +
-        `${formatCommandLine("/nr-gotm", "NR-GOTM history, nominations, and your pick.")}\n` +
-        `${formatCommandLine("/noms", "See current GOTM and NR-GOTM nominations.")}\n` +
-        `${formatCommandLine("/round", "See the current round and winners.")}\n` +
-        `${formatCommandLine("/nextvote", "Check when the next vote happens.")}\n\n` +
+        `${formatCommandLine("gotm", "GOTM history, nominations, and your pick.")}\n` +
+        `${formatCommandLine("nr-gotm", "NR-GOTM history, nominations, and your pick.")}\n` +
+        `${formatCommandLine("noms", "See current GOTM and NR-GOTM nominations.")}\n` +
+        `${formatCommandLine("round", "See the current round and winners.")}\n` +
+        `${formatCommandLine("nextvote", "Check when the next vote happens.")}\n\n` +
         "**Members**\n" +
-        `${formatCommandLine("/profile", "View and edit member profiles and Now Playing.")}\n` +
-        `${formatCommandLine("/mp-info", "Find who has shared multiplayer info.")}\n\n` +
+        `${formatCommandLine("profile", "View and edit member profiles and Now Playing.")}\n` +
+        `${formatCommandLine("mp-info", "Find who has shared multiplayer info.")}\n\n` +
         "**GameDB**\n" +
-        `${formatCommandLine("/gamedb", "Search/import games and view GameDB details.")}\n` +
-        `${formatCommandLine("/now-playing", "Show Now Playing lists and thread links.")}\n\n` +
+        `${formatCommandLine("gamedb", "Search/import games and view GameDB details.")}\n` +
+        `${formatCommandLine("now-playing", "Show Now Playing lists and thread links.")}\n\n` +
         "**Utilities**\n" +
-        `${formatCommandLine("/hltb", "Look up HowLongToBeat playtimes.")}\n` +
-        `${formatCommandLine("/coverart", "Grab cover art for a game.")}\n` +
-        `${formatCommandLine("/remindme", "Set personal reminders with snooze.")}\n\n` +
+        `${formatCommandLine("hltb", "Look up HowLongToBeat playtimes.")}\n` +
+        `${formatCommandLine("coverart", "Grab cover art for a game.")}\n` +
+        `${formatCommandLine("remindme", "Set personal reminders with snooze.")}\n\n` +
         "**Server Administration**\n" +
-        `${formatCommandLine("/mod", "Moderator tools.")}\n` +
-        `${formatCommandLine("/admin", "Admin tools.")}\n` +
-        `${formatCommandLine("/superadmin", "Server Owner tools.")}\n` +
-        `${formatCommandLine("/publicreminder", "Schedule public reminders.")}\n` +
-        `${formatCommandLine("/thread", "Link threads to GameDB games.")}\n` +
-        `${formatCommandLine("/rss", "Manage RSS relays with filters.")}`);
+        `${formatCommandLine("mod", "Moderator tools.")}\n` +
+        `${formatCommandLine("admin", "Admin tools.")}\n` +
+        `${formatCommandLine("superadmin", "Server Owner tools.")}\n` +
+        `${formatCommandLine("publicreminder", "Schedule public reminders.")}\n` +
+        `${formatCommandLine("thread", "Link threads to GameDB games.")}\n` +
+        `${formatCommandLine("rss", "Manage RSS relays with filters.")}`);
     return {
         embeds: [embed],
-        components: buildHelpButtons(),
+        components: buildMainHelpComponents(),
     };
 }
 export function buildGotmHelpResponse(activeTopicId) {
@@ -805,10 +795,10 @@ BotHelp = __decorate([
     Discord()
 ], BotHelp);
 export { BotHelp };
-function buildCategoryComponents(categoryId, activeTopicId) {
+function buildCategoryComponents(categoryId, activeTopicId, includeBackToMain = true) {
     const category = getCategoryById(categoryId);
     if (!category)
-        return buildHelpButtons();
+        return buildMainHelpComponents();
     const topics = category.topicIds
         .map((id) => HELP_TOPICS.find((t) => t.id === id))
         .filter((t) => Boolean(t));
@@ -818,10 +808,11 @@ function buildCategoryComponents(categoryId, activeTopicId) {
         .addOptions(topics.map((topic) => ({
         label: topic.label,
         value: topic.id,
-        description: topic.summary.slice(0, 95),
         default: topic.id === activeTopicId,
-    })))
-        .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+    })));
+    if (includeBackToMain) {
+        select.addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+    }
     return [new ActionRowBuilder().addComponents(select)];
 }
 function buildCategoryHelpResponse(categoryId, activeTopicId) {
@@ -832,10 +823,13 @@ function buildCategoryHelpResponse(categoryId, activeTopicId) {
     const embed = new EmbedBuilder()
         .setTitle(`${category?.name ?? "Commands"}`)
         .setDescription(topics && topics.length
-        ? topics.map((t) => formatCommandLine(t.label, t.summary)).join("\n")
+        ? topics.map((t) => formatCommandLine(t.label, t.summary, 10)).join("\n")
         : "No commands found for this category.");
     return {
         embeds: [embed],
         components: buildCategoryComponents(categoryId, activeTopicId),
     };
+}
+function buildMainHelpComponents() {
+    return HELP_CATEGORIES.flatMap((category) => buildCategoryComponents(category.id, undefined, false));
 }

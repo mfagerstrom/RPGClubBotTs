@@ -11,3 +11,4 @@
 - Table docs live in db folder
 - Check the TODO.md file for development goals.  Don't do these automatically but ask me if I would like you to tackle one of them when you set up a new task context.
 - At the start of each session, scan the entire project and ensure that all /help content is up to date.
+- Never edit files in the build folder.  They're irrelevant.
