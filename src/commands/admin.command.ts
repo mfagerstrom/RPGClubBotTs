@@ -64,63 +64,62 @@ export const ADMIN_HELP_TOPICS: AdminHelpTopic[] = [
   {
     id: "add-gotm",
     label: "/admin add-gotm",
-    summary: "Interactively add a new GOTM round.",
+    summary: "Add the next GOTM round with guided prompts.",
     syntax: "Syntax: /admin add-gotm",
     notes:
-      "The round number is always assigned automatically as the next round after the current highest GOTM round.",
+      "Round number is auto-assigned to the next open round.",
   },
   {
     id: "edit-gotm",
     label: "/admin edit-gotm",
-    summary: "Interactively edit GOTM data for a given round.",
+    summary: "Update details for a specific GOTM round.",
     syntax: "Syntax: /admin edit-gotm round:<integer>",
     parameters:
-      "round (required integer) - GOTM round number to edit. The bot will show current data and prompt you for which game and field to update.",
+      "round (required) — GOTM round to edit. The bot shows current data and lets you pick what to change.",
   },
   {
     id: "add-nr-gotm",
     label: "/admin add-nr-gotm",
-    summary: "Interactively add a new NR-GOTM (Non-RPG Game of the Month) round.",
+    summary: "Add the next NR-GOTM round with guided prompts.",
     syntax: "Syntax: /admin add-nr-gotm",
     notes:
-      "The round number is always assigned automatically as the next round after the current highest NR-GOTM round.",
+      "Round number is auto-assigned to the next open NR-GOTM round.",
   },
   {
     id: "edit-nr-gotm",
     label: "/admin edit-nr-gotm",
-    summary: "Interactively edit NR-GOTM data for a given round.",
+    summary: "Update details for a specific NR-GOTM round.",
     syntax: "Syntax: /admin edit-nr-gotm round:<integer>",
     parameters:
-      "round (required integer) - NR-GOTM round number to edit. The bot will show current data and prompt you for which game and field to update.",
+      "round (required) — NR-GOTM round to edit. The bot shows current data and lets you pick what to change.",
   },
   {
     id: "delete-gotm-nomination",
     label: "/admin delete-gotm-nomination",
-    summary: "Delete any GOTM nomination for the upcoming round and announce it.",
+    summary: "Remove a user’s GOTM nomination for the upcoming round and announce it.",
     syntax: "Syntax: /admin delete-gotm-nomination user:<user> reason:<string>",
-    notes: "Targets the upcoming nomination set (current round + 1). Announcement is posted publicly with the updated list.",
+    notes: "Targets the upcoming nomination set. A public update is posted with the refreshed list.",
   },
   {
     id: "delete-nr-gotm-nomination",
     label: "/admin delete-nr-gotm-nomination",
-    summary: "Delete any NR-GOTM nomination for the upcoming round and announce it.",
+    summary: "Remove a user’s NR-GOTM nomination for the upcoming round and announce it.",
     syntax: "Syntax: /admin delete-nr-gotm-nomination user:<user> reason:<string>",
-    notes: "Targets the upcoming nomination set (current round + 1). Announcement is posted publicly with the updated list.",
+    notes: "Targets the upcoming nomination set. A public update is posted with the refreshed list.",
   },
   {
     id: "set-nextvote",
     label: "/admin set-nextvote",
-    summary: "Set the date of the next GOTM/NR-GOTM vote.",
+    summary: "Set when the next GOTM/NR-GOTM vote will happen.",
     syntax: "Syntax: /admin set-nextvote date:<date>",
     notes: "Votes are typically held the last Friday of the month.",
   },
   {
     id: "voting-setup",
     label: "/admin voting-setup",
-    summary: "Create copy/pasteable /poll commands for Subo.",
-    syntax:
-      "Syntax: /admin voting-setup",
-    notes: "Uses current nomination data for GOTM and NR-GOTM; answers are auto-sorted and max_select is floor(count/2) (minimum 1).",
+    summary: "Build ready-to-paste Subo /poll commands from current nominations.",
+    syntax: "Syntax: /admin voting-setup",
+    notes: "Pulls current nominations for GOTM and NR-GOTM, sorts answers, and sets a sensible max_select.",
   },
 ];
 
@@ -187,7 +186,7 @@ export function buildAdminHelpResponse(
 } {
   const embed = new EmbedBuilder()
     .setTitle("Admin Commands Help")
-    .setDescription("Choose an `/admin` subcommand button to view details.");
+    .setDescription("Pick an `/admin` command below to see what it does and how to use it.");
 
   const components = buildAdminHelpButtons(activeTopicId);
   components.push(

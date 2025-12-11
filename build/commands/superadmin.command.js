@@ -29,23 +29,23 @@ export const SUPERADMIN_HELP_TOPICS = [
     {
         id: "memberscan",
         label: "/superadmin memberscan",
-        summary: "Scan guild members and upsert them into RPG_CLUB_USERS.",
+        summary: "Scan the server and refresh member records in the database.",
         syntax: "Syntax: /superadmin memberscan",
-        notes: "Runs in the current guild; requires appropriate environment role IDs for classification.",
+        notes: "Runs in the current server. Make sure env role IDs are set so roles classify correctly.",
     },
     {
         id: "gamedb-backfill",
         label: "/superadmin gamedb-backfill",
-        summary: "Import all GOTM and NR-GOTM titles into the GameDB using IGDB lookups.",
+        summary: "Import all GOTM and NR-GOTM titles into GameDB with IGDB lookups.",
         syntax: "Syntax: /superadmin gamedb-backfill",
-        notes: "Prompts for choice when IGDB returns multiple matches; skips titles already in GameDB.",
+        notes: "Prompts if IGDB returns multiple matches; skips anything already in GameDB.",
     },
     {
         id: "thread-game-link-backfill",
         label: "/superadmin thread-game-link-backfill",
-        summary: "Backfill THREADS.GAMEDB_GAME_ID from existing GOTM / NR-GOTM thread links.",
+        summary: "Backfill thread-to-GameDB links using existing GOTM/NR-GOTM data.",
         syntax: "Syntax: /superadmin thread-game-link-backfill",
-        notes: "Uses GOTM/NR-GOTM tables to set GAMEDB_GAME_ID on THREADS where thread ids are present.",
+        notes: "Uses GOTM/NR-GOTM tables to set missing GameDB IDs on threads.",
     },
 ];
 function buildSuperAdminHelpButtons(activeId) {
@@ -986,7 +986,7 @@ export async function isSuperAdmin(interaction) {
 export function buildSuperAdminHelpResponse(activeTopicId) {
     const embed = new EmbedBuilder()
         .setTitle("Superadmin Commands Help")
-        .setDescription("Choose a `/superadmin` subcommand button to view details (server owner only).");
+        .setDescription("Pick a `/superadmin` command to see what it does and how to run it (server owner only).");
     const components = buildSuperAdminHelpButtons(activeTopicId);
     components.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
         .setCustomId("help-main")

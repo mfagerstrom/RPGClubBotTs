@@ -95,140 +95,137 @@ const HELP_TOPICS: HelpTopic[] = [
     id: "gotm",
     label: "/gotm",
     summary:
-      "GOTM commands: search history, list nominations (public), nominate or delete your own nomination (ephemeral).",
+      "Browse GOTM history, see current nominations, and add or change your pick.",
     syntax:
       "Syntax: /gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>] | /gotm noms | /gotm nominate title:<string> | /gotm delete-nomination",
     notes:
-      "Search: round takes precedence; year+month target a specific month; title searches by game title; set showinchat:true to post publicly. Noms is public. Nominations target the upcoming round (current round + 1) and close one day before the vote.",
+      "Search by round, month/year, or title. Set showinchat:true to share in channel; otherwise replies are private. Nominations are for the next round and close a day before voting.",
   },
   {
     id: "nr-gotm",
     label: "/nr-gotm",
     summary:
-      "NR-GOTM commands: search history, list nominations (public), nominate or delete your own nomination (ephemeral).",
+      "Browse NR-GOTM history, see current nominations, and add or change your pick.",
     syntax:
       "Syntax: /nr-gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>] | /nr-gotm noms | /nr-gotm nominate title:<string> | /nr-gotm delete-nomination",
     notes:
-      "Search: round takes precedence; year+month target a specific month; title searches by game title; set showinchat:true to post publicly. Noms is public. Nominations target the upcoming round (current round + 1) and close one day before the vote.",
+      "Search by round, month/year, or title. Set showinchat:true to share in channel; otherwise replies are private. Nominations are for the next round and close a day before voting.",
   },
   {
     id: "noms",
     label: "/noms",
-    summary: "Show both GOTM and NR-GOTM current nominations (public).",
+    summary: "Show the current GOTM and NR-GOTM nominations together (public).",
     syntax: "Syntax: /noms",
-    notes: "Lists the upcoming round nominations for GOTM and NR-GOTM together.",
+    notes: "Lists nominations for the upcoming round of each category.",
   },
   {
     id: "round",
     label: "/round",
-    summary: "Show the current voting round, including GOTM and NR-GOTM winners (ephemeral by default).",
+    summary: "See the current round details and winners for GOTM and NR-GOTM.",
     syntax: "Syntax: /round [showinchat:<boolean>]",
-    notes: "Set showinchat:true to post publicly.",
+    notes: "Replies privately by default; set showinchat:true to post in channel.",
   },
   {
     id: "nextvote",
     label: "/nextvote",
-    summary: "Show the date of the next GOTM/NR-GOTM vote (ephemeral by default).",
+    summary: "Check when the next GOTM/NR-GOTM vote happens.",
     syntax: "Syntax: /nextvote [showinchat:<boolean>]",
-    notes: "Set showinchat:true to post publicly. See nominations with /noms; nominate via /gotm nominate or /nr-gotm nominate.",
+    notes: "Replies privately by default; set showinchat:true to post in channel. See nominations with /noms; nominate with /gotm nominate or /nr-gotm nominate.",
   },
   {
     id: "hltb",
     label: "/hltb",
-    summary: "Search HowLongToBeat for game completion times (ephemeral by default).",
+    summary: "Look up HowLongToBeat playtimes for a game.",
     syntax: "Syntax: /hltb title:<string> [showinchat:<boolean>]",
-    parameters: "title (required string) - game title and optional descriptors. showinchat (optional boolean) - post publicly if true.",
+    parameters: "title (required) — game name and optional details. showinchat (optional) — set true to share in channel.",
   },
   {
     id: "coverart",
     label: "/coverart",
-    summary: "Search for video game cover art using Google/HLTB data (ephemeral by default).",
+    summary: "Find cover art for a game using Google/HLTB data.",
     syntax: "Syntax: /coverart title:<string> [showinchat:<boolean>]",
-    parameters: "title (required string) - game title and optional descriptors. showinchat (optional boolean) - post publicly if true.",
+    parameters: "title (required) — game name and optional details. showinchat (optional) — set true to share in channel.",
   },
   {
     id: "mp-info",
     label: "/mp-info",
     summary:
-      "List members who have shared multiplayer platform info with quick profile buttons (ephemeral by default).",
+      "See who’s shared their multiplayer info (Steam/XBL/PSN/Switch) with quick profile buttons.",
     syntax:
       "Syntax: /mp-info [showinchat:<boolean>] [steam:<boolean>] [xbl:<boolean>] [psn:<boolean>] [switch:<boolean>]",
     notes:
-      "Platform filters default to true; if any flag is true, unspecified platforms default to " +
-      "false. Set showinchat:true to post publicly. Pick a member from the dropdown to open " +
-      "their profile.",
+      "Filters default to all platforms unless you set any flag true (then others default to false). Replies are private unless showinchat:true. Use the dropdown to jump to a member’s profile.",
   },
   {
     id: "now-playing",
     label: "/now-playing",
-    summary: "Show Now Playing entries for yourself, another member, or everyone.",
+    summary: "Show Now Playing lists for you, someone else, or everyone.",
     syntax: "Syntax: /now-playing [member:<user>] [all:<boolean>]",
     notes:
-      "Defaults to an ephemeral view for a single member. Set all:true to list everyone with Now Playing entries (sent publicly) with thread links when available.",
+      "Defaults to a private view for one member. Set all:true to list everyone (sent publicly) with thread links when available.",
   },
   {
     id: "remindme",
     label: "/remindme",
-    summary: "Personal reminders with quick snooze buttons (DM delivery).",
+    summary: "Set personal reminders with snooze buttons (delivered by DM).",
     syntax: "Use /remindme help for a list of reminder subcommands, syntax, and notes.",
   },
   {
     id: "profile",
     label: "/profile",
     summary:
-      "View, edit, search profiles, and manage your GameDB-backed Now Playing list (view/search are ephemeral by default).",
+      "View, edit, and search profiles, and manage your Now Playing list (view/search are private by default).",
     syntax: "Use /profile help for subcommands (view/edit/search/nowplaying-add/nowplaying-remove) and parameters.",
   },
   {
     id: "gamedb",
     label: "/gamedb",
     summary:
-      "Game database tools powered by IGDB search/import and GameDB round/nomination associations.",
+      "Search, import, and view games from GameDB with IGDB-powered lookups.",
     syntax: "Use /gamedb help for subcommands: add, search, view, help.",
     notes:
-      "Imports pull titles/covers from IGDB. View now surfaces GOTM/NR-GOTM wins, threads, and " +
-      "nominations tied to the GameDB id.",
+      "Imports pull titles/covers from IGDB. View shows GOTM/NR-GOTM wins, nominations, and related threads for the GameDB id.",
   },
   {
     id: "publicreminder",
     label: "/publicreminder",
-    summary: "Admin-only scheduled public reminders with optional recurrence.",
+    summary: "Schedule public reminders with optional recurrence (admin only).",
     syntax:
       "Syntax: /publicreminder create channel:<channel> date:<string> time:<string> message:<string> [recur:<int>] [recurunit:<minutes|hours|days|weeks|months|years>] | /publicreminder list | /publicreminder delete id:<int>",
     notes:
-      "Times parse in America/New_York. Recurrence requires both recur and recurunit and must be positive. Responses are ephemeral; creation posts confirmation with the scheduled timestamp.",
+      "Times parse in America/New_York. Recurring reminders need both recur and recurunit. Replies are private; creation shows the scheduled time.",
   },
   {
     id: "thread",
     label: "/thread",
-    summary: "Link or unlink a thread to a GameDB game id (requires Manage Threads).",
+    summary: "Link or unlink a thread to a GameDB game (requires Manage Threads).",
     syntax:
       "Syntax: /thread link thread_id:<string> gamedb_game_id:<int> | /thread unlink thread_id:<string>",
-    notes: "Links help Now Playing entries point to the correct GameDB thread; replies are ephemeral.",
+    notes: "Helps Now Playing entries point to the right thread. Replies are private.",
   },
   {
     id: "rss",
     label: "/rss",
-    summary: "Admin-only RSS relays with include/exclude keyword filters per channel.",
+    summary: "Manage RSS relays with include/exclude keywords per channel (admin only).",
     syntax: "Use /rss help for subcommands: add, remove, edit, list.",
   },
   {
     id: "admin",
     label: "/admin",
-    summary: "Admin-only commands for managing bot presence and GOTM/NR-GOTM data.",
-    syntax: "Use /admin help for a detailed list of admin subcommands, their syntax, and parameters.",
+    summary: "Admin tools for presence and GOTM/NR-GOTM management.",
+    syntax: "Use /admin help to see the subcommands and details.",
   },
   {
     id: "mod",
     label: "/mod",
-    summary: "Moderator commands for managing bot presence and NR-GOTM data.",
-    syntax: "Use /mod help for a detailed list of moderator subcommands, their syntax, and parameters.",
+    summary: "Moderator tools for presence and NR-GOTM management.",
+    syntax: "Use /mod help to see the subcommands and details.",
   },
   {
     id: "superadmin",
     label: "/superadmin",
-    summary: "Server owner commands for GOTM/NR-GOTM management and bot presence.",
-    syntax: "Use /superadmin help for a detailed list of server owner subcommands, their syntax, and parameters.",
+    summary: "Server owner tools for GOTM/NR-GOTM and presence management.",
+    syntax: "Use /superadmin help to see the subcommands and details.",
   },
 ];
 
@@ -595,7 +592,7 @@ const PROFILE_HELP_TOPICS: ProfileHelpTopic[] = [
   {
     id: "view",
     label: "/profile view",
-    summary: "View a member profile (ephemeral by default).",
+    summary: "View a member profile (private by default).",
     syntax: "Syntax: /profile view [member:<user>] [showinchat:<boolean>]",
     notes: "Omit member to view your own profile; set showinchat:true to post publicly.",
   },

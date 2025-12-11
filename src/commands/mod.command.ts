@@ -253,7 +253,7 @@ export function buildModHelpResponse(
 } {
   const embed = new EmbedBuilder()
     .setTitle("Moderator Commands Help")
-    .setDescription("Choose a `/mod` subcommand button to view details.");
+    .setDescription("Pick a `/mod` command to see what it does and how to run it.");
 
   const components = buildModHelpButtons(activeTopicId);
   components.push(
