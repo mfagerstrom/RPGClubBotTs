@@ -22,8 +22,6 @@ let MessageCreated = class MessageCreated {
                 message.member.roles.remove(newcomersRole);
             }
         }
-        // Logging of messages, mostly for development / testing
-        // console.log(consoleOutputString);
     }
 };
 __decorate([

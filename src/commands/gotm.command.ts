@@ -1,4 +1,4 @@
-import type { CommandInteraction, Client, TextBasedChannel } from "discord.js";
+import type { CommandInteraction, Client, TextBasedChannel, Message } from "discord.js";
 import { ApplicationCommandOptionType, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, type StringSelectMenuInteraction } from "discord.js";
 import { Discord, Slash, SlashChoice, SlashGroup, SlashOption, SelectMenuComponent } from "discordx";
 // Use relative import with .js for ts-node ESM compatibility
@@ -384,16 +384,24 @@ export class GotmSearch {
     }
   }
 
-  @SelectMenuComponent({ id: /^gotm-nom-\d+$/ })
+  @SelectMenuComponent({ id: /^gotm-nom-\d+-\d+$/ })
   async handleGotmNominationSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const [, , ownerId] = interaction.customId.split("-");
+    if (ownerId && interaction.user.id !== ownerId) {
+      await interaction.reply({ content: "This selection isn't for you.", ephemeral: true });
+      return;
+    }
+
     const cb = GOTM_NOM_SESSIONS.get(interaction.customId);
     if (!cb) {
-      await interaction.deferUpdate().catch(() => {});
+      await interaction
+        .update({ content: "This selection is no longer active.", components: [] })
+        .catch(() => interaction.deferUpdate().catch(() => {}));
       return;
     }
     const val = interaction.values?.[0] ?? null;
     try {
-      await interaction.deferUpdate();
+      await interaction.update({ components: [] });
     } catch {
       // ignore
     }
@@ -491,7 +499,7 @@ async function resolveGameDbGame(interaction: CommandInteraction, title: string)
     };
   });
 
-  const customId = `gotm-nom-${Date.now()}`;
+  const customId = `gotm-nom-${interaction.user.id}-${Date.now()}`;
   const selectMenu = new StringSelectMenuBuilder()
     .setCustomId(customId)
     .setPlaceholder("Select the correct game")
@@ -502,19 +510,23 @@ async function resolveGameDbGame(interaction: CommandInteraction, title: string)
     .setDescription(`Select the correct game for "${searchTerm}".`)
     .setFooter({ text: "If you have trouble importing, tag @merph518." });
 
-  const prompt = await safeReply(interaction, {
+  const prompt = (await safeReply(interaction, {
     content: "Game not found in GameDB. Select the IGDB match to import (2 min timeout).",
     embeds: [embed],
     components: [row],
+    ephemeral: true,
     fetchReply: true,
     __forceFollowUp: true,
-  });
+  })) as Message<boolean> | undefined;
 
   if (!prompt) return null;
 
   const selectedId = await new Promise<number | null>((resolve) => {
     const timeout = setTimeout(() => {
       GOTM_NOM_SESSIONS.delete(customId);
+      prompt
+        .edit({ content: "Import timed out. No nomination changes made.", components: [] })
+        .catch(() => {});
       resolve(null);
     }, 120000);
     GOTM_NOM_SESSIONS.set(customId, (val) => {

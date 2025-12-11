@@ -63,7 +63,8 @@ async function handleLinkButton(interaction, threadId) {
     }
     const threadName = interaction.channel?.name ?? "Unknown Thread";
     const title = threadName.split("(")[0].trim() || threadName;
-    await interaction.deferReply({ ephemeral: false });
+    await interaction.deferReply({ ephemeral: true });
+    await interaction.message.edit({ components: [] }).catch(() => { });
     try {
         // First try existing GameDB by title
         const localMatches = (await Game.searchGames(title)).filter((g) => g.title.toLowerCase() === title.toLowerCase());
@@ -76,7 +77,7 @@ async function handleLinkButton(interaction, threadId) {
             if (!results.length) {
                 await interaction.followUp({
                     content: `No GameDB/IGDB results found for "${title}". Tagging @admin to review.`,
-                    ephemeral: false,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
@@ -96,11 +97,11 @@ async function handleLinkButton(interaction, threadId) {
                     .setCustomId("thread-link-select")
                     .setPlaceholder(`Select game for "${title}"`)
                     .addOptions(options));
-                const selectMessage = await interaction.followUp({
+                const selectMessage = (await interaction.followUp({
                     content: `Select the correct game for "${title}".`,
                     components: [selectRow],
                     flags: MessageFlags.Ephemeral,
-                });
+                }));
                 const selection = await selectMessage
                     .awaitMessageComponent({
                     componentType: ComponentType.StringSelect,
@@ -109,6 +110,7 @@ async function handleLinkButton(interaction, threadId) {
                 })
                     .catch(() => null);
                 if (!selection) {
+                    await selectMessage.edit({ components: [] }).catch(() => { });
                     await interaction.followUp({
                         content: "No selection made; leaving thread unlinked.",
                         flags: MessageFlags.Ephemeral,
@@ -138,7 +140,7 @@ async function handleLinkButton(interaction, threadId) {
             else {
                 const details = await igdbService.getGameDetails(chosen.id);
                 if (!details) {
-                    await interaction.followUp({ content: "Failed to load game details from IGDB.", ephemeral: false });
+                    await interaction.followUp({ content: "Failed to load game details from IGDB.", flags: MessageFlags.Ephemeral });
                     return;
                 }
                 const newGame = await Game.createGame(details.name, details.summary ?? "", null, details.id, details.slug ?? null, details.total_rating ?? null, details.url ?? null);
@@ -150,10 +152,13 @@ async function handleLinkButton(interaction, threadId) {
         await interaction.followUp({
             content: `Linked this thread to GameDB #${gameId}${chosenName ? ` (${chosenName})` : ""}.\n` +
                 "Thank you! If the wrong game was linked by mistake, please contact @merph518.",
+            flags: MessageFlags.Ephemeral,
         });
         // Delete the original prompt message if we can
         try {
-            await interaction.message.delete().catch(() => { });
+            await interaction.message.delete().catch(async () => {
+                await interaction.message.edit({ components: [] }).catch(() => { });
+            });
         }
         catch {
             // ignore
@@ -171,6 +176,7 @@ async function handleSkipButton(interaction, threadId) {
             content: "Okay, I'll skip linking a game for this thread going forward.",
             flags: MessageFlags.Ephemeral,
         });
+        await interaction.message.edit({ components: [] }).catch(() => { });
     }
     catch (err) {
         const msg = err?.message ?? String(err);

@@ -161,7 +161,6 @@ let ThreadCreated = class ThreadCreated {
                 }
             }
         }
-        // Join Live Event forum threads as well
     }
 };
 __decorate([

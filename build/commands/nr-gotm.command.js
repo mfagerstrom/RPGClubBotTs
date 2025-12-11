@@ -284,12 +284,14 @@ let NrGotmSearch = class NrGotmSearch {
     async handleNrGotmNominationSelect(interaction) {
         const cb = NR_GOTM_NOM_SESSIONS.get(interaction.customId);
         if (!cb) {
-            await interaction.deferUpdate().catch(() => { });
+            await interaction
+                .update({ content: "This selection is no longer active.", components: [] })
+                .catch(() => interaction.deferUpdate().catch(() => { }));
             return;
         }
         const val = interaction.values?.[0] ?? null;
         try {
-            await interaction.deferUpdate();
+            await interaction.update({ components: [] });
         }
         catch {
             // ignore
@@ -462,18 +464,21 @@ async function resolveNrGameDbGame(interaction, title) {
     const embed = new EmbedBuilder()
         .setDescription(`Select the correct game for "${searchTerm}".`)
         .setFooter({ text: "If you have trouble importing, tag @merph518." });
-    const prompt = await safeReply(interaction, {
+    const prompt = (await safeReply(interaction, {
         content: "Game not found in GameDB. Select the IGDB match to import (2 min timeout).",
         embeds: [embed],
         components: [row],
         fetchReply: true,
         __forceFollowUp: true,
-    });
+    }));
     if (!prompt)
         return null;
     const selectedId = await new Promise((resolve) => {
         const timeout = setTimeout(() => {
             NR_GOTM_NOM_SESSIONS.delete(customId);
+            prompt
+                .edit({ content: "Import timed out. No nomination changes made.", components: [] })
+                .catch(() => { });
             resolve(null);
         }, 120000);
         NR_GOTM_NOM_SESSIONS.set(customId, (val) => {

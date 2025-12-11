@@ -7,7 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { AttachmentBuilder, ApplicationCommandOptionType, EmbedBuilder, MessageFlags, PermissionsBitField, ActionRowBuilder, StringSelectMenuBuilder, ComponentType, ButtonBuilder, ButtonStyle, } from "discord.js";
+import { AttachmentBuilder, ApplicationCommandOptionType, EmbedBuilder, MessageFlags, PermissionsBitField, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, } from "discord.js";
 import { Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption, ButtonComponent } from "discordx";
 import axios from "axios";
 import Member from "../classes/Member.js";
@@ -314,59 +314,83 @@ let ProfileCommand = class ProfileCommand {
                 value: String(g.id),
                 description: `GameDB #${g.id}`,
             }));
+            const selectId = `nowplaying-add-select:${interaction.user.id}`;
             const selectRow = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
-                .setCustomId("nowplaying-add-select")
+                .setCustomId(selectId)
                 .setPlaceholder("Select the game to add")
                 .addOptions(options));
-            const selectMessage = await safeReply(interaction, {
+            await safeReply(interaction, {
                 content: "Select the game to add to your Now Playing list:",
                 components: [selectRow],
                 ephemeral: true,
-                fetchReply: true,
             });
-            if (!selectMessage)
-                return;
-            const selection = await selectMessage
-                .awaitMessageComponent({
-                componentType: ComponentType.StringSelect,
-                time: 60_000,
-                filter: (i) => i.user.id === interaction.user.id,
-            })
-                .catch(() => null);
-            if (!selection) {
-                await safeReply(interaction, {
-                    content: "Timed out waiting for a selection. No changes made.",
-                    ephemeral: true,
-                });
-                return;
-            }
-            try {
-                await selection.deferUpdate();
-            }
-            catch {
-                // ignore
-            }
-            const gameId = Number(selection.values[0]);
-            const game = await Game.getGameById(gameId);
-            if (!game) {
-                await safeReply(interaction, {
-                    content: "Selected game not found. Please try again.",
-                    ephemeral: true,
-                });
-                return;
-            }
-            await Member.addNowPlaying(interaction.user.id, gameId);
-            const list = await Member.getNowPlaying(interaction.user.id);
-            await safeReply(interaction, {
-                content: `Added **${game.title}** to your Now Playing list (${list.length}/${MAX_NOW_PLAYING}).`,
-                ephemeral: true,
-            });
+            setTimeout(async () => {
+                try {
+                    const reply = (await interaction.fetchReply());
+                    const hasActiveComponents = reply.components.some((row) => {
+                        if (!("components" in row))
+                            return false;
+                        const actionRow = row;
+                        return actionRow.components.length > 0;
+                    });
+                    if (!hasActiveComponents)
+                        return;
+                    await interaction.editReply({
+                        content: "Timed out waiting for a selection. No changes made.",
+                        components: [],
+                    });
+                }
+                catch {
+                    // ignore
+                }
+            }, 60_000);
         }
         catch (err) {
             const msg = err?.message ?? String(err);
             await safeReply(interaction, {
                 content: `Could not add to Now Playing: ${msg}`,
                 ephemeral: true,
+            });
+        }
+    }
+    async handleAddNowPlayingSelect(interaction) {
+        const [, ownerId] = interaction.customId.split(":");
+        if (interaction.user.id !== ownerId) {
+            await interaction.reply({
+                content: "This add prompt isn't for you.",
+                flags: MessageFlags.Ephemeral,
+            });
+            return;
+        }
+        const gameId = Number(interaction.values[0]);
+        if (!Number.isInteger(gameId) || gameId <= 0) {
+            await interaction.update({
+                content: "Invalid selection. Please try again.",
+                components: [],
+            });
+            return;
+        }
+        try {
+            const game = await Game.getGameById(gameId);
+            if (!game) {
+                await interaction.update({
+                    content: "Selected game not found. Please try again.",
+                    components: [],
+                });
+                return;
+            }
+            await Member.addNowPlaying(ownerId, gameId);
+            const list = await Member.getNowPlaying(ownerId);
+            await interaction.update({
+                content: `Added **${game.title}** to your Now Playing list (${list.length}/${MAX_NOW_PLAYING}).`,
+                components: [],
+            });
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await interaction.update({
+                content: `Could not add to Now Playing: ${msg}`,
+                components: [],
             });
         }
     }
@@ -689,6 +713,9 @@ __decorate([
         type: ApplicationCommandOptionType.String,
     }))
 ], ProfileCommand.prototype, "addNowPlaying", null);
+__decorate([
+    SelectMenuComponent({ id: /^nowplaying-add-select:\d+$/ })
+], ProfileCommand.prototype, "handleAddNowPlayingSelect", null);
 __decorate([
     Slash({ description: "Remove a game from your Now Playing list", name: "nowplaying-remove" }),
     SlashGroup("profile")

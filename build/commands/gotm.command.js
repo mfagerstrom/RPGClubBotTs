@@ -258,14 +258,21 @@ let GotmSearch = class GotmSearch {
         }
     }
     async handleGotmNominationSelect(interaction) {
+        const [, , ownerId] = interaction.customId.split("-");
+        if (ownerId && interaction.user.id !== ownerId) {
+            await interaction.reply({ content: "This selection isn't for you.", ephemeral: true });
+            return;
+        }
         const cb = GOTM_NOM_SESSIONS.get(interaction.customId);
         if (!cb) {
-            await interaction.deferUpdate().catch(() => { });
+            await interaction
+                .update({ content: "This selection is no longer active.", components: [] })
+                .catch(() => interaction.deferUpdate().catch(() => { }));
             return;
         }
         const val = interaction.values?.[0] ?? null;
         try {
-            await interaction.deferUpdate();
+            await interaction.update({ components: [] });
         }
         catch {
             // ignore
@@ -342,7 +349,7 @@ __decorate([
     })
 ], GotmSearch.prototype, "listNominations", null);
 __decorate([
-    SelectMenuComponent({ id: /^gotm-nom-\d+$/ })
+    SelectMenuComponent({ id: /^gotm-nom-\d+-\d+$/ })
 ], GotmSearch.prototype, "handleGotmNominationSelect", null);
 GotmSearch = __decorate([
     Discord(),
@@ -423,7 +430,7 @@ async function resolveGameDbGame(interaction, title) {
             description: (game.summary || "No summary").substring(0, 100),
         };
     });
-    const customId = `gotm-nom-${Date.now()}`;
+    const customId = `gotm-nom-${interaction.user.id}-${Date.now()}`;
     const selectMenu = new StringSelectMenuBuilder()
         .setCustomId(customId)
         .setPlaceholder("Select the correct game")
@@ -432,18 +439,22 @@ async function resolveGameDbGame(interaction, title) {
     const embed = new EmbedBuilder()
         .setDescription(`Select the correct game for "${searchTerm}".`)
         .setFooter({ text: "If you have trouble importing, tag @merph518." });
-    const prompt = await safeReply(interaction, {
+    const prompt = (await safeReply(interaction, {
         content: "Game not found in GameDB. Select the IGDB match to import (2 min timeout).",
         embeds: [embed],
         components: [row],
+        ephemeral: true,
         fetchReply: true,
         __forceFollowUp: true,
-    });
+    }));
     if (!prompt)
         return null;
     const selectedId = await new Promise((resolve) => {
         const timeout = setTimeout(() => {
             GOTM_NOM_SESSIONS.delete(customId);
+            prompt
+                .edit({ content: "Import timed out. No nomination changes made.", components: [] })
+                .catch(() => { });
             resolve(null);
         }, 120000);
         GOTM_NOM_SESSIONS.set(customId, (val) => {

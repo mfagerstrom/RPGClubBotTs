@@ -181,3 +181,6 @@
 2025-12-11 - Commit ID: 64d97fc - chore: updated help
 2025-12-11 - Commit ID: c61c61c - chore: updated TODOs
 2025-12-11 - Commit ID: 804ac97 - chore: updated todos
+2025-12-11 - Commit ID: b1c2cf5 - chore: updated todos, generated commit history file
+2025-12-11 - Commit ID: a4e7cd3 - chore: small tweaks
+2025-12-11 - Commit ID: f3bdd83 - chore: removed unused and redundant code

@@ -1,15 +1,14 @@
 - Create admin function for creating a new round and doing everything needed so that it's not a manual process.
 - Normalize all embed styles / colors / etc
 - Normalize behavior between /gamedb add, search and view
--  Add who's playing a game to its /gamedb view
--  Change 1:1 thread:game relationship to 1:many
--  Finish developing now-playing commands, the embeds could use some work, especially removing a now playing entry
--  Move /profile nowplaying commands to /nowplaying
--  Add paging to results from IGDB during game import
--  Add parameters to /gamedb add to narrow down to certain categories
+- Add who's playing a game to its /gamedb view
+- Change 1:1 thread:game relationship to 1:many
+- Finish developing now-playing commands, the embeds could use some work, especially removing a now playing entry
+- Move /profile nowplaying commands to /nowplaying
+- Add paging to results from IGDB during game import
+- Add parameters to /gamedb add to narrow down to certain categories
 - Add note(s) to now playing entries, that would only be visible using /now-playing, not in profile
 - Update <#927727584148611102>, also incorporate that content into the bot's help menu
-- Address this: ``[WARN] RPGClubBotTs >> select menu component handler not found, interactionId: 1448471960597168148 | customId: nowplaying-add-select``
 - Address this: ``[ERROR] (node:23592) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.``
 - Do a UI Pass over all embeds and try to make things look nicer, incorporate thumbnail images and/or emoji.  MP info emoji for platforms
 - Add game completion functionality, tie into profile and game view
@@ -36,6 +35,3 @@
 - The RSS pipeline has duplicated keyword logic and extra round-trips: normalizeKeywords in RssFeedService and splitKeywords in RssFeed.ts both lowercase/trim comma lists; centralize this to avoid divergent behavior. Also, processFeed does isItemSeen per item before bulk markItemsSeen, opening a new connection each time. A single fetch of seen hashes per feed (or a connection reused within the poll) would cut redundant DB calls and race windows.
 - Member activity remains a stub: recordMessageActivity/setMessageCount are no-ops while recordMessageActivity is invoked on every message (src/classes/Member.ts (lines 481-497), src/RPGClubBotTS.ts (line 143)). Either wire them to the DB or remove the call to avoid redundant, misleading code paths.
 - profile.command.ts (lines 362-438) creates the nowplaying-add-select menu but handles it via awaitMessageComponent instead of a @SelectMenuComponent handler. DiscordX logs “component handler not found” for every selection (the warning in TODO). Register a handler (or mark the menu interactionCreate-handled) and clear components after selection/timeout to stop the noise and prevent re-clicks on stale menus.
-- gotm.command.ts (lines 167-247) IGDB import prompt follows up without ephemeral: true even when the slash command was deferred ephemerally, and it doesn’t filter the select menu to the requesting user. That makes the selection UI public and hijackable. Set ephemeral: true, add a user filter, and remove/disable the components after selection or timeout to avoid accidental picks.
-- ThreadLinkPromptService.ts (lines 71-150) similar pattern: multi-option IGDB select is ephemeral and filtered, but on timeout it leaves the select active in the thread, and button presses are still public. Consider cleaning up components on timeout and making follow-ups ephemeral or at least gated to the clicker to reduce accidental interaction on embeds.
-- Several embed-based flows don’t disable components after use (e.g., GOTM nomination IGDB select, nowplaying-add select, thread-link prompt). Add component cleanup or disablement to avoid users interacting with stale embeds and to reduce stray interactionCreate traffic.
