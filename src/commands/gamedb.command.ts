@@ -583,6 +583,7 @@ export class GameDb {
       const platforms = await Game.getAllPlatforms();
       const regions = await Game.getAllRegions();
       const associations = await Game.getGameAssociations(gameId);
+      const nowPlayingMembers = await Game.getNowPlayingMembers(gameId);
 
       const platformMap = new Map(platforms.map((p) => [p.id, p.name]));
       const regionMap = new Map(regions.map((r) => [r.id, r.name]));
@@ -613,6 +614,7 @@ export class GameDb {
       const threadId =
         associations.gotmWins.find((w) => w.threadId)?.threadId ??
         associations.nrGotmWins.find((w) => w.threadId)?.threadId ??
+        nowPlayingMembers.find((p) => p.threadId)?.threadId ??
         null;
       if (threadId) {
         const threadLabel = await this.buildThreadLink(
@@ -636,6 +638,25 @@ export class GameDb {
         embed.addFields({
           name: "Reddit Discussion Thread",
           value: `[Reddit Link](${redditUrl})`,
+          inline: true,
+        });
+      }
+
+      if (nowPlayingMembers.length) {
+        const MAX_NOW_PLAYING_DISPLAY = 12;
+        const lines = nowPlayingMembers.slice(0, MAX_NOW_PLAYING_DISPLAY).map((member) => {
+          const name = member.globalName ?? member.username ?? member.userId;
+          return `${name} (<@${member.userId}>)`;
+        });
+
+        if (nowPlayingMembers.length > MAX_NOW_PLAYING_DISPLAY) {
+          const remaining = nowPlayingMembers.length - MAX_NOW_PLAYING_DISPLAY;
+          lines.push(`…and ${remaining} more playing now.`);
+        }
+
+        embed.addFields({
+          name: "Now Playing",
+          value: lines.join("\n"),
           inline: true,
         });
       }

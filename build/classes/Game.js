@@ -599,4 +599,40 @@ export default class Game {
             await connection.close();
         }
     }
+    static async getNowPlayingMembers(gameId) {
+        const pool = getOraclePool();
+        const connection = await pool.getConnection();
+        try {
+            const res = await connection.execute(`SELECT u.USER_ID,
+                ru.USERNAME,
+                ru.GLOBAL_NAME,
+                COALESCE(
+                  (SELECT MIN(tgl.THREAD_ID)
+                     FROM THREAD_GAME_LINKS tgl
+                    WHERE tgl.GAMEDB_GAME_ID = u.GAMEDB_GAME_ID),
+                  (SELECT MIN(th.THREAD_ID)
+                     FROM THREADS th
+                    WHERE th.GAMEDB_GAME_ID = u.GAMEDB_GAME_ID)
+                ) AS THREAD_ID,
+                u.ADDED_AT
+           FROM USER_NOW_PLAYING u
+           JOIN RPG_CLUB_USERS ru ON ru.USER_ID = u.USER_ID
+          WHERE u.GAMEDB_GAME_ID = :gameId
+          ORDER BY u.ADDED_AT DESC, u.ENTRY_ID DESC`, { gameId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+            return (res.rows ?? []).map((row) => ({
+                userId: String(row.USER_ID),
+                username: row.USERNAME ?? null,
+                globalName: row.GLOBAL_NAME ?? null,
+                threadId: row.THREAD_ID ?? null,
+                addedAt: row.ADDED_AT instanceof Date
+                    ? row.ADDED_AT
+                    : row.ADDED_AT
+                        ? new Date(row.ADDED_AT)
+                        : null,
+            }));
+        }
+        finally {
+            await connection.close();
+        }
+    }
 }
