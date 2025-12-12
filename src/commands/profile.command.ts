@@ -1846,7 +1846,7 @@ export class ProfileCommand {
       return;
     }
 
-    const igdbSearch = await igdbService.searchGames(searchTerm, 30, false);
+    const igdbSearch = await igdbService.searchGames(searchTerm);
     if (!igdbSearch.results.length) {
       await safeReply(interaction, {
         content: `No GameDB or IGDB matches found for "${searchTerm}".`,
@@ -1995,7 +1995,7 @@ export class ProfileCommand {
     session: { userId: string; query: string },
   ): Promise<void> {
     try {
-      const searchRes = await igdbService.searchGames(session.query, 30, false);
+      const searchRes = await igdbService.searchGames(session.query);
       if (!searchRes.results.length) {
         await interaction.update({
           content: `No IGDB results found for "${session.query}".`,

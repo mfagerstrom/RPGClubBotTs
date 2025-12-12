@@ -446,7 +446,7 @@ async function resolveGameDbGame(interaction: CommandInteraction, title: string)
 
   let igdbResults: Awaited<ReturnType<typeof igdbService.searchGames>>["results"] = [];
   try {
-    igdbResults = (await igdbService.searchGames(searchTerm, 30, false)).results;
+    igdbResults = (await igdbService.searchGames(searchTerm)).results;
   } catch (err: any) {
     const msg = err?.message ?? String(err);
     await safeReply(interaction, {

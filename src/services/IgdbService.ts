@@ -51,9 +51,12 @@ export interface IGDBGameDetails extends IGDBGame {
   }[];
 }
 
+export const IGDB_SEARCH_LIMIT = 500;
+
 export interface IGameSearchResult {
   results: IGDBGame[];
   raw: any;
+  total?: number;
 }
 
 class IgdbService {
@@ -98,7 +101,7 @@ class IgdbService {
 
   async searchGames(
     query: string,
-    limit: number = 24,
+    limit: number = IGDB_SEARCH_LIMIT,
     includeRaw: boolean = false,
   ): Promise<IGameSearchResult> {
     if (!this.clientId) {
@@ -107,11 +110,12 @@ class IgdbService {
     const token = await this.getAccessToken();
 
     const sanitizedQuery = query.replace(/"/g, '\\"');
+    const cappedLimit = Math.min(limit ?? IGDB_SEARCH_LIMIT, IGDB_SEARCH_LIMIT);
     const buildBody = (): string =>
       [
         "fields name, cover.image_id, summary, first_release_date, total_rating, url;",
         `search "${sanitizedQuery}";`,
-        `limit ${limit};`,
+        `limit ${cappedLimit};`,
       ].join(" ");
 
     try {
@@ -130,6 +134,7 @@ class IgdbService {
       return {
         results: response.data,
         raw: includeRaw ? response.data : null,
+        total: parseInt(response.headers?.["x-count"] as string, 10) || response.data.length,
       };
     } catch (error: any) {
       console.error("IGDB: Failed to search games:", error);
@@ -180,7 +185,7 @@ class IgdbService {
   }
 
   async getGameDetailsBySearch(query: string): Promise<IGDBGameDetails | null> {
-    const search = await this.searchGames(query, 1, false);
+    const search = await this.searchGames(query, 1);
     const first = search.results[0];
     if (!first) return null;
     return this.getGameDetails(first.id);

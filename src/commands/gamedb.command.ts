@@ -138,30 +138,23 @@ export class GameDb {
     query: string,
   ): Promise<void> {
     try {
-      // If something was added concurrently, re-check GameDB before prompting IGDB import.
+      // If something was added concurrently, surface nearby matches while prompting IGDB import.
       const existing = await Game.searchGames(query);
-      if (existing.length > 0) {
-        const list = existing
-          .slice(0, 10)
-          .map((g) => `• **${g.title}** (GameDB #${g.id})`)
-          .join("\n");
-        await safeReply(interaction, {
-          content:
-            `GameDB already has matching entries for "${query}".\n` +
-            list +
-            `${existing.length > 10 ? "\n(and more...)" : ""}`,
-          __forceFollowUp: true,
-        });
-        return;
-      }
+      const existingList = existing
+        .slice(0, 10)
+        .map((g) => `• **${g.title}** (GameDB #${g.id})`);
+      const existingText = existingList.length
+        ? `${existingList.join("\n")}${existing.length > 10 ? "\n(and more...)" : ""}`
+        : null;
 
-      const searchRes = await igdbService.searchGames(query, 10, false);
+      const searchRes = await igdbService.searchGames(query);
       const results = searchRes.results;
 
       if (!results.length) {
         await safeReply(interaction, {
-          content:
-            `No games found on IGDB matching "${query}".`,
+          content: existingText
+            ? `No games found on IGDB matching "${query}".\nSimilar GameDB entries:\n${existingText}`
+            : `No games found on IGDB matching "${query}".`,
           __forceFollowUp: true,
         });
         return;
@@ -191,8 +184,29 @@ export class GameDb {
         },
       );
 
+      const totalLabel =
+        typeof searchRes.total === "number" ? searchRes.total : results.length;
+      const needsPaging = totalLabel > 22;
+      const pagingHint = needsPaging
+        ? "\nUse the dropdown's Next page option to see more results."
+        : "";
+
+      const embed = new EmbedBuilder().setDescription(
+        `Found ${totalLabel} results for "${query}". Showing first ${Math.min(
+          results.length,
+          22,
+        )}.${pagingHint ? ` ${pagingHint}` : ""}`,
+      );
+
+      if (existingText) {
+        embed.addFields({
+          name: "Existing GameDB matches",
+          value: existingText.slice(0, 1024),
+        });
+      }
+
       await safeReply(interaction, {
-        content: `No exact GameDB match for "${query}". Select the correct IGDB result to import (paged):`,
+        embeds: [embed],
         components,
         __forceFollowUp: true,
       });
@@ -217,9 +231,9 @@ export class GameDb {
     await safeDeferReply(interaction);
 
     try {
-      const searchRes = await igdbService.searchGames(title, 5);
-      const first = searchRes.results[0];
-      if (!first) {
+      const searchRes = await igdbService.searchGames(title, 50, true);
+      const results = searchRes.results;
+      if (!results?.length) {
         await safeReply(interaction, {
           content: `No IGDB results for "${title}".`,
           __forceFollowUp: true,
@@ -227,9 +241,7 @@ export class GameDb {
         return;
       }
 
-      const details = await igdbService.getGameDetails(first.id);
-      const payload = details ?? first;
-      const json = JSON.stringify(payload, null, 2);
+      const json = JSON.stringify(results, null, 2);
       const sanitized = escapeCodeBlock ? escapeCodeBlock(json) : json;
       const attachment = new AttachmentBuilder(Buffer.from(json, "utf8"), {
         name: "igdb-response.json",
@@ -239,7 +251,9 @@ export class GameDb {
         sanitized.length > maxPreview ? `${sanitized.slice(0, maxPreview)}...\n(truncated)` : sanitized;
 
       await safeReply(interaction, {
-        content: `\`\`\`json\n${preview}\n\`\`\`\nFull response attached as igdb-response.json.`,
+        content:
+          `Found ${results.length} IGDB result(s) for "${title}".\n` +
+          `\`\`\`json\n${preview}\n\`\`\`\nFull array attached as igdb-response.json.`,
         files: [attachment],
         __forceFollowUp: true,
       });
@@ -258,7 +272,9 @@ export class GameDb {
   ): Promise<void> {
     try {
       // 1. Search IGDB
-      const searchRes = await igdbService.searchGames(title, 24, includeRaw);
+      const searchRes = includeRaw
+        ? await igdbService.searchGames(title, undefined, true)
+        : await igdbService.searchGames(title);
       const results = searchRes.results;
 
       if (!results || results.length === 0) {

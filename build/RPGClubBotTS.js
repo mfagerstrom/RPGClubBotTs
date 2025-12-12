@@ -125,7 +125,7 @@ async function run() {
     await initOraclePool();
     await loadGotmFromDb();
     await loadNrGotmFromDb();
-    await importx(`${dirname(import.meta.url)}/{events,commands}/**/*.command.{ts,js}`);
+    await importx(`${dirname(import.meta.url)}/{events,commands}/**/*.{command,handler}.{ts,js}`);
     await bot.login(process.env.BOT_TOKEN);
 }
 void run();

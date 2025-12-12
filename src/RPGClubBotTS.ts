@@ -166,7 +166,9 @@ async function run(): Promise<void> {
   await loadGotmFromDb();
   await loadNrGotmFromDb();
 
-  await importx(`${dirname(import.meta.url)}/{events,commands}/**/*.command.{ts,js}`);
+  await importx(
+    `${dirname(import.meta.url)}/{events,commands}/**/*.{command,handler}.{ts,js}`,
+  );
 
   await bot.login(process.env.BOT_TOKEN);
 }

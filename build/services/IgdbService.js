@@ -1,4 +1,5 @@
 import axios from "axios";
+export const IGDB_SEARCH_LIMIT = 500;
 class IgdbService {
     accessToken = null;
     tokenExpiry = 0; // Unix timestamp
@@ -31,16 +32,17 @@ class IgdbService {
             throw new Error("IGDB service unavailable: Could not authenticate with Twitch.");
         }
     }
-    async searchGames(query, limit = 24, includeRaw = false) {
+    async searchGames(query, limit = IGDB_SEARCH_LIMIT, includeRaw = false) {
         if (!this.clientId) {
             throw new Error("IGDB service not configured.");
         }
         const token = await this.getAccessToken();
         const sanitizedQuery = query.replace(/"/g, '\\"');
+        const cappedLimit = Math.min(limit ?? IGDB_SEARCH_LIMIT, IGDB_SEARCH_LIMIT);
         const buildBody = () => [
             "fields name, cover.image_id, summary, first_release_date, total_rating, url;",
             `search "${sanitizedQuery}";`,
-            `limit ${limit};`,
+            `limit ${cappedLimit};`,
         ].join(" ");
         try {
             const response = await axios.post("https://api.igdb.com/v4/games", buildBody(), {
@@ -53,6 +55,7 @@ class IgdbService {
             return {
                 results: response.data,
                 raw: includeRaw ? response.data : null,
+                total: parseInt(response.headers?.["x-count"], 10) || response.data.length,
             };
         }
         catch (error) {
@@ -84,7 +87,7 @@ class IgdbService {
         }));
     }
     async getGameDetailsBySearch(query) {
-        const search = await this.searchGames(query, 1, false);
+        const search = await this.searchGames(query, 1);
         const first = search.results[0];
         if (!first)
             return null;

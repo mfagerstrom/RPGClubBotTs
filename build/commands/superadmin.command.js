@@ -22,8 +22,8 @@ import { igdbService } from "../services/IgdbService.js";
 import { loadGotmFromDb } from "../classes/Gotm.js";
 import { loadNrGotmFromDb } from "../classes/NrGotm.js";
 import { setThreadGameLink } from "../classes/Thread.js";
+import { createIgdbSession, deleteIgdbSession, } from "../services/IgdbSelectService.js";
 const SUPERADMIN_PRESENCE_CHOICES = new Map();
-const GAMEDB_IMPORT_PROMPTS = new Map();
 const GAMEDB_SESSION_LIMIT = 10;
 export const SUPERADMIN_HELP_TOPICS = [
     {
@@ -577,162 +577,68 @@ let SuperAdmin = class SuperAdmin {
             await this.linkGameToSeed(seed, exactMatch.id);
             return `[${label}] Linked existing GameDB #${exactMatch.id} to ${seed.title}`;
         }
-        let searchTerm = seed.title;
-        while (true) {
-            let igdbMatches = [];
-            try {
-                const searchRes = await igdbService.searchGames(searchTerm, 8);
-                igdbMatches = searchRes.results;
-            }
-            catch (err) {
-                const msg = err?.message ?? String(err);
-                return `[${label}] IGDB search failed: ${msg}`;
-            }
-            if (!igdbMatches.length) {
-                return `[${label}] No IGDB match for "${searchTerm}"`;
-            }
-            const existingIgdb = await this.findExistingIgdbGame(igdbMatches);
-            if (existingIgdb) {
-                await this.linkGameToSeed(seed, existingIgdb.id);
-                return `[${label}] Linked existing GameDB #${existingIgdb.id} to ${seed.title}`;
-            }
-            let selectedId = null;
-            if (igdbMatches.length === 1) {
-                selectedId = igdbMatches[0].id;
-            }
-            else {
-                const selection = await this.promptForIgdbSelection(interaction, seed, igdbMatches, searchTerm);
-                if (selection.newQuery) {
-                    searchTerm = selection.newQuery;
-                    continue;
-                }
-                if (selection.skipped) {
-                    return `[${label}] Skipped (no selection): ${seed.title}`;
-                }
-                selectedId = selection.selectedId;
-            }
-            if (!selectedId) {
-                return `[${label}] Skipped (no selection): ${seed.title}`;
-            }
-            return this.importGameFromIgdb(selectedId, label, seed);
+        let igdbMatches = [];
+        try {
+            const searchRes = await igdbService.searchGames(seed.title);
+            igdbMatches = searchRes.results;
         }
-    }
-    async promptForIgdbSelection(interaction, seed, matches, searchTerm) {
-        const options = matches.slice(0, 23).map((game) => {
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            return `[${label}] IGDB search failed: ${msg}`;
+        }
+        if (!igdbMatches.length) {
+            return `[${label}] No IGDB match for "${seed.title}"`;
+        }
+        const existingIgdb = await this.findExistingIgdbGame(igdbMatches);
+        if (existingIgdb) {
+            await this.linkGameToSeed(seed, existingIgdb.id);
+            return `[${label}] Linked existing GameDB #${existingIgdb.id} to ${seed.title}`;
+        }
+        if (igdbMatches.length === 1) {
+            return this.importGameFromIgdb(igdbMatches[0].id, label, seed);
+        }
+        const options = igdbMatches.map((game) => {
             const year = game.first_release_date
                 ? new Date(game.first_release_date * 1000).getFullYear()
                 : "TBD";
             const rating = game.total_rating ? ` | ${Math.round(game.total_rating)}/100` : "";
             return {
+                id: game.id,
                 label: `${game.name} (${year})`.substring(0, 100),
-                value: String(game.id),
                 description: `${rating} ${game.summary ?? "No summary"}`.substring(0, 95),
             };
         });
-        options.push({
-            label: "Skip (do not import this title)",
-            value: "skip",
-            description: "Leave this GOTM/NR-GOTM un-imported",
-        });
-        options.push({
-            label: "Search with a different title",
-            value: "search-new",
-            description: "Type a new search string in this channel, then re-run the lookup",
-        });
-        const customId = `gamedb-import-${Date.now()}`;
-        const menu = new StringSelectMenuBuilder()
-            .setCustomId(customId)
-            .setPlaceholder(`Select IGDB match for "${seed.title}"`)
-            .addOptions(options);
-        const row = new ActionRowBuilder().addComponents(menu);
-        const payload = {
-            content: `Multiple IGDB matches for ${seed.source} Round ${seed.round} (${seed.monthYear}).`,
-            components: [row],
-            fetchReply: true,
-        };
-        let prompt = null;
-        const existing = this.__gamedbPromptMessage;
-        if (existing && typeof existing.edit === "function") {
-            try {
-                prompt = (await existing.edit(payload));
-            }
-            catch {
-                prompt = null;
-            }
-        }
-        if (!prompt) {
-            prompt = (await safeReply(interaction, { ...payload, ephemeral: false }));
-            this.__gamedbPromptMessage = prompt ?? null;
-        }
-        if (!prompt) {
-            return { selectedId: null, newQuery: null, skipped: true };
-        }
-        const selection = await new Promise((resolve) => {
-            const timeout = setTimeout(() => {
-                GAMEDB_IMPORT_PROMPTS.delete(customId);
-                resolve(null);
-            }, 60_000);
-            GAMEDB_IMPORT_PROMPTS.set(customId, (val) => {
+        return await new Promise((resolve) => {
+            const { components, sessionId } = createIgdbSession(interaction.user.id, options, async (sel, igdbId) => {
+                const result = await this.importGameFromIgdb(igdbId, label, seed);
+                deleteIgdbSession(sessionId);
+                finish(result);
+                try {
+                    await sel.update({ content: result, components: [] });
+                }
+                catch {
+                    // ignore
+                }
+            });
+            const timeout = setTimeout(async () => {
+                deleteIgdbSession(sessionId);
+                finish(`[${label}] Skipped (no selection): ${seed.title}`);
+                await safeReply(interaction, {
+                    content: `[${label}] Import cancelled or timed out.`,
+                    ephemeral: true,
+                }).catch(() => { });
+            }, 120000);
+            const finish = (value) => {
                 clearTimeout(timeout);
-                GAMEDB_IMPORT_PROMPTS.delete(customId);
-                resolve(val);
+                resolve(value);
+            };
+            safeReply(interaction, {
+                content: `Multiple IGDB matches for ${seed.source} Round ${seed.round} (${seed.monthYear}).`,
+                components,
+                ephemeral: false,
+                __forceFollowUp: true,
             });
         });
-        if (selection === "skip" || selection === null) {
-            return { selectedId: null, newQuery: null, skipped: true };
-        }
-        if (selection === "search-new") {
-            const newQuery = await this.promptForNewIgdbSearch(interaction, seed, searchTerm);
-            return {
-                selectedId: null,
-                newQuery,
-                skipped: !newQuery,
-            };
-        }
-        const selected = Number(selection);
-        return {
-            selectedId: Number.isFinite(selected) ? selected : null,
-            newQuery: null,
-            skipped: false,
-        };
-    }
-    async promptForNewIgdbSearch(interaction, seed, searchTerm) {
-        const channel = interaction.channel;
-        const userId = interaction.user.id;
-        if (!channel || typeof channel.awaitMessages !== "function") {
-            await safeReply(interaction, {
-                content: "Cannot prompt for a new search; use this command in a text channel.",
-                ephemeral: true,
-            });
-            return null;
-        }
-        const prompt = `Reply in this channel with a new search string for "${seed.title}" ` +
-            `(current search: "${searchTerm}").`;
-        await safeReply(interaction, { content: prompt, ephemeral: false });
-        try {
-            const collected = await channel.awaitMessages({
-                filter: (m) => m.author?.id === userId,
-                max: 1,
-                time: 120_000,
-            });
-            const first = collected?.first?.();
-            if (!first)
-                return null;
-            const content = (first.content ?? "").trim();
-            try {
-                await first.delete();
-            }
-            catch {
-                // ignore delete failures
-            }
-            if (!content || /^cancel$/i.test(content)) {
-                return null;
-            }
-            return content;
-        }
-        catch {
-            return null;
-        }
     }
     async findExistingIgdbGame(matches) {
         for (const match of matches) {
@@ -742,30 +648,6 @@ let SuperAdmin = class SuperAdmin {
             }
         }
         return null;
-    }
-    async handleGamedbImportSelect(interaction) {
-        const resolver = GAMEDB_IMPORT_PROMPTS.get(interaction.customId);
-        if (!resolver) {
-            await interaction.reply({
-                content: "This selection has expired or was already handled.",
-                ephemeral: true,
-            }).catch(() => { });
-            return;
-        }
-        try {
-            await interaction.deferUpdate();
-        }
-        catch {
-            // ignore
-        }
-        const val = interaction.values?.[0] ?? null;
-        resolver(val);
-        try {
-            await interaction.message.edit({ components: [] });
-        }
-        catch {
-            // ignore
-        }
     }
     async importGameFromIgdb(igdbId, label, seed) {
         const details = await igdbService.getGameDetails(igdbId);
@@ -934,9 +816,6 @@ __decorate([
         name: "thread-game-link-backfill",
     })
 ], SuperAdmin.prototype, "threadGameLinkBackfill", null);
-__decorate([
-    SelectMenuComponent({ id: /^gamedb-import-\d+$/ })
-], SuperAdmin.prototype, "handleGamedbImportSelect", null);
 SuperAdmin = __decorate([
     Discord(),
     SlashGroup({ description: "Server Owner Commands", name: "superadmin" }),

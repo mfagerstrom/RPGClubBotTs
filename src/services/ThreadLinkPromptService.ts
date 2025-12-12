@@ -154,7 +154,7 @@ async function handleLinkButton(interaction: ButtonInteraction, threadId: string
 
     if (!gameId) {
       // Fallback to IGDB search
-      const searchRes = await igdbService.searchGames(title, 30, false);
+      const searchRes = await igdbService.searchGames(title);
       const results = searchRes.results;
       if (!results.length) {
         await interaction.followUp({

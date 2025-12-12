@@ -748,7 +748,7 @@ export class SuperAdmin {
 
     let igdbMatches: IGDBGame[] = [];
     try {
-      const searchRes = await igdbService.searchGames(seed.title, 30);
+      const searchRes = await igdbService.searchGames(seed.title);
       igdbMatches = searchRes.results;
     } catch (err: any) {
       const msg = err?.message ?? String(err);
