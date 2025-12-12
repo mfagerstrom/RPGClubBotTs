@@ -557,6 +557,13 @@ export class Admin {
   ): Promise<void> {
     await safeDeferReply(interaction);
 
+    if (interaction.channelId !== ADMIN_CHANNEL_ID) {
+      await safeReply(interaction, {
+        content: `This command can only be used in <#${ADMIN_CHANNEL_ID}>.`,
+      });
+      return;
+    }
+
     const okToUseCommand: boolean = await isAdmin(interaction);
     if (!okToUseCommand) return;
 
@@ -1415,6 +1422,7 @@ function calculateNextVoteDate(): Date {
 }
 
 const NOW_PLAYING_FORUM_ID = "1059875931356938240";
+const ADMIN_CHANNEL_ID = "428142514222923776";
 
 async function setupRoundGames(
   interaction: CommandInteraction,
