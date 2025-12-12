@@ -74,6 +74,15 @@ export interface INowPlayingMember {
   addedAt: Date | null;
 }
 
+export interface ICompletedMember {
+  userId: string;
+  username: string | null;
+  globalName: string | null;
+  completionType: string;
+  completedAt: Date | null;
+  finalPlaytimeHours: number | null;
+}
+
 const IGDB_REGION_MAP: Record<number, { code: string; name: string }> = {
   1: { code: "EU", name: "Europe" },
   2: { code: "NA", name: "North America" },
@@ -1133,6 +1142,54 @@ export default class Game {
             : row.ADDED_AT
               ? new Date(row.ADDED_AT as any)
               : null,
+      }));
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async getGameCompletions(gameId: number): Promise<ICompletedMember[]> {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+
+    try {
+      const res = await connection.execute<{
+        USER_ID: string;
+        USERNAME: string | null;
+        GLOBAL_NAME: string | null;
+        COMPLETION_TYPE: string;
+        COMPLETED_AT: Date | null;
+        FINAL_PLAYTIME_HRS: number | null;
+      }>(
+        `
+        SELECT c.USER_ID,
+               u.USERNAME,
+               u.GLOBAL_NAME,
+               c.COMPLETION_TYPE,
+               c.COMPLETED_AT,
+               c.FINAL_PLAYTIME_HRS
+          FROM USER_GAME_COMPLETIONS c
+          LEFT JOIN RPG_CLUB_USERS u ON u.USER_ID = c.USER_ID
+         WHERE c.GAMEDB_GAME_ID = :gameId
+         ORDER BY c.COMPLETED_AT DESC NULLS LAST, c.CREATED_AT DESC, c.COMPLETION_ID DESC
+        `,
+        { gameId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      return (res.rows ?? []).map((row) => ({
+        userId: String(row.USER_ID),
+        username: row.USERNAME ?? null,
+        globalName: row.GLOBAL_NAME ?? null,
+        completionType: String(row.COMPLETION_TYPE),
+        completedAt:
+          row.COMPLETED_AT instanceof Date
+            ? row.COMPLETED_AT
+            : row.COMPLETED_AT
+              ? new Date(row.COMPLETED_AT as any)
+              : null,
+        finalPlaytimeHours:
+          row.FINAL_PLAYTIME_HRS == null ? null : Number(row.FINAL_PLAYTIME_HRS),
       }));
     } finally {
       await connection.close();

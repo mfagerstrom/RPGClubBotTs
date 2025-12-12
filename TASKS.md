@@ -7,6 +7,8 @@
 - You are disallowed from using git commands that can result in file changes or losses
 - review eslint.config.ts and follow all rules outlined there
 - Do not keep making this mistake: [ERROR] (node:30760) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+- Do not keep making this mistake: Discord slash commands require all required options to come before optional options; reorder parameters if you see DiscordAPIError[50035] about APPLICATION_COMMAND_OPTIONS_REQUIRED_INVALID.
+- Do not keep making this mistake: when adding helper utilities (like GameDB thumbnail helpers), ensure they are imported or defined in the file before use to avoid compile-time "cannot find name" errors.
 - Do not delete the build directory.
 - Table docs live in db folder
 - Check the TODO.md file for development goals.  Don't do these automatically but ask me if I would like you to tackle one of them when you set up a new task context.

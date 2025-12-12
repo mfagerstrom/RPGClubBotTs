@@ -125,10 +125,9 @@ export async function safeReply(interaction: AnyRepliable, options: any): Promis
 
   // First-time acknowledgement: normal reply
   try {
-    // Force fetchReply so we can return the message
-    const replyOptions = typeof options === "string" 
-      ? { content: options, fetchReply: true } 
-      : { ...normalizedOptions, fetchReply: true };
+    const replyOptions = typeof options === "string"
+      ? { content: options }
+      : { ...normalizedOptions };
 
     const result = await interaction.reply(replyOptions as any);
     anyInteraction.__rpgAcked = true;

@@ -1,7 +1,7 @@
+import "dotenv/config";
 import { dirname, importx } from "@discordx/importer";
 import { IntentsBitField } from "discord.js";
 import { Client } from "discordx";
-import dotenv from "dotenv";
 import { restorePresenceIfMissing, updateBotPresence } from "./functions/SetPresence.js";
 import { initOraclePool } from "./db/oracleClient.js";
 import { loadGotmFromDb } from "./classes/Gotm.js";
@@ -15,7 +15,6 @@ import { startRssFeedService } from "./services/RssFeedService.js";
 import { startPublicReminderService } from "./services/PublicReminderService.js";
 import { startThreadSyncService } from "./services/ThreadSyncService.js";
 import { startThreadLinkPromptService } from "./services/ThreadLinkPromptService.js";
-dotenv.config();
 installConsoleLogging();
 const PRESENCE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 export const bot = new Client({

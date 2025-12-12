@@ -635,4 +635,37 @@ export default class Game {
             await connection.close();
         }
     }
+    static async getGameCompletions(gameId) {
+        const pool = getOraclePool();
+        const connection = await pool.getConnection();
+        try {
+            const res = await connection.execute(`
+        SELECT c.USER_ID,
+               u.USERNAME,
+               u.GLOBAL_NAME,
+               c.COMPLETION_TYPE,
+               c.COMPLETED_AT,
+               c.FINAL_PLAYTIME_HRS
+          FROM USER_GAME_COMPLETIONS c
+          LEFT JOIN RPG_CLUB_USERS u ON u.USER_ID = c.USER_ID
+         WHERE c.GAMEDB_GAME_ID = :gameId
+         ORDER BY c.COMPLETED_AT DESC NULLS LAST, c.CREATED_AT DESC, c.COMPLETION_ID DESC
+        `, { gameId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+            return (res.rows ?? []).map((row) => ({
+                userId: String(row.USER_ID),
+                username: row.USERNAME ?? null,
+                globalName: row.GLOBAL_NAME ?? null,
+                completionType: String(row.COMPLETION_TYPE),
+                completedAt: row.COMPLETED_AT instanceof Date
+                    ? row.COMPLETED_AT
+                    : row.COMPLETED_AT
+                        ? new Date(row.COMPLETED_AT)
+                        : null,
+                finalPlaytimeHours: row.FINAL_PLAYTIME_HRS == null ? null : Number(row.FINAL_PLAYTIME_HRS),
+            }));
+        }
+        finally {
+            await connection.close();
+        }
+    }
 }

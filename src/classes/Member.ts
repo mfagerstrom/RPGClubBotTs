@@ -96,6 +96,16 @@ export interface IMemberNowPlayingList {
   entries: IMemberNowPlayingEntry[];
 }
 
+export interface ICompletionRecord {
+  completionId: number;
+  gameId: number;
+  title: string;
+  completionType: string;
+  completedAt: Date | null;
+  finalPlaytimeHours: number | null;
+  createdAt: Date;
+}
+
 type Connection = oracledb.Connection;
 const MAX_NOW_PLAYING = 10;
 
@@ -315,6 +325,231 @@ export default class Member {
       const res = await connection.execute(
         `DELETE FROM USER_NOW_PLAYING WHERE USER_ID = :userId AND GAMEDB_GAME_ID = :gameId`,
         { userId, gameId },
+        { autoCommit: true },
+      );
+      const rows = (res as any).rowsAffected ?? 0;
+      return rows > 0;
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async addCompletion(params: {
+    userId: string;
+    gameId: number;
+    completionType: string;
+    completedAt?: Date | null;
+    finalPlaytimeHours?: number | null;
+  }): Promise<number> {
+    const { userId, gameId, completionType, completedAt, finalPlaytimeHours } = params;
+    if (!Number.isInteger(gameId) || gameId <= 0) {
+      throw new Error("Invalid GameDB id.");
+    }
+    const connection = await getOraclePool().getConnection();
+
+    try {
+      const result = await connection.execute<{ COMPLETION_ID: number }>(
+        `
+        INSERT INTO USER_GAME_COMPLETIONS (
+          USER_ID, GAMEDB_GAME_ID, COMPLETION_TYPE, COMPLETED_AT, FINAL_PLAYTIME_HRS
+        ) VALUES (
+          :userId, :gameId, :type, :completedAt, :playtime
+        )
+        RETURNING COMPLETION_ID INTO :completionId
+        `,
+        {
+          userId,
+          gameId,
+          type: completionType,
+          completedAt: completedAt ?? new Date(),
+          playtime: finalPlaytimeHours ?? null,
+          completionId: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+        },
+        { autoCommit: false },
+      );
+
+      const id = (result.outBinds as any)?.completionId?.[0];
+      if (!id) throw new Error("Failed to save completion (no id returned).");
+
+      const verify = await connection.execute<{ CNT: number }>(
+        `SELECT COUNT(*) AS CNT FROM USER_GAME_COMPLETIONS WHERE COMPLETION_ID = :id AND USER_ID = :userId`,
+        { id, userId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+      const exists = Number((verify.rows ?? [])[0]?.CNT ?? 0) > 0;
+      if (!exists) {
+        throw new Error("Completion insert verification failed (row not found after insert).");
+      }
+
+      await connection.commit();
+      return Number(id);
+    } catch (err) {
+      await connection.rollback().catch(() => {});
+      throw err;
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async getCompletions(params: {
+    userId: string;
+    limit: number;
+    offset?: number;
+    year?: number | null;
+  }): Promise<ICompletionRecord[]> {
+    const { userId, limit, offset = 0, year = null } = params;
+    const connection = await getOraclePool().getConnection();
+    const safeLimit = Math.min(Math.max(limit, 1), 50);
+    const safeOffset = Math.max(offset, 0);
+
+    const clauses: string[] = ["c.USER_ID = :userId"];
+    const binds: Record<string, any> = { userId, limit: safeLimit, offset: safeOffset };
+    if (year) {
+      clauses.push("EXTRACT(YEAR FROM c.COMPLETED_AT) = :year");
+      binds.year = year;
+    }
+
+    try {
+      const res = await connection.execute<{
+        COMPLETION_ID: number;
+        GAME_ID: number;
+        TITLE: string;
+        COMPLETION_TYPE: string;
+        COMPLETED_AT: Date | null;
+        FINAL_PLAYTIME_HRS: number | null;
+        CREATED_AT: Date;
+      }>(
+        `
+        SELECT c.COMPLETION_ID,
+               g.GAME_ID,
+               g.TITLE,
+               c.COMPLETION_TYPE,
+               c.COMPLETED_AT,
+               c.FINAL_PLAYTIME_HRS,
+               c.CREATED_AT
+          FROM USER_GAME_COMPLETIONS c
+          JOIN GAMEDB_GAMES g ON g.GAME_ID = c.GAMEDB_GAME_ID
+         WHERE ${clauses.join(" AND ")}
+         ORDER BY c.COMPLETED_AT ASC NULLS LAST, c.CREATED_AT ASC, c.COMPLETION_ID ASC
+         OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
+        `,
+        binds,
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      return (res.rows ?? []).map((row) => ({
+        completionId: Number(row.COMPLETION_ID),
+        gameId: Number(row.GAME_ID),
+        title: String(row.TITLE),
+        completionType: String(row.COMPLETION_TYPE),
+        completedAt:
+          row.COMPLETED_AT instanceof Date
+            ? row.COMPLETED_AT
+            : row.COMPLETED_AT
+              ? new Date(row.COMPLETED_AT as any)
+              : null,
+        finalPlaytimeHours:
+          row.FINAL_PLAYTIME_HRS == null ? null : Number(row.FINAL_PLAYTIME_HRS),
+        createdAt:
+          row.CREATED_AT instanceof Date
+            ? row.CREATED_AT
+            : row.CREATED_AT
+              ? new Date(row.CREATED_AT as any)
+              : new Date(),
+      }));
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async countCompletions(userId: string, year?: number | null): Promise<number> {
+    const connection = await getOraclePool().getConnection();
+    const clauses: string[] = ["USER_ID = :userId"];
+    const binds: Record<string, any> = { userId };
+    if (year) {
+      clauses.push("EXTRACT(YEAR FROM COMPLETED_AT) = :year");
+      binds.year = year;
+    }
+
+    try {
+      const res = await connection.execute<{ CNT: number }>(
+        `
+        SELECT COUNT(*) AS CNT
+          FROM USER_GAME_COMPLETIONS
+         WHERE ${clauses.join(" AND ")}
+        `,
+        binds,
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+      return Number((res.rows ?? [])[0]?.CNT ?? 0);
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async updateCompletion(
+    userId: string,
+    completionId: number,
+    updates: Partial<{
+      completionType: string;
+      completedAt: Date | null;
+      finalPlaytimeHours: number | null;
+    }>,
+  ): Promise<boolean> {
+    if (!Number.isInteger(completionId) || completionId <= 0) {
+      throw new Error("Invalid completion id.");
+    }
+
+    const fields: string[] = [];
+    const binds: Record<string, any> = { userId, completionId };
+
+    if (updates.completionType !== undefined) {
+      fields.push("COMPLETION_TYPE = :type");
+      binds.type = updates.completionType;
+    }
+    if (updates.completedAt !== undefined) {
+      fields.push("COMPLETED_AT = :completedAt");
+      binds.completedAt = updates.completedAt;
+    }
+    if (updates.finalPlaytimeHours !== undefined) {
+      fields.push("FINAL_PLAYTIME_HRS = :playtime");
+      binds.playtime = updates.finalPlaytimeHours;
+    }
+
+    if (!fields.length) return false;
+
+    const connection = await getOraclePool().getConnection();
+    try {
+      const res = await connection.execute(
+        `
+        UPDATE USER_GAME_COMPLETIONS
+           SET ${fields.join(", ")}
+         WHERE COMPLETION_ID = :completionId
+           AND USER_ID = :userId
+        `,
+        binds,
+        { autoCommit: true },
+      );
+      const rows = (res as any).rowsAffected ?? 0;
+      return rows > 0;
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async deleteCompletion(userId: string, completionId: number): Promise<boolean> {
+    if (!Number.isInteger(completionId) || completionId <= 0) {
+      throw new Error("Invalid completion id.");
+    }
+    const connection = await getOraclePool().getConnection();
+    try {
+      const res = await connection.execute(
+        `
+        DELETE FROM USER_GAME_COMPLETIONS
+         WHERE COMPLETION_ID = :completionId
+           AND USER_ID = :userId
+        `,
+        { completionId, userId },
         { autoCommit: true },
       );
       const rows = (res as any).rowsAffected ?? 0;

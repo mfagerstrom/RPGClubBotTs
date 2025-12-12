@@ -431,6 +431,7 @@ let GameDb = class GameDb {
             const regions = await Game.getAllRegions();
             const associations = await Game.getGameAssociations(gameId);
             const nowPlayingMembers = await Game.getNowPlayingMembers(gameId);
+            const completions = await Game.getGameCompletions(gameId);
             const platformMap = new Map(platforms.map((p) => [p.id, p.name]));
             const regionMap = new Map(regions.map((r) => [r.id, r.name]));
             const description = game.description || "No description available.";
@@ -486,6 +487,22 @@ let GameDb = class GameDb {
                 }
                 embed.addFields({
                     name: "Now Playing",
+                    value: lines.join("\n"),
+                    inline: true,
+                });
+            }
+            if (completions.length) {
+                const MAX_COMPLETIONS_DISPLAY = 12;
+                const lines = completions.slice(0, MAX_COMPLETIONS_DISPLAY).map((member) => {
+                    const name = member.globalName ?? member.username ?? member.userId;
+                    return `${name} (<@${member.userId}>) — ${member.completionType}`;
+                });
+                if (completions.length > MAX_COMPLETIONS_DISPLAY) {
+                    const remaining = completions.length - MAX_COMPLETIONS_DISPLAY;
+                    lines.push(`…and ${remaining} more completed this.`);
+                }
+                embed.addFields({
+                    name: "Completed By",
                     value: lines.join("\n"),
                     inline: true,
                 });
