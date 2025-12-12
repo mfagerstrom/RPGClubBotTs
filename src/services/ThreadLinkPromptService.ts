@@ -4,11 +4,8 @@ import {
   ButtonInteraction,
   ButtonStyle,
   Client,
-  ComponentType,
   EmbedBuilder,
   MessageFlags,
-  type Message,
-  StringSelectMenuBuilder,
   ThreadChannel,
 } from "discord.js";
 import {
@@ -18,6 +15,10 @@ import {
 } from "../classes/Thread.js";
 import Game from "../classes/Game.js";
 import { igdbService, type IGDBGameDetails } from "../services/IgdbService.js";
+import {
+  createIgdbSession,
+  type IgdbSelectOption,
+} from "./IgdbSelectService.js";
 
 const NOW_PLAYING_FORUM_ID = "1059875931356938240";
 const PROMPT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24h
@@ -104,9 +105,56 @@ async function handleLinkButton(interaction: ButtonInteraction, threadId: string
     let gameId: number | null = localMatches[0]?.id ?? null;
     let chosenName: string | null = localMatches[0]?.title ?? null;
 
+    const finalizeSelection = async (igdbId: number, nameHint?: string): Promise<number | null> => {
+      const existing = await Game.getGameByIgdbId(igdbId);
+      if (existing) {
+        chosenName = existing.title;
+        return existing.id;
+      }
+      const details: IGDBGameDetails | null = await igdbService.getGameDetails(igdbId);
+      if (!details) {
+        await interaction.followUp({
+          content: "Failed to load game details from IGDB.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return null;
+      }
+      const newGame = await Game.createGame(
+        details.name,
+        details.summary ?? "",
+        null,
+        details.id,
+        details.slug ?? null,
+        details.total_rating ?? null,
+        details.url ?? null,
+      );
+      await Game.saveFullGameMetadata(newGame.id, details);
+      chosenName = nameHint ?? details.name;
+      return newGame.id;
+    };
+
+    const finishLink = async (): Promise<void> => {
+      if (!gameId) return;
+      await setThreadGameLink(threadId, gameId!);
+      await interaction.followUp({
+        content:
+          `Linked this thread to GameDB #${gameId}${chosenName ? ` (${chosenName})` : ""}.\n` +
+          "Threads can have multiple links; use /thread unlink to remove one or all.",
+        flags: MessageFlags.Ephemeral,
+      });
+
+      try {
+        await interaction.message.delete().catch(async () => {
+          await interaction.message.edit({ components: [] }).catch(() => {});
+        });
+      } catch {
+        // ignore
+      }
+    };
+
     if (!gameId) {
       // Fallback to IGDB search
-      const searchRes = await igdbService.searchGames(title, 24, false);
+      const searchRes = await igdbService.searchGames(title, 30, false);
       const results = searchRes.results;
       if (!results.length) {
         await interaction.followUp({
@@ -116,107 +164,50 @@ async function handleLinkButton(interaction: ButtonInteraction, threadId: string
         return;
       }
 
-      let chosen = results[0];
+      const selectFirst = async (igdbId: number, name: string): Promise<void> => {
+        const finalId = await finalizeSelection(igdbId, name);
+        if (!finalId) return;
+        gameId = finalId;
+      };
 
-      if (results.length > 1) {
-        const options = results.slice(0, 24).map((game) => {
+      if (results.length === 1) {
+        await selectFirst(results[0].id, results[0].name);
+      } else {
+        const opts: IgdbSelectOption[] = results.map((game) => {
           const year = game.first_release_date
             ? new Date(game.first_release_date * 1000).getFullYear()
             : "TBD";
           return {
-            label: `${game.name} (${year})`.slice(0, 100),
-            value: String(game.id),
-            description: (game.summary || "No summary").slice(0, 100),
+            id: game.id,
+            label: `${game.name} (${year})`,
+            description: (game.summary || "No summary").slice(0, 95),
           };
         });
 
-        const selectRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-          new StringSelectMenuBuilder()
-            .setCustomId("thread-link-select")
-            .setPlaceholder(`Select game for "${title}"`)
-            .addOptions(options),
+        const { components } = createIgdbSession(
+          interaction.user.id,
+          opts,
+          async (sel, igdbId) => {
+            const finalId = await finalizeSelection(igdbId);
+            if (!finalId) return;
+            gameId = finalId;
+            await sel.update({ content: `Linked to GameDB #${finalId}.`, components: [] });
+            await finishLink();
+          },
         );
 
-        const selectMessage = (await interaction.followUp({
+        await interaction.followUp({
           content: `Select the correct game for "${title}".`,
-          components: [selectRow],
+          components,
           flags: MessageFlags.Ephemeral,
-        })) as Message<boolean>;
+        });
 
-        const selection = await selectMessage
-          .awaitMessageComponent({
-            componentType: ComponentType.StringSelect,
-            time: 60_000,
-            filter: (i) => i.user.id === interaction.user.id,
-          })
-          .catch(() => null);
-
-        if (!selection) {
-          await selectMessage.edit({ components: [] }).catch(() => {});
-          await interaction.followUp({
-            content: "No selection made; leaving thread unlinked.",
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
-        }
-
-        try {
-          await selection.deferUpdate();
-        } catch {
-          // ignore
-        }
-
-        const selectedId = Number(selection.values[0]);
-        chosen = results.find((g) => g.id === selectedId) ?? chosen;
-
-        try {
-          await (selection.message as any).edit({ components: [] }).catch(() => {});
-        } catch {
-          // ignore
-        }
-      }
-
-      chosenName = chosen.name;
-
-      const existing = await Game.getGameByIgdbId(chosen.id);
-      if (existing) {
-        gameId = existing.id;
-      } else {
-        const details: IGDBGameDetails | null = await igdbService.getGameDetails(chosen.id);
-        if (!details) {
-        await interaction.followUp({ content: "Failed to load game details from IGDB.", flags: MessageFlags.Ephemeral });
+        // Defer finishing until selection happens
         return;
       }
-        const newGame = await Game.createGame(
-          details.name,
-          details.summary ?? "",
-          null,
-          details.id,
-          details.slug ?? null,
-          details.total_rating ?? null,
-          details.url ?? null,
-        );
-        gameId = newGame.id;
-        await Game.saveFullGameMetadata(gameId, details);
-      }
     }
 
-    await setThreadGameLink(threadId, gameId!);
-    await interaction.followUp({
-      content:
-        `Linked this thread to GameDB #${gameId}${chosenName ? ` (${chosenName})` : ""}.\n` +
-        "Threads can have multiple links; use /thread unlink to remove one or all.",
-      flags: MessageFlags.Ephemeral,
-    });
-
-    // Delete the original prompt message if we can
-    try {
-      await interaction.message.delete().catch(async () => {
-        await interaction.message.edit({ components: [] }).catch(() => {});
-      });
-    } catch {
-      // ignore
-    }
+    await finishLink();
   } catch (err: any) {
     const msg = err?.message ?? String(err);
     await interaction.followUp({ content: `Failed to link game: ${msg}` });

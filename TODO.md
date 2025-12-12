@@ -9,7 +9,6 @@
 - Update <#927727584148611102>, also incorporate that content into the bot's help menu
 - Address this: ``[ERROR] (node:23592) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.``
 - Do a UI Pass over all embeds and try to make things look nicer, incorporate thumbnail images and/or emoji.  MP info emoji for platforms
-- Add game completion functionality, tie into profile and game view
 - Linking of different versions of same game in game view (remaster, remake, port, etc)
 - /now-playing create-thread, tag it, auto-source image and link to game all in one go
 - /mp-info all could reuse same embed while keeping the dropdown below it, like game search does

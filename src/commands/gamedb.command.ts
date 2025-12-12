@@ -4,7 +4,6 @@ import {
   EmbedBuilder,
   StringSelectMenuBuilder,
   ActionRowBuilder,
-  ComponentType,
   StringSelectMenuInteraction,
   ButtonBuilder,
   ButtonInteraction,
@@ -27,6 +26,10 @@ import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import Game, { type IGameAssociationSummary } from "../classes/Game.js";
 import axios from "axios"; // For downloading image attachments
 import { igdbService } from "../services/IgdbService.js";
+import {
+  createIgdbSession,
+  type IgdbSelectOption,
+} from "../services/IgdbSelectService.js";
 
 const GAME_SEARCH_PAGE_SIZE = 25;
 const GAME_SEARCH_SESSIONS = new Map<
@@ -169,70 +172,29 @@ export class GameDb {
         return;
       }
 
-      const options = results.slice(0, 25).map((game) => {
+      const opts: IgdbSelectOption[] = results.map((game) => {
         const year = game.first_release_date
           ? new Date(game.first_release_date * 1000).getFullYear()
           : "TBD";
         return {
-          label: `${game.name} (${year})`.substring(0, 100),
-          value: game.id.toString(),
-          description: (game.summary || "No summary").substring(0, 100),
+          id: game.id,
+          label: `${game.name} (${year})`,
+          description: (game.summary || "No summary").substring(0, 95),
         };
       });
 
-      const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId(`gamedb-add-select-${Date.now()}`)
-        .setPlaceholder("Select the correct game to import")
-        .addOptions(options);
+      const { components } = createIgdbSession(
+        interaction.user.id,
+        opts,
+        async (sel, igdbId) => {
+          await this.addGameToDatabase(sel, igdbId, { selectionMessage: sel.message as any });
+        },
+      );
 
-      const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
-
-      const reply = await safeReply(interaction, {
-        content: `No exact GameDB match for "${query}". Select the correct IGDB result to import (2 min timeout):`,
-        components: [row],
+      await safeReply(interaction, {
+        content: `No exact GameDB match for "${query}". Select the correct IGDB result to import (paged):`,
+        components,
         __forceFollowUp: true,
-        fetchReply: true,
-      });
-
-      if (!reply) return;
-
-      await new Promise<void>((resolve) => {
-        const collector = (reply as any).createMessageComponentCollector({
-          componentType: ComponentType.StringSelect,
-          time: 120000,
-          filter: (i: any) => i.user.id === interaction.user.id,
-        });
-
-        collector.on("collect", async (i: StringSelectMenuInteraction) => {
-          try {
-            await i.deferUpdate();
-            const selectedId = Number(i.values[0]);
-            await this.addGameToDatabase(i, selectedId, { selectionMessage: reply as any });
-            collector.stop("selected");
-          } catch (err: any) {
-            console.error("Error importing from IGDB selection:", err);
-            const payload = {
-              content: `Import failed: ${err.message}`,
-              __forceFollowUp: true,
-            };
-            await safeReply(i, payload);
-          }
-        });
-
-        collector.on("end", async (_collected: any, reason: string) => {
-          if (reason !== "selected") {
-            try {
-              await (reply as any).edit({
-                content:
-                  "Import cancelled or timed out. Nominations must be in GameDB first. Use /gamedb add (tag @merph518 if you need help).",
-                components: [],
-              });
-            } catch {
-              // ignore
-            }
-          }
-          resolve();
-        });
       });
     } catch (err: any) {
       await safeReply(interaction, {
@@ -311,85 +273,37 @@ export class GameDb {
       }
 
       // 2. Build Select Menu
-      const options = results.slice(0, 25).map((game) => {
-        const year = game.first_release_date
-          ? new Date(game.first_release_date * 1000).getFullYear()
-          : "TBD";
-        return {
-          label: `${game.name} (${year})`.substring(0, 100),
-          value: game.id.toString(),
-          description: (game.summary || "No summary").substring(0, 100),
-        };
-      });
+    const opts: IgdbSelectOption[] = results.map((game) => {
+      const year = game.first_release_date
+        ? new Date(game.first_release_date * 1000).getFullYear()
+        : "TBD";
+      return {
+        id: game.id,
+        label: `${game.name} (${year})`,
+        description: (game.summary || "No summary").substring(0, 95),
+      };
+    });
 
-      const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId("gamedb-add-select")
-        .setPlaceholder("Select the correct game")
-        .addOptions(options);
+    const attachment = includeRaw && searchRes.raw
+      ? new AttachmentBuilder(Buffer.from(JSON.stringify(searchRes.raw, null, 2), "utf8"), {
+          name: "igdb-search.json",
+        })
+      : null;
 
-      const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
+    const { components } = createIgdbSession(
+      interaction.user.id,
+      opts,
+      async (sel, igdbId) => {
+        await this.addGameToDatabase(sel, igdbId, { selectionMessage: sel.message as any });
+      },
+    );
 
-      const attachment = includeRaw && searchRes.raw
-        ? new AttachmentBuilder(Buffer.from(JSON.stringify(searchRes.raw, null, 2), "utf8"), {
-            name: "igdb-search.json",
-          })
-        : null;
-
-      const reply = await safeReply(interaction, {
-        content: `Found ${results.length} results for "${title}". Please select one:`,
-        components: [row],
-        files: attachment ? [attachment] : undefined,
-        __forceFollowUp: true,
-        fetchReply: true,
-      });
-
-      if (!reply) return; // Should not happen given safeReply logic but safety first
-
-      // 3. Wait for selection
-      const collector = (reply as any).createMessageComponentCollector({
-        componentType: ComponentType.StringSelect,
-        time: 60000, // 1 minute timeout
-        filter: (i: any) => i.user.id === interaction.user.id,
-      });
-
-      await new Promise<void>((resolve) => {
-        collector.on("collect", async (i: StringSelectMenuInteraction) => {
-          try {
-            await i.deferUpdate(); // Acknowledge selection
-            const selectedId = Number(i.values[0]);
-            await this.addGameToDatabase(i, selectedId, { selectionMessage: reply as any });
-            collector.stop("selected");
-          } catch (err: any) {
-            console.error("Error in gamedb add selection:", err);
-            const payload = {
-              content: `An error occurred while adding the game: ${err.message}`,
-            };
-            try {
-              await i.followUp(payload);
-            } catch (e) {
-              if (isUnknownWebhookError(e)) {
-                await safeReply(i, { ...payload, __forceFollowUp: true });
-              } else {
-                throw e;
-              }
-            }
-          }
-        });
-
-        collector.on("end", async (_collected: any, reason: string) => {
-          if (reason !== "selected") {
-            try {
-              await (reply as any).edit({
-                content: "Selection timed out or cancelled.",
-                components: [],
-              });
-            } catch {
-              // Ignore if message deleted
-            }
-          }
-          resolve();
-        });
-      });
+    await safeReply(interaction, {
+      content: `Found ${results.length} results for "${title}". Please select one (paged):`,
+      components,
+      files: attachment ? [attachment] : undefined,
+      __forceFollowUp: true,
+    });
 
     } catch (error: any) {
       await safeReply(interaction, {

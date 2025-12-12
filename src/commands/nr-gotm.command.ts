@@ -1,6 +1,6 @@
-import type { CommandInteraction, Client, TextBasedChannel, Message } from "discord.js";
-import { ApplicationCommandOptionType, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder,  type StringSelectMenuInteraction } from "discord.js";
-import { Discord, Slash, SlashChoice, SlashGroup, SlashOption, SelectMenuComponent } from "discordx";
+import type { CommandInteraction, Client, TextBasedChannel } from "discord.js";
+import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
+import { Discord, Slash, SlashChoice, SlashGroup, SlashOption } from "discordx";
 import { AUDIT_NO_VALUE_SENTINEL } from "./superadmin.command.js";
 // Use relative import with .js for ts-node ESM compatibility
 import NrGotm, { INrGotmEntry } from "../classes/NrGotm.js";
@@ -21,9 +21,13 @@ import { buildNrGotmEntryEmbed, type IEmbedWithAttachments } from "../functions/
 import Game, { type IGame } from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
 import axios from "axios";
+import {
+  createIgdbSession,
+  deleteIgdbSession,
+  type IgdbSelectOption,
+} from "../services/IgdbSelectService.js";
 
 const ANNOUNCEMENTS_CHANNEL_ID: string | undefined = process.env.ANNOUNCEMENTS_CHANNEL_ID;
-const NR_GOTM_NOM_SESSIONS = new Map<string, (value: string | null) => void>();
 
 function isNoNrGotm(entry: INrGotmEntry): boolean {
   return entry.gameOfTheMonth.some((g) => (g.title ?? "").trim().toLowerCase() === "n/a");
@@ -419,24 +423,6 @@ export class NrGotmSearch {
       });
     }
   }
-
-  @SelectMenuComponent({ id: /^nr-gotm-nom-\d+$/ })
-  async handleNrGotmNominationSelect(interaction: StringSelectMenuInteraction): Promise<void> {
-    const cb = NR_GOTM_NOM_SESSIONS.get(interaction.customId);
-    if (!cb) {
-      await interaction
-        .update({ content: "This selection is no longer active.", components: [] })
-        .catch(() => interaction.deferUpdate().catch(() => {}));
-      return;
-    }
-    const val = interaction.values?.[0] ?? null;
-    try {
-      await interaction.update({ components: [] });
-    } catch {
-      // ignore
-    }
-    cb(val);
-  }
 }
 
 function buildNominationEmbed(
@@ -494,7 +480,7 @@ async function resolveNrGameDbGame(interaction: CommandInteraction, title: strin
 
   let igdbResults: Awaited<ReturnType<typeof igdbService.searchGames>>["results"] = [];
   try {
-    igdbResults = (await igdbService.searchGames(searchTerm, 10, false)).results;
+    igdbResults = (await igdbService.searchGames(searchTerm, 30, false)).results;
   } catch (err: any) {
     const msg = err?.message ?? String(err);
     await safeReply(interaction, {
@@ -518,65 +504,58 @@ async function resolveNrGameDbGame(interaction: CommandInteraction, title: strin
     return await importNrGameFromIgdb(interaction, igdbResults[0].id);
   }
 
-  const options = igdbResults.slice(0, 25).map((game) => {
+  const opts: IgdbSelectOption[] = igdbResults.map((game) => {
     const year = game.first_release_date
       ? new Date(game.first_release_date * 1000).getFullYear()
       : "TBD";
     return {
-      label: `${game.name} (${year})`.substring(0, 100),
-      value: game.id.toString(),
-      description: (game.summary || "No summary").substring(0, 100),
+      id: game.id,
+      label: `${game.name} (${year})`,
+      description: (game.summary || "No summary").substring(0, 95),
     };
   });
 
-  const customId = `nr-gotm-nom-${Date.now()}`;
-  const selectMenu = new StringSelectMenuBuilder()
-    .setCustomId(customId)
-    .setPlaceholder("Select the correct game")
-    .addOptions(options);
+  return await new Promise<IGame | null>((resolve) => {
+    const { components, sessionId } = createIgdbSession(
+      interaction.user.id,
+      opts,
+      async (sel, igdbId) => {
+        const imported = await importNrGameFromIgdb(interaction, igdbId);
+        deleteIgdbSession(sessionId);
+        finish(imported);
+        if (imported) {
+          try {
+            await sel.update({ content: `Imported **${imported.title}**.`, components: [] });
+          } catch {
+            // ignore
+          }
+        }
+      },
+    );
 
-  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
-  const embed = new EmbedBuilder()
-    .setDescription(`Select the correct game for "${searchTerm}".`)
-    .setFooter({ text: "If you have trouble importing, tag @merph518." });
-
-  const prompt = (await safeReply(interaction, {
-    content: "Game not found in GameDB. Select the IGDB match to import (2 min timeout).",
-    embeds: [embed],
-    components: [row],
-    fetchReply: true,
-    __forceFollowUp: true,
-  })) as Message<boolean> | undefined;
-
-  if (!prompt) return null;
-
-  const selectedId = await new Promise<number | null>((resolve) => {
-    const timeout = setTimeout(() => {
-      NR_GOTM_NOM_SESSIONS.delete(customId);
-      prompt
-        .edit({ content: "Import timed out. No nomination changes made.", components: [] })
-        .catch(() => {});
-      resolve(null);
+    const timeout = setTimeout(async () => {
+      deleteIgdbSession(sessionId);
+      finish(null);
+      await safeReply(interaction, {
+        content:
+          "Import cancelled or timed out. Nominations must be in GameDB first. " +
+          "Use /gamedb add to import (tag @merph518 if you have trouble).",
+        ephemeral: true,
+      }).catch(() => {});
     }, 120000);
-    NR_GOTM_NOM_SESSIONS.set(customId, (val) => {
+
+    const finish = (value: IGame | null) => {
       clearTimeout(timeout);
-      NR_GOTM_NOM_SESSIONS.delete(customId);
-      const id = Number(val);
-      resolve(Number.isFinite(id) ? id : null);
+      resolve(value);
+    };
+
+    void safeReply(interaction, {
+      content: "Game not found in GameDB. Select the IGDB match to import (paged).",
+      components,
+      ephemeral: true,
+      __forceFollowUp: true,
     });
   });
-
-  if (!selectedId) {
-    await safeReply(interaction, {
-      content:
-        "Import cancelled or timed out. Nominations must be in GameDB first. " +
-        "Use /gamedb add to import (tag @merph518 if you have trouble).",
-      ephemeral: true,
-    });
-    return null;
-  }
-
-  return await importNrGameFromIgdb(interaction, selectedId);
 }
 
 async function importNrGameFromIgdb(

@@ -39,6 +39,11 @@ import { igdbService, type IGDBGame, type IGDBGameDetails } from "../services/Ig
 import { loadGotmFromDb } from "../classes/Gotm.js";
 import { loadNrGotmFromDb } from "../classes/NrGotm.js";
 import { setThreadGameLink } from "../classes/Thread.js";
+import {
+  createIgdbSession,
+  deleteIgdbSession,
+  type IgdbSelectOption,
+} from "../services/IgdbSelectService.js";
 
 type SuperAdminHelpTopicId =
   | "memberscan"
@@ -55,7 +60,6 @@ type SuperAdminHelpTopic = {
 };
 
 const SUPERADMIN_PRESENCE_CHOICES = new Map<string, string[]>();
-const GAMEDB_IMPORT_PROMPTS = new Map<string, (value: string | null) => void>();
 const GAMEDB_SESSION_LIMIT: number = 10;
 
 type GameDbSeed = {
@@ -65,12 +69,6 @@ type GameDbSeed = {
   monthYear: string;
   gameIndex: number;
   gamedbGameId: number | null;
-};
-
-type IgdbSelectionResult = {
-  selectedId: number | null;
-  newQuery: string | null;
-  skipped: boolean;
 };
 
 export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
@@ -748,200 +746,78 @@ export class SuperAdmin {
       return `[${label}] Linked existing GameDB #${exactMatch.id} to ${seed.title}`;
     }
 
-    let searchTerm = seed.title;
-
-    while (true) {
-      let igdbMatches: IGDBGame[] = [];
-      try {
-        const searchRes = await igdbService.searchGames(searchTerm, 8);
-        igdbMatches = searchRes.results;
-      } catch (err: any) {
-        const msg = err?.message ?? String(err);
-        return `[${label}] IGDB search failed: ${msg}`;
-      }
-
-      if (!igdbMatches.length) {
-        return `[${label}] No IGDB match for "${searchTerm}"`;
-      }
-
-      const existingIgdb = await this.findExistingIgdbGame(igdbMatches);
-      if (existingIgdb) {
-        await this.linkGameToSeed(seed, existingIgdb.id);
-        return `[${label}] Linked existing GameDB #${existingIgdb.id} to ${seed.title}`;
-      }
-
-      let selectedId: number | null = null;
-      if (igdbMatches.length === 1) {
-        selectedId = igdbMatches[0].id;
-      } else {
-        const selection = await this.promptForIgdbSelection(
-          interaction,
-          seed,
-          igdbMatches,
-          searchTerm,
-        );
-        if (selection.newQuery) {
-          searchTerm = selection.newQuery;
-          continue;
-        }
-        if (selection.skipped) {
-          return `[${label}] Skipped (no selection): ${seed.title}`;
-        }
-        selectedId = selection.selectedId;
-      }
-
-      if (!selectedId) {
-        return `[${label}] Skipped (no selection): ${seed.title}`;
-      }
-
-      return this.importGameFromIgdb(selectedId, label, seed);
+    let igdbMatches: IGDBGame[] = [];
+    try {
+      const searchRes = await igdbService.searchGames(seed.title, 30);
+      igdbMatches = searchRes.results;
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      return `[${label}] IGDB search failed: ${msg}`;
     }
-  }
 
-  private async promptForIgdbSelection(
-    interaction: CommandInteraction,
-    seed: GameDbSeed,
-    matches: IGDBGame[],
-    searchTerm: string,
-  ): Promise<IgdbSelectionResult> {
-    const options = matches.slice(0, 23).map((game) => {
+    if (!igdbMatches.length) {
+      return `[${label}] No IGDB match for "${seed.title}"`;
+    }
+
+    const existingIgdb = await this.findExistingIgdbGame(igdbMatches);
+    if (existingIgdb) {
+      await this.linkGameToSeed(seed, existingIgdb.id);
+      return `[${label}] Linked existing GameDB #${existingIgdb.id} to ${seed.title}`;
+    }
+
+    if (igdbMatches.length === 1) {
+      return this.importGameFromIgdb(igdbMatches[0].id, label, seed);
+    }
+
+    const options: IgdbSelectOption[] = igdbMatches.map((game) => {
       const year = game.first_release_date
         ? new Date(game.first_release_date * 1000).getFullYear()
         : "TBD";
       const rating = game.total_rating ? ` | ${Math.round(game.total_rating)}/100` : "";
       return {
+        id: game.id,
         label: `${game.name} (${year})`.substring(0, 100),
-        value: String(game.id),
         description: `${rating} ${game.summary ?? "No summary"}`.substring(0, 95),
       };
     });
 
-    options.push({
-      label: "Skip (do not import this title)",
-      value: "skip",
-      description: "Leave this GOTM/NR-GOTM un-imported",
-    });
-    options.push({
-      label: "Search with a different title",
-      value: "search-new",
-      description: "Type a new search string in this channel, then re-run the lookup",
-    });
+    return await new Promise<string | null>((resolve) => {
+      const { components, sessionId } = createIgdbSession(
+        interaction.user.id,
+        options,
+        async (sel, igdbId) => {
+          const result = await this.importGameFromIgdb(igdbId, label, seed);
+          deleteIgdbSession(sessionId);
+          finish(result);
+          try {
+            await sel.update({ content: result, components: [] });
+          } catch {
+            // ignore
+          }
+        },
+      );
 
-    const customId = `gamedb-import-${Date.now()}`;
+      const timeout = setTimeout(async () => {
+        deleteIgdbSession(sessionId);
+        finish(`[${label}] Skipped (no selection): ${seed.title}`);
+        await safeReply(interaction, {
+          content: `[${label}] Import cancelled or timed out.`,
+          ephemeral: true,
+        }).catch(() => {});
+      }, 120000);
 
-    const menu = new StringSelectMenuBuilder()
-      .setCustomId(customId)
-      .setPlaceholder(`Select IGDB match for "${seed.title}"`)
-      .addOptions(options);
-
-    const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
-
-    const payload = {
-      content: `Multiple IGDB matches for ${seed.source} Round ${seed.round} (${seed.monthYear}).`,
-      components: [row],
-      fetchReply: true,
-    };
-
-    let prompt: Message | null = null;
-    const existing = (this as any).__gamedbPromptMessage;
-    if (existing && typeof existing.edit === "function") {
-      try {
-        prompt = (await existing.edit(payload as any)) as Message;
-      } catch {
-        prompt = null;
-      }
-    }
-
-    if (!prompt) {
-      prompt = (await safeReply(interaction, { ...payload, ephemeral: false })) as Message | null;
-      (this as any).__gamedbPromptMessage = prompt ?? null;
-    }
-
-    if (!prompt) {
-      return { selectedId: null, newQuery: null, skipped: true };
-    }
-
-    const selection = await new Promise<string | null>((resolve) => {
-      const timeout = setTimeout(() => {
-        GAMEDB_IMPORT_PROMPTS.delete(customId);
-        resolve(null);
-      }, 60_000);
-
-      GAMEDB_IMPORT_PROMPTS.set(customId, (val: string | null) => {
+      const finish = (value: string | null) => {
         clearTimeout(timeout);
-        GAMEDB_IMPORT_PROMPTS.delete(customId);
-        resolve(val);
+        resolve(value);
+      };
+
+      safeReply(interaction, {
+        content: `Multiple IGDB matches for ${seed.source} Round ${seed.round} (${seed.monthYear}).`,
+        components,
+        ephemeral: false,
+        __forceFollowUp: true,
       });
     });
-
-    if (selection === "skip" || selection === null) {
-      return { selectedId: null, newQuery: null, skipped: true };
-    }
-
-    if (selection === "search-new") {
-      const newQuery = await this.promptForNewIgdbSearch(interaction, seed, searchTerm);
-      return {
-        selectedId: null,
-        newQuery,
-        skipped: !newQuery,
-      };
-    }
-
-    const selected = Number(selection);
-    return {
-      selectedId: Number.isFinite(selected) ? selected : null,
-      newQuery: null,
-      skipped: false,
-    };
-  }
-
-  private async promptForNewIgdbSearch(
-    interaction: CommandInteraction,
-    seed: GameDbSeed,
-    searchTerm: string,
-  ): Promise<string | null> {
-    const channel: any = interaction.channel;
-    const userId = interaction.user.id;
-
-    if (!channel || typeof channel.awaitMessages !== "function") {
-      await safeReply(interaction, {
-        content: "Cannot prompt for a new search; use this command in a text channel.",
-        ephemeral: true,
-      });
-      return null;
-    }
-
-    const prompt =
-      `Reply in this channel with a new search string for "${seed.title}" ` +
-      `(current search: "${searchTerm}").`;
-
-    await safeReply(interaction, { content: prompt, ephemeral: false });
-
-    try {
-      const collected = await channel.awaitMessages({
-        filter: (m: any) => m.author?.id === userId,
-        max: 1,
-        time: 120_000,
-      });
-
-      const first = collected?.first?.();
-      if (!first) return null;
-
-      const content = (first.content ?? "").trim();
-      try {
-        await first.delete();
-      } catch {
-        // ignore delete failures
-      }
-
-      if (!content || /^cancel$/i.test(content)) {
-        return null;
-      }
-
-      return content;
-    } catch {
-      return null;
-    }
   }
 
   private async findExistingIgdbGame(matches: IGDBGame[]): Promise<IGame | null> {
@@ -952,33 +828,6 @@ export class SuperAdmin {
       }
     }
     return null;
-  }
-
-  @SelectMenuComponent({ id: /^gamedb-import-\d+$/ })
-  async handleGamedbImportSelect(interaction: StringSelectMenuInteraction): Promise<void> {
-    const resolver = GAMEDB_IMPORT_PROMPTS.get(interaction.customId);
-    if (!resolver) {
-      await interaction.reply({
-        content: "This selection has expired or was already handled.",
-        ephemeral: true,
-      }).catch(() => {});
-      return;
-    }
-
-    try {
-      await interaction.deferUpdate();
-    } catch {
-      // ignore
-    }
-
-    const val = interaction.values?.[0] ?? null;
-    resolver(val);
-
-    try {
-      await interaction.message.edit({ components: [] });
-    } catch {
-      // ignore
-    }
   }
 
   private async importGameFromIgdb(igdbId: number, label: string, seed: GameDbSeed): Promise<string> {

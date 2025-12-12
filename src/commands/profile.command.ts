@@ -34,6 +34,10 @@ import Member, {
 } from "../classes/Member.js";
 import Game from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
+import {
+  createIgdbSession,
+  type IgdbSelectOption,
+} from "../services/IgdbSelectService.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 
 const MAX_NOW_PLAYING = 10;
@@ -1000,19 +1004,11 @@ export class ProfileCommand {
       const sessionId = `np-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
       nowPlayingAddSessions.set(sessionId, { userId: interaction.user.id, query });
 
-      const options = results.slice(0, 24).map((g) => ({
+      const options = results.slice(0, 23).map((g) => ({
         label: g.title.substring(0, 100),
         value: String(g.id),
         description: `GameDB #${g.id}`,
       }));
-
-      if (options.length === 0) {
-        options.push({
-          label: "No GameDB results found",
-          value: "no-results",
-          description: "Use the option below to import from IGDB",
-        });
-      }
 
       options.push({
         label: "Import another game from IGDB",
@@ -1119,43 +1115,6 @@ export class ProfileCommand {
       await interaction.update({
         content: `Could not add to Now Playing: ${msg}`,
         components: [],
-      });
-    }
-  }
-
-  @SelectMenuComponent({ id: /^np-igdb-import:\d+$/ })
-  async handleNowPlayingIgdbImport(interaction: StringSelectMenuInteraction): Promise<void> {
-    const [, ownerId] = interaction.customId.split(":");
-    if (interaction.user.id !== ownerId) {
-      await interaction.reply({
-        content: "This import prompt isn't for you.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const igdbId = Number(interaction.values[0]);
-    if (!Number.isInteger(igdbId) || igdbId <= 0) {
-      await interaction.reply({
-        content: "Invalid selection.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    try {
-      const imported = await this.importGameFromIgdb(igdbId);
-      await Member.addNowPlaying(ownerId, imported.gameId);
-      const list = await Member.getNowPlaying(ownerId);
-      await interaction.update({
-        content: `Imported **${imported.title}** and added to Now Playing (${list.length}/${MAX_NOW_PLAYING}).`,
-        components: [],
-      });
-    } catch (err: any) {
-      const msg = err?.message ?? "Failed to import from IGDB.";
-      await interaction.reply({
-        content: msg,
-        flags: MessageFlags.Ephemeral,
       });
     }
   }
@@ -1887,7 +1846,7 @@ export class ProfileCommand {
       return;
     }
 
-    const igdbSearch = await igdbService.searchGames(searchTerm, 10, false);
+    const igdbSearch = await igdbService.searchGames(searchTerm, 30, false);
     if (!igdbSearch.results.length) {
       await safeReply(interaction, {
         content: `No GameDB or IGDB matches found for "${searchTerm}".`,
@@ -1896,26 +1855,37 @@ export class ProfileCommand {
       return;
     }
 
-    const sessionId = this.createCompletionSession({ ...ctx, source: "igdb" });
-    const select = new StringSelectMenuBuilder()
-      .setCustomId(`completion-add-select:${sessionId}`)
-      .setPlaceholder("Select the IGDB game to import and log")
-      .addOptions(
-        igdbSearch.results.map((game) => {
-          const year = game.first_release_date
-            ? new Date(game.first_release_date * 1000).getFullYear()
-            : "TBD";
-          return {
-            label: `${game.name} (${year})`.slice(0, 100),
-            value: `igdb:${game.id}`,
-            description: (game.summary || "No summary").slice(0, 100),
-          };
-        }),
-      );
+    const opts: IgdbSelectOption[] = igdbSearch.results.map((game) => {
+      const year = game.first_release_date
+        ? new Date(game.first_release_date * 1000).getFullYear()
+        : "TBD";
+      return {
+        id: game.id,
+        label: `${game.name} (${year})`,
+        description: (game.summary || "No summary").slice(0, 95),
+      };
+    });
+
+    const { components } = createIgdbSession(
+      interaction.user.id,
+      opts,
+      async (sel, gameId) => {
+        const imported = await this.importGameFromIgdb(gameId);
+        await this.saveCompletion(
+          sel,
+          ctx.userId,
+          imported.gameId,
+          ctx.completionType,
+          ctx.completedAt,
+          ctx.finalPlaytimeHours,
+          imported.title,
+        );
+      },
+    );
 
     await safeReply(interaction, {
       content: `No GameDB match; select an IGDB result to import for "${searchTerm}".`,
-      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
+      components,
       ephemeral: true,
     });
   }
@@ -2025,7 +1995,7 @@ export class ProfileCommand {
     session: { userId: string; query: string },
   ): Promise<void> {
     try {
-      const searchRes = await igdbService.searchGames(session.query, 10, false);
+      const searchRes = await igdbService.searchGames(session.query, 30, false);
       if (!searchRes.results.length) {
         await interaction.update({
           content: `No IGDB results found for "${session.query}".`,
@@ -2034,25 +2004,38 @@ export class ProfileCommand {
         return;
       }
 
-      const select = new StringSelectMenuBuilder()
-        .setCustomId(`np-igdb-import:${session.userId}`)
-        .setPlaceholder(`Import from IGDB for "${session.query}"`)
-        .addOptions(
-          searchRes.results.map((game) => {
-            const year = game.first_release_date
-              ? new Date(game.first_release_date * 1000).getFullYear()
-              : "TBD";
-            return {
-              label: `${game.name} (${year})`.slice(0, 100),
-              value: String(game.id),
-              description: (game.summary || "No summary").slice(0, 100),
-            };
-          }),
-        );
+      const opts: IgdbSelectOption[] = searchRes.results.map((game) => {
+        const year = game.first_release_date
+          ? new Date(game.first_release_date * 1000).getFullYear()
+          : "TBD";
+        return {
+          id: game.id,
+          label: `${game.name} (${year})`,
+          description: (game.summary || "No summary").slice(0, 95),
+        };
+      });
+
+      const { components } = createIgdbSession(session.userId, opts, async (sel, igdbId) => {
+        try {
+          const imported = await this.importGameFromIgdb(igdbId);
+          await Member.addNowPlaying(session.userId, imported.gameId);
+          const list = await Member.getNowPlaying(session.userId);
+          await sel.update({
+            content: `Imported **${imported.title}** and added to Now Playing (${list.length}/${MAX_NOW_PLAYING}).`,
+            components: [],
+          });
+        } catch (err: any) {
+          const msg = err?.message ?? "Failed to import from IGDB.";
+          await sel.reply({
+            content: msg,
+            flags: MessageFlags.Ephemeral,
+          }).catch(() => {});
+        }
+      });
 
       await interaction.update({
         content: "Select an IGDB result to import and add to Now Playing:",
-        components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
+        components,
       });
     } catch (err: any) {
       const msg = err?.message ?? "Failed to search IGDB.";
