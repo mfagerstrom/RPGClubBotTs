@@ -116,6 +116,7 @@ class IgdbService {
         "fields name, cover.image_id, summary, first_release_date, total_rating, url;",
         `search "${sanitizedQuery}";`,
         `limit ${cappedLimit};`,
+        "where category != 5;",
       ].join(" ");
 
     try {
