@@ -70,9 +70,8 @@ const HELP_TOPICS = [
     {
         id: "now-playing",
         label: "/now-playing",
-        summary: "Show Now Playing lists for you, someone else, or everyone.",
-        syntax: "Syntax: /now-playing [member:<user>] [all:<boolean>]",
-        notes: "Defaults to a private view for one member. Set all:true to list everyone (sent publicly) with thread links when available.",
+        summary: "Manage your Now Playing list and view others'.",
+        syntax: "Use /now-playing help for subcommands: list, add, remove.",
     },
     {
         id: "remindme",
@@ -281,6 +280,36 @@ function buildProfileHelpEmbed(topic) {
     }
     return embed;
 }
+function buildNowPlayingHelpButtons(activeId) {
+    const select = new StringSelectMenuBuilder()
+        .setCustomId("now-playing-help-select")
+        .setPlaceholder("/now-playing help")
+        .addOptions(NOW_PLAYING_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+    })))
+        .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+    return [new ActionRowBuilder().addComponents(select)];
+}
+function buildNowPlayingHelpEmbed(topic) {
+    const embed = new EmbedBuilder()
+        .setTitle(`${topic.label} help`)
+        .setDescription(topic.summary)
+        .addFields({ name: "Syntax", value: topic.syntax });
+    if (topic.notes) {
+        embed.addFields({ name: "Notes", value: topic.notes });
+    }
+    return embed;
+}
+export function buildNowPlayingHelpResponse(activeTopicId) {
+    const embed = new EmbedBuilder()
+        .setTitle("/now-playing commands")
+        .setDescription("Choose a subcommand from the dropdown to view details.");
+    const components = buildNowPlayingHelpButtons(activeTopicId);
+    return { embeds: [embed], components };
+}
 function buildGamedbHelpButtons(activeId) {
     const select = new StringSelectMenuBuilder()
         .setCustomId("gamedb-help-select")
@@ -434,20 +463,6 @@ const PROFILE_HELP_TOPICS = [
         notes: "Filters default to partial matches; date/times use ISO formats; limit max 100; departed members are excluded unless include-departed-members is true.",
     },
     {
-        id: "nowplaying-add",
-        label: "/profile nowplaying-add",
-        summary: "Add a GameDB title to your Now Playing list (max 10).",
-        syntax: "Syntax: /profile nowplaying-add query:<string>",
-        notes: "Searches GameDB; choose from up to 24 results. Only GameDB titles are allowed; no free text.",
-    },
-    {
-        id: "nowplaying-remove",
-        label: "/profile nowplaying-remove",
-        summary: "Remove a GameDB title from your Now Playing list.",
-        syntax: "Syntax: /profile nowplaying-remove game:<GameDB id from your list>",
-        notes: "Remove by selecting a GameDB id that is already in your Now Playing list. List is capped at 10 entries.",
-    },
-    {
         id: "completion-add",
         label: "/profile completion-add",
         summary: "Log that you completed a game (removes it from Now Playing if present).",
@@ -474,6 +489,29 @@ const PROFILE_HELP_TOPICS = [
         summary: "Delete one of your completion records.",
         syntax: "Syntax: /profile completion-delete completion_id:<int>",
         notes: "You can only delete your own completions.",
+    },
+];
+const NOW_PLAYING_HELP_TOPICS = [
+    {
+        id: "list",
+        label: "/now-playing list",
+        summary: "Show Now Playing lists for you, someone else, or everyone.",
+        syntax: "Syntax: /now-playing list [member:<user>] [all:<boolean>]",
+        notes: "Defaults to a private view for one member. Set all:true to list everyone (sent publicly) with thread links when available.",
+    },
+    {
+        id: "add",
+        label: "/now-playing add",
+        summary: "Add a GameDB title to your Now Playing list (max 10).",
+        syntax: "Syntax: /now-playing add query:<string>",
+        notes: "Searches GameDB; choose from up to 24 results. Only GameDB titles are allowed; no free text.",
+    },
+    {
+        id: "remove",
+        label: "/now-playing remove",
+        summary: "Remove a GameDB title from your Now Playing list.",
+        syntax: "Syntax: /now-playing remove",
+        notes: "Shows a dropdown of your current list to pick what to remove.",
     },
 ];
 const GAMEDB_HELP_TOPICS = [
@@ -782,6 +820,28 @@ let BotHelp = class BotHelp {
             components: buildProfileHelpButtons(topic.id),
         });
     }
+    async handleNowPlayingHelpButton(interaction) {
+        const topicId = interaction.values?.[0];
+        if (topicId === "help-main") {
+            const response = buildMainHelpResponse();
+            await safeUpdate(interaction, response);
+            return;
+        }
+        const topic = NOW_PLAYING_HELP_TOPICS.find((entry) => entry.id === topicId);
+        if (!topic) {
+            const response = buildNowPlayingHelpResponse();
+            await safeUpdate(interaction, {
+                ...response,
+                content: "Sorry, I don't recognize that now-playing help topic. Showing the help menu.",
+            });
+            return;
+        }
+        const embed = buildNowPlayingHelpEmbed(topic);
+        await safeUpdate(interaction, {
+            embeds: [embed],
+            components: buildNowPlayingHelpButtons(topic.id),
+        });
+    }
     async handleGamedbHelpButton(interaction) {
         const topicId = interaction.values?.[0];
         if (topicId === "help-main") {
@@ -834,6 +894,9 @@ __decorate([
     SelectMenuComponent({ id: "profile-help-select" })
 ], BotHelp.prototype, "handleProfileHelpButton", null);
 __decorate([
+    SelectMenuComponent({ id: "now-playing-help-select" })
+], BotHelp.prototype, "handleNowPlayingHelpButton", null);
+__decorate([
     SelectMenuComponent({ id: "gamedb-help-select" })
 ], BotHelp.prototype, "handleGamedbHelpButton", null);
 __decorate([
@@ -853,6 +916,8 @@ function buildTopicHelpResponse(topicId) {
             return buildRemindMeHelpResponse();
         case "profile":
             return buildProfileHelpResponse();
+        case "now-playing":
+            return buildNowPlayingHelpResponse();
         case "gamedb":
             return buildGamedbHelpResponse();
         case "rss":

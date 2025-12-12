@@ -335,15 +335,29 @@ export class NowPlayingCommand {
       return;
     }
 
-    const lines = entries.map(
-      (entry, idx) => `${idx + 1}. ${formatEntry(entry, interaction.guildId)}`,
-    );
+    let hasLinks = false;
+    let hasUnlinked = false;
 
-    const footerText = target.tag || target.username || target.id;
+    const lines = entries.map((entry, idx) => {
+      if (entry.threadId) hasLinks = true;
+      else hasUnlinked = true;
+      return `${idx + 1}. ${formatEntry(entry, interaction.guildId)}`;
+    });
+
+    const footerParts: string[] = [target.tag || target.username || target.id];
+    if (hasLinks) {
+      footerParts.push("Links on game titles lead to their respective discussion threads.");
+    }
+    if (hasUnlinked) {
+      footerParts.push(
+        "For unlinked games, feel free to add a new thread or link one to the game if it already exists.",
+      );
+    }
+
     const embed = new EmbedBuilder()
       .setTitle("Now Playing")
       .setDescription(lines.join("\n"))
-      .setFooter({ text: footerText });
+      .setFooter({ text: footerParts.join("\n") });
 
     await safeReply(interaction, {
       content: `<@${target.id}>`,
@@ -365,20 +379,39 @@ export class NowPlayingCommand {
       return;
     }
 
+    let hasLinks = false;
+    let hasUnlinked = false;
+
     const lines = lists.map((record, idx) => {
       const displayName =
         record.globalName ?? record.username ?? `Member ${idx + 1}`;
       const games = record.entries
-        .map((entry) => formatEntry(entry, interaction.guildId))
+        .map((entry) => {
+          if (entry.threadId) hasLinks = true;
+          else hasUnlinked = true;
+          return formatEntry(entry, interaction.guildId);
+        })
         .join("; ");
       return `${idx + 1}. <@${record.userId}> (${displayName}) - ${games}`;
     });
+
+    const footerParts: string[] = [];
+    if (hasLinks) {
+      footerParts.push("Links on game titles lead to their respective discussion threads.");
+    }
+    if (hasUnlinked) {
+      footerParts.push(
+        "For unlinked games, feel free to add a new thread or link one to the game if it already exists.",
+      );
+    }
+    const footerText = footerParts.join("\n");
 
     const chunks = chunkLines(lines);
     const embeds = chunks.slice(0, 10).map((chunk, idx) =>
       new EmbedBuilder()
         .setTitle(idx === 0 ? "Now Playing - Everyone" : "Now Playing (continued)")
-        .setDescription(chunk),
+        .setDescription(chunk)
+        .setFooter(footerText ? { text: footerText } : null),
     );
 
     const truncated = chunks.length > embeds.length;
