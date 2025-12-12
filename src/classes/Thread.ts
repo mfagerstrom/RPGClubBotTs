@@ -232,3 +232,28 @@ export async function getThreadGameIds(threadId: string): Promise<number[]> {
   const info = await getThreadLinkInfo(threadId);
   return info.gamedbGameIds;
 }
+
+export async function getThreadsByGameId(gameId: number): Promise<string[]> {
+  const pool = getOraclePool();
+  const connection = await pool.getConnection();
+  try {
+    const linksRes = await connection.execute<{ THREAD_ID: string }>(
+      `SELECT THREAD_ID FROM THREAD_GAME_LINKS WHERE GAMEDB_GAME_ID = :gameId`,
+      { gameId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+    );
+    const threadIds = (linksRes.rows ?? []).map((r) => String(r.THREAD_ID));
+
+    // Also check legacy column in THREADS table
+    const legacyRes = await connection.execute<{ THREAD_ID: string }>(
+      `SELECT THREAD_ID FROM THREADS WHERE GAMEDB_GAME_ID = :gameId`,
+      { gameId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+    );
+    const legacyIds = (legacyRes.rows ?? []).map((r) => String(r.THREAD_ID));
+
+    return Array.from(new Set([...threadIds, ...legacyIds]));
+  } finally {
+    await connection.close();
+  }
+}

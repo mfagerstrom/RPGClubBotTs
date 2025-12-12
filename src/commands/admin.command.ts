@@ -7,6 +7,7 @@ import {
   StringSelectMenuBuilder,
   type ButtonInteraction,
   type StringSelectMenuInteraction,
+  type ForumChannel,
 } from "discord.js";
 import type { CommandInteraction, User } from "discord.js";
 import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption } from "discordx";
@@ -41,6 +42,7 @@ import {
   getNominationForUser,
   listNominationsForRound,
 } from "../classes/Nomination.js";
+import { getThreadsByGameId, setThreadGameLink } from "../classes/Thread.js";
 
 type AdminHelpTopicId =
   | "add-gotm"
@@ -50,7 +52,8 @@ type AdminHelpTopicId =
   | "delete-gotm-nomination"
   | "delete-nr-gotm-nomination"
   | "set-nextvote"
-  | "voting-setup";
+  | "voting-setup"
+  | "nextround-setup";
 
 type AdminHelpTopic = {
   id: AdminHelpTopicId;
@@ -62,6 +65,13 @@ type AdminHelpTopic = {
 };
 
 export const ADMIN_HELP_TOPICS: AdminHelpTopic[] = [
+  {
+    id: "nextround-setup",
+    label: "/admin nextround-setup",
+    summary: "Interactive wizard to setup the next round (games, threads, dates).",
+    syntax: "Syntax: /admin nextround-setup",
+    notes: "Walks through adding GOTM/NR-GOTM winners, linking threads, and setting the next vote date.",
+  },
   {
     id: "add-gotm",
     label: "/admin add-gotm",
@@ -532,6 +542,135 @@ export class Admin {
     const userId = match[3];
 
     await handleNominationDeletionButton(interaction, kind, round, userId, "admin");
+  }
+
+  @Slash({ description: "Interactive setup for the next round (GOTM, NR-GOTM, dates)", name: "nextround-setup" })
+  async nextRoundSetup(
+    @SlashOption({
+      description: "Run in test mode (no DB changes)",
+      name: "testmode",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    testModeInput: boolean | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction);
+
+    const okToUseCommand: boolean = await isAdmin(interaction);
+    if (!okToUseCommand) return;
+
+    const testMode = !!testModeInput;
+    if (testMode) {
+      await safeReply(interaction, {
+        content: "Running in **TEST MODE**. No changes will be committed.",
+      });
+    }
+
+    let allEntries: IGotmEntry[];
+    try {
+      allEntries = Gotm.all();
+    } catch (err: any) {
+      await safeReply(interaction, { content: `Error loading data: ${err.message}` });
+      return;
+    }
+
+    const nextRound = allEntries.length > 0 ? Math.max(...allEntries.map((e) => e.round)) + 1 : 1;
+
+    await safeReply(interaction, {
+      content: `**Starting setup for Round ${nextRound}.**`,
+    });
+
+    // 1. Month/Year
+    const monthYearRaw = await promptUserForInput(
+      interaction,
+      `Enter the label for Round ${nextRound} (e.g. "April 2024").`,
+    );
+    if (!monthYearRaw) return;
+    const monthYear = monthYearRaw.trim();
+
+    // 2. GOTM
+    const gotmGames = await setupRoundGames(interaction, "GOTM", nextRound, testMode);
+    if (!gotmGames) {
+      await safeReply(interaction, { content: "Aborted during GOTM setup." });
+      return;
+    }
+
+    // 3. NR-GOTM
+    const nrGotmGames = await setupRoundGames(interaction, "NR-GOTM", nextRound, testMode);
+    if (!nrGotmGames) {
+      await safeReply(interaction, { content: "Aborted during NR-GOTM setup." });
+      return;
+    }
+
+    // 4. Confirm
+    const confirm = await promptUserForInput(
+      interaction,
+      `Ready to commit Round ${nextRound} (${monthYear})?${testMode ? " (TEST MODE)" : ""}\n` +
+        `GOTM: ${gotmGames.map((g) => g.title).join(", ")}\n` +
+        `NR-GOTM: ${nrGotmGames.map((g) => g.title).join(", ")}\n` +
+        `Type 'yes' to proceed.`,
+    );
+    if (confirm?.toLowerCase() !== "yes") {
+      await safeReply(interaction, { content: "Cancelled." });
+      return;
+    }
+
+    // 5. Commit
+    if (testMode) {
+      await safeReply(interaction, {
+        content: `[Test Mode] Would commit rounds to DB and set round info for Round ${nextRound}.`,
+      });
+    } else {
+      try {
+        await insertGotmRoundInDatabase(nextRound, monthYear, gotmGames);
+        Gotm.addRound(nextRound, monthYear, gotmGames);
+
+        await insertNrGotmRoundInDatabase(nextRound, monthYear, nrGotmGames);
+        NrGotm.addRound(nextRound, monthYear, nrGotmGames);
+
+        await safeReply(interaction, { content: "Rounds created in database." });
+      } catch (e: any) {
+        await safeReply(interaction, { content: `Failed to commit rounds: ${e.message}` });
+        return;
+      }
+    }
+
+    // 6. Next Vote Date
+    const defaultDate = calculateNextVoteDate();
+    const dateStr = defaultDate.toLocaleDateString("en-US");
+
+    const dateResp = await promptUserForInput(
+      interaction,
+      `When should the *next* vote be? (Default: ${dateStr}). Type 'default' or a date (YYYY-MM-DD).`,
+    );
+
+    if (!dateResp) return;
+
+    let finalDate = defaultDate;
+    if (dateResp.toLowerCase() !== "default") {
+      const parsed = new Date(dateResp);
+      if (!Number.isNaN(parsed.getTime())) {
+        finalDate = parsed;
+      } else {
+        await safeReply(interaction, { content: "Invalid date. Using default." });
+      }
+    }
+
+    if (testMode) {
+      await safeReply(interaction, {
+        content: `[Test Mode] Would set next vote date to ${finalDate.toLocaleDateString()}.`,
+      });
+    } else {
+      try {
+        await BotVotingInfo.setRoundInfo(nextRound, finalDate, null);
+        await safeReply(interaction, {
+          content: `Round ${nextRound} is now active! Next vote set to ${finalDate.toLocaleDateString()}.`,
+        });
+      } catch (e: any) {
+        await safeReply(interaction, { content: `Failed to set round info: ${e.message}` });
+      }
+    }
   }
 
   @Slash({ description: "Add a new GOTM round", name: "add-gotm" })
@@ -1262,6 +1401,145 @@ async function promptUserForInput(
     }
     return null;
   }
+}
+
+function calculateNextVoteDate(): Date {
+  const now = new Date();
+  // Move to next month
+  const d = new Date(now.getFullYear(), now.getMonth() + 2, 0); // Last day of next month
+  // Back up to Friday (5)
+  while (d.getDay() !== 5) {
+    d.setDate(d.getDate() - 1);
+  }
+  return d;
+}
+
+const NOW_PLAYING_FORUM_ID = "1059875931356938240";
+
+async function setupRoundGames(
+  interaction: CommandInteraction,
+  label: "GOTM" | "NR-GOTM",
+  roundNumber: number,
+  testMode: boolean,
+): Promise<
+  { title: string; threadId: string | null; redditUrl: string | null; gamedbGameId: number }[] | null
+> {
+  await safeReply(interaction, {
+    content: `**Setting up ${label} for Round ${roundNumber}.**`,
+  });
+
+  const countRaw = await promptUserForInput(
+    interaction,
+    `How many ${label} winners? (1-5). Type \`cancel\` to abort.`,
+  );
+  if (!countRaw) return null;
+  const count = Number(countRaw);
+  if (!Number.isInteger(count) || count < 1 || count > 5) {
+    await safeReply(interaction, { content: "Invalid count." });
+    return null;
+  }
+
+  const games: {
+    title: string;
+    threadId: string | null;
+    redditUrl: string | null;
+    gamedbGameId: number;
+  }[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const n = i + 1;
+    const gamedbRaw = await promptUserForInput(interaction, `Enter GameDB ID for ${label} #${n}.`);
+    if (!gamedbRaw) return null;
+    const gamedbId = Number(gamedbRaw);
+    if (!Number.isInteger(gamedbId)) {
+      await safeReply(interaction, { content: "Invalid ID." });
+      return null;
+    }
+
+    const game = await Game.getGameById(gamedbId);
+    if (!game) {
+      await safeReply(interaction, { content: "Game not found." });
+      return null;
+    }
+
+    // Check for thread
+    const threads = await getThreadsByGameId(gamedbId);
+    let threadId: string | null = threads.length ? threads[0] : null;
+
+    if (threadId) {
+      await safeReply(interaction, {
+        content: `Found existing thread <#${threadId}> linked to this game. Using it.`,
+      });
+    } else {
+      // Prompt to create
+      const createResp = await promptUserForInput(
+        interaction,
+        `No linked thread found for "${game.title}". Create one in Now Playing? (yes/no/id)`,
+      );
+      if (!createResp) return null;
+
+      if (createResp.toLowerCase() === "yes") {
+        if (testMode) {
+          await safeReply(interaction, {
+            content: `[Test Mode] Would create and link thread for "${game.title}".`,
+          });
+          threadId = "TEST-THREAD-ID";
+        } else {
+          try {
+            const forum = (await interaction.guild?.channels.fetch(
+              NOW_PLAYING_FORUM_ID,
+            )) as ForumChannel;
+            if (forum) {
+                          const thread = await forum.threads.create({
+                            name: testMode ? `Sidegame - ${game.title}` : game.title,
+                            message: { content: `Discussion thread for **${game.title}**.` },              });
+              threadId = thread.id;
+              await setThreadGameLink(threadId, gamedbId);
+              await safeReply(interaction, {
+                content: `Created and linked thread <#${threadId}>.`,
+              });
+            } else {
+              await safeReply(interaction, {
+                content: "Could not find Now Playing forum channel.",
+              });
+            }
+          } catch (e: any) {
+            await safeReply(interaction, { content: `Failed to create thread: ${e.message}` });
+          }
+        }
+      } else if (createResp.toLowerCase() !== "no") {
+        // Assume ID
+        if (/^\d+$/.test(createResp)) {
+          threadId = createResp;
+          if (testMode) {
+            await safeReply(interaction, {
+              content: `[Test Mode] Would link thread <#${threadId}>.`,
+            });
+          } else {
+            await setThreadGameLink(threadId, gamedbId);
+            await safeReply(interaction, { content: `Linked thread <#${threadId}>.` });
+          }
+        }
+      }
+    }
+
+    // Reddit
+    const redditRaw = await promptUserForInput(
+      interaction,
+      `Enter Reddit URL for ${label} #${n} (or 'none').`,
+    );
+    if (!redditRaw) return null;
+    const redditUrl = redditRaw.toLowerCase() === "none" ? null : redditRaw;
+
+    games.push({
+      title: game.title,
+      threadId,
+      redditUrl,
+      gamedbGameId: gamedbId,
+    });
+  }
+
+  return games;
 }
 
 export async function isAdmin(interaction: AnyRepliable) {

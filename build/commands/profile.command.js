@@ -17,7 +17,7 @@ import Game from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
 import { createIgdbSession, } from "../services/IgdbSelectService.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
-const COMPLETION_TYPES = [
+export const COMPLETION_TYPES = [
     "Main Story",
     "Main Story + Side Content",
     "Completionist",
@@ -25,14 +25,14 @@ const COMPLETION_TYPES = [
 const GAME_DB_THUMB_NAME = "gameDB.png";
 const GAME_DB_THUMB_PATH = path.join(process.cwd(), "src", "assets", "images", GAME_DB_THUMB_NAME);
 const gameDbThumbBuffer = readFileSync(GAME_DB_THUMB_PATH);
-function buildGameDbThumbAttachment() {
+export function buildGameDbThumbAttachment() {
     return new AttachmentBuilder(gameDbThumbBuffer, { name: GAME_DB_THUMB_NAME });
 }
-function applyGameDbThumbnail(embed) {
+export function applyGameDbThumbnail(embed) {
     return embed.setThumbnail(`attachment://${GAME_DB_THUMB_NAME}`);
 }
 const completionAddSessions = new Map();
-const COMPLETION_PAGE_SIZE = 20;
+export const COMPLETION_PAGE_SIZE = 20;
 function parseDateInput(value) {
     if (!value)
         return null;
@@ -46,7 +46,7 @@ function clampLimit(limit, max) {
         return Math.min(50, max);
     return Math.min(Math.max(limit, 1), max);
 }
-function parseCompletionDateInput(value) {
+export function parseCompletionDateInput(value) {
     if (!value)
         return new Date();
     const parsed = new Date(value);
@@ -55,7 +55,7 @@ function parseCompletionDateInput(value) {
     }
     return parsed;
 }
-function formatPlaytimeHours(val) {
+export function formatPlaytimeHours(val) {
     if (val === null || val === undefined)
         return null;
     const rounded = Math.round(val * 100) / 100;
@@ -67,7 +67,7 @@ function formatCompletionLine(record) {
     const extras = [date, playtime].filter(Boolean).join(" — ");
     return `${record.title} — ${record.completionType}${extras ? ` — ${extras}` : ""}`;
 }
-function formatTableDate(date) {
+export function formatTableDate(date) {
     if (!date)
         return "No date";
     const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -123,7 +123,7 @@ function chunkOptions(items, size) {
     }
     return chunks;
 }
-function formatDiscordTimestamp(value) {
+export function formatDiscordTimestamp(value) {
     if (!value)
         return "Unknown";
     const seconds = Math.floor(value.getTime() / 1000);
