@@ -79,8 +79,6 @@ type ProfileHelpTopicId =
   | "view"
   | "edit"
   | "search"
-  | "nowplaying-add"
-  | "nowplaying-remove"
   | "completion-add"
   | "completion-list"
   | "completion-edit"
@@ -173,10 +171,8 @@ const HELP_TOPICS: HelpTopic[] = [
   {
     id: "now-playing",
     label: "/now-playing",
-    summary: "Show Now Playing lists for you, someone else, or everyone.",
-    syntax: "Syntax: /now-playing [member:<user>] [all:<boolean>]",
-    notes:
-      "Defaults to a private view for one member. Set all:true to list everyone (sent publicly) with thread links when available.",
+    summary: "Manage your Now Playing list and view others'.",
+    syntax: "Use /now-playing help for subcommands: list, add, remove.",
   },
   {
     id: "remindme",
@@ -431,6 +427,49 @@ function buildProfileHelpEmbed(topic: ProfileHelpTopic): EmbedBuilder {
   return embed;
 }
 
+function buildNowPlayingHelpButtons(
+  activeId?: NowPlayingHelpTopicId,
+): ActionRowBuilder<StringSelectMenuBuilder>[] {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("now-playing-help-select")
+    .setPlaceholder("/now-playing help")
+    .addOptions(
+      NOW_PLAYING_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+      })),
+    )
+    .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+
+  return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
+}
+
+function buildNowPlayingHelpEmbed(topic: NowPlayingHelpTopic): EmbedBuilder {
+  const embed = new EmbedBuilder()
+    .setTitle(`${topic.label} help`)
+    .setDescription(topic.summary)
+    .addFields({ name: "Syntax", value: topic.syntax });
+
+  if (topic.notes) {
+    embed.addFields({ name: "Notes", value: topic.notes });
+  }
+
+  return embed;
+}
+
+export function buildNowPlayingHelpResponse(
+  activeTopicId?: NowPlayingHelpTopicId,
+): { embeds: EmbedBuilder[]; components: ActionRowBuilder<StringSelectMenuBuilder>[] } {
+  const embed = new EmbedBuilder()
+    .setTitle("/now-playing commands")
+    .setDescription("Choose a subcommand from the dropdown to view details.");
+
+  const components = buildNowPlayingHelpButtons(activeTopicId);
+  return { embeds: [embed], components };
+}
+
 function buildGamedbHelpButtons(
   activeId?: GameDbHelpTopicId,
 ): ActionRowBuilder<StringSelectMenuBuilder>[] {
@@ -621,22 +660,6 @@ const PROFILE_HELP_TOPICS: ProfileHelpTopic[] = [
       "Filters default to partial matches; date/times use ISO formats; limit max 100; departed members are excluded unless include-departed-members is true.",
   },
   {
-    id: "nowplaying-add",
-    label: "/profile nowplaying-add",
-    summary: "Add a GameDB title to your Now Playing list (max 10).",
-    syntax: "Syntax: /profile nowplaying-add query:<string>",
-    notes:
-      "Searches GameDB; choose from up to 24 results. Only GameDB titles are allowed; no free text.",
-  },
-  {
-    id: "nowplaying-remove",
-    label: "/profile nowplaying-remove",
-    summary: "Remove a GameDB title from your Now Playing list.",
-    syntax: "Syntax: /profile nowplaying-remove game:<GameDB id from your list>",
-    notes:
-      "Remove by selecting a GameDB id that is already in your Now Playing list. List is capped at 10 entries.",
-  },
-  {
     id: "completion-add",
     label: "/profile completion-add",
     summary: "Log that you completed a game (removes it from Now Playing if present).",
@@ -666,6 +689,43 @@ const PROFILE_HELP_TOPICS: ProfileHelpTopic[] = [
     summary: "Delete one of your completion records.",
     syntax: "Syntax: /profile completion-delete completion_id:<int>",
     notes: "You can only delete your own completions.",
+  },
+];
+
+type NowPlayingHelpTopicId = "list" | "add" | "remove";
+
+type NowPlayingHelpTopic = {
+  id: NowPlayingHelpTopicId;
+  label: string;
+  summary: string;
+  syntax: string;
+  notes?: string;
+};
+
+const NOW_PLAYING_HELP_TOPICS: NowPlayingHelpTopic[] = [
+  {
+    id: "list",
+    label: "/now-playing list",
+    summary: "Show Now Playing lists for you, someone else, or everyone.",
+    syntax: "Syntax: /now-playing list [member:<user>] [all:<boolean>]",
+    notes:
+      "Defaults to a private view for one member. Set all:true to list everyone (sent publicly) with thread links when available.",
+  },
+  {
+    id: "add",
+    label: "/now-playing add",
+    summary: "Add a GameDB title to your Now Playing list (max 10).",
+    syntax: "Syntax: /now-playing add query:<string>",
+    notes:
+      "Searches GameDB; choose from up to 24 results. Only GameDB titles are allowed; no free text.",
+  },
+  {
+    id: "remove",
+    label: "/now-playing remove",
+    summary: "Remove a GameDB title from your Now Playing list.",
+    syntax: "Syntax: /now-playing remove",
+    notes:
+      "Shows a dropdown of your current list to pick what to remove.",
   },
 ];
 
@@ -1053,6 +1113,32 @@ export class BotHelp {
     });
   }
 
+  @SelectMenuComponent({ id: "now-playing-help-select" })
+  async handleNowPlayingHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
+    const topicId = interaction.values?.[0] as NowPlayingHelpTopicId | "help-main" | undefined;
+    if (topicId === "help-main") {
+      const response = buildMainHelpResponse();
+      await safeUpdate(interaction, response);
+      return;
+    }
+    const topic = NOW_PLAYING_HELP_TOPICS.find((entry) => entry.id === topicId);
+
+    if (!topic) {
+      const response = buildNowPlayingHelpResponse();
+      await safeUpdate(interaction, {
+        ...response,
+        content: "Sorry, I don't recognize that now-playing help topic. Showing the help menu.",
+      });
+      return;
+    }
+
+    const embed = buildNowPlayingHelpEmbed(topic);
+    await safeUpdate(interaction, {
+      embeds: [embed],
+      components: buildNowPlayingHelpButtons(topic.id),
+    });
+  }
+
   @SelectMenuComponent({ id: "gamedb-help-select" })
   async handleGamedbHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
     const topicId = interaction.values?.[0] as GameDbHelpTopicId | "help-main" | undefined;
@@ -1101,6 +1187,8 @@ function buildTopicHelpResponse(
       return buildRemindMeHelpResponse();
     case "profile":
       return buildProfileHelpResponse();
+    case "now-playing":
+      return buildNowPlayingHelpResponse();
     case "gamedb":
       return buildGamedbHelpResponse();
     case "rss":
