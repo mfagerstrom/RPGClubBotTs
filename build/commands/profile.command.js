@@ -409,8 +409,8 @@ let ProfileCommand = class ProfileCommand {
             const lines = current.slice(0, emojis.length).map((entry, idx) => `${emojis[idx]} ${entry.title} (GameDB #${entry.gameId})`);
             const buttons = current.slice(0, emojis.length).map((entry, idx) => new ButtonBuilder()
                 .setCustomId(`np-remove:${interaction.user.id}:${entry.gameId}`)
-                .setLabel(emojis[idx])
-                .setStyle(ButtonStyle.Danger));
+                .setLabel(`${idx + 1}`)
+                .setStyle(ButtonStyle.Primary));
             const rows = [];
             for (let i = 0; i < buttons.length; i += 5) {
                 rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));

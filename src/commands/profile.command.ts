@@ -495,8 +495,8 @@ export class ProfileCommand {
       const buttons = current.slice(0, emojis.length).map((entry, idx) =>
         new ButtonBuilder()
           .setCustomId(`np-remove:${interaction.user.id}:${entry.gameId}`)
-          .setLabel(emojis[idx])
-          .setStyle(ButtonStyle.Danger),
+          .setLabel(`${idx+1}`)
+          .setStyle(ButtonStyle.Primary),
       );
 
       const rows: ActionRowBuilder<ButtonBuilder>[] = [];
