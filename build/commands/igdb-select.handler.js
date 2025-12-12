@@ -5,12 +5,13 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
 import { Discord, SelectMenuComponent } from "discordx";
+import { MessageFlags } from "discord.js";
 import { handleIgdbSelectInteraction } from "../services/IgdbSelectService.js";
 let IgdbSelectHandler = class IgdbSelectHandler {
     async handleIgdbSelect(interaction) {
         const handled = await handleIgdbSelectInteraction(interaction);
         if (!handled && !interaction.replied && !interaction.deferred) {
-            await interaction.reply({ content: "This IGDB selection is no longer valid.", ephemeral: true }).catch(() => { });
+            await interaction.reply({ content: "This IGDB selection is no longer valid.", flags: MessageFlags.Ephemeral }).catch(() => { });
         }
     }
 };

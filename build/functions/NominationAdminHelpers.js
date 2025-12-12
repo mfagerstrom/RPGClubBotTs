@@ -1,4 +1,4 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, } from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, } from "discord.js";
 import { GOTM_NOMINATION_CHANNEL_ID, NR_GOTM_NOMINATION_CHANNEL_ID, } from "../config/nominationChannels.js";
 import { deleteNominationForUser, getNominationForUser, listNominationsForRound, } from "../classes/Nomination.js";
 import { getUpcomingNominationWindow, } from "./NominationWindow.js";
@@ -61,7 +61,7 @@ export async function handleNominationDeletionButton(interaction, kind, round, u
             content: `No ${kind.toUpperCase()} nomination found for Round ${round} and user <@${userId}>.`,
             components: [],
             embeds: [],
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
         return;
     }
@@ -79,7 +79,7 @@ export async function handleNominationDeletionButton(interaction, kind, round, u
         content,
         embeds: [embed],
         components,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
     });
     await announceNominationChange(kind, interaction, content, embed);
 }

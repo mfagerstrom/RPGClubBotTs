@@ -7,7 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ApplicationCommandOptionType, } from "discord.js";
+import { ApplicationCommandOptionType, MessageFlags, } from "discord.js";
 import { DateTime } from "luxon";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import Reminder from "../classes/Reminder.js";
@@ -16,12 +16,12 @@ import { buildReminderButtons, formatReminderTime, parseReminderButton, } from "
 let RemindMeCommand = class RemindMeCommand {
     async create(when, note, noisy, interaction) {
         const ephemeral = true;
-        await safeDeferReply(interaction, { ephemeral });
+        await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         const parsedDate = parseUserDate(when);
         if (!parsedDate) {
             await safeReply(interaction, {
                 content: formatDateHelpText("Sorry, I could not understand that time."),
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -30,7 +30,7 @@ let RemindMeCommand = class RemindMeCommand {
         if (remindAt <= now.plus({ minutes: 1 })) {
             await safeReply(interaction, {
                 content: "Reminders must be at least one minute in the future.",
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -45,7 +45,7 @@ let RemindMeCommand = class RemindMeCommand {
     }
     async menu(interaction) {
         const ephemeral = true;
-        await safeDeferReply(interaction, { ephemeral });
+        await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         const reminders = await Reminder.listByUser(interaction.user.id);
         const header = "**Your reminders**";
         const body = reminders.length
@@ -59,12 +59,12 @@ let RemindMeCommand = class RemindMeCommand {
     }
     async snooze(reminderId, until, interaction) {
         const ephemeral = true;
-        await safeDeferReply(interaction, { ephemeral });
+        await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         const parsedDate = parseUserDate(until);
         if (!parsedDate) {
             await safeReply(interaction, {
                 content: formatDateHelpText("Sorry, I could not understand that time."),
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -72,7 +72,7 @@ let RemindMeCommand = class RemindMeCommand {
         if (remindAt <= DateTime.utc().plus({ minutes: 1 })) {
             await safeReply(interaction, {
                 content: "Snoozed time must be at least one minute in the future.",
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -80,23 +80,23 @@ let RemindMeCommand = class RemindMeCommand {
         if (!updated) {
             await safeReply(interaction, {
                 content: "I could not find that reminder for you.",
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
         await safeReply(interaction, {
             content: `Reminder #${updated.reminderId} snoozed to ${formatReminderTime(remindAt.toJSDate())}.`,
-            ephemeral,
+            flags: ephemeral ? MessageFlags.Ephemeral : undefined,
         });
     }
     async delete(reminderId, interaction) {
         const ephemeral = true;
-        await safeDeferReply(interaction, { ephemeral });
+        await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         const removed = await Reminder.delete(reminderId, interaction.user.id);
         if (!removed) {
             await safeReply(interaction, {
                 content: "I could not find that reminder for you.",
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -166,7 +166,7 @@ let RemindMeButtons = class RemindMeButtons {
         if (!parsed) {
             await safeReply(interaction, {
                 content: "Sorry, I could not understand that action.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -174,7 +174,7 @@ let RemindMeButtons = class RemindMeButtons {
         if (!reminder || reminder.userId !== interaction.user.id) {
             await safeReply(interaction, {
                 content: "That reminder is not available to you anymore.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -185,7 +185,7 @@ let RemindMeButtons = class RemindMeButtons {
                     await interaction.message.delete();
                     await safeReply(interaction, {
                         content: `Reminder #${reminder.reminderId} marked done.`,
-                        ephemeral: true,
+                        flags: MessageFlags.Ephemeral,
                     });
                     return;
                 }
@@ -208,7 +208,7 @@ let RemindMeButtons = class RemindMeButtons {
             }
             await safeReply(interaction, {
                 content: `Got it. Reminder #${reminder.reminderId} is removed.`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -218,13 +218,13 @@ let RemindMeButtons = class RemindMeButtons {
         if (!updated) {
             await safeReply(interaction, {
                 content: "I could not update that reminder.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
         await safeReply(interaction, {
             content: `Snoozed to ${formatReminderTime(newTime.toJSDate())}.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 };

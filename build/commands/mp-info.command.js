@@ -7,7 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ActionRowBuilder, EmbedBuilder, StringSelectMenuBuilder, ApplicationCommandOptionType, } from "discord.js";
+import { ActionRowBuilder, EmbedBuilder, StringSelectMenuBuilder, ApplicationCommandOptionType, MessageFlags, } from "discord.js";
 import { Discord, SelectMenuComponent, Slash, SlashOption } from "discordx";
 import Member from "../classes/Member.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
@@ -85,12 +85,12 @@ let MultiplayerInfoCommand = class MultiplayerInfoCommand {
                 nsw: nsw ?? true,
             };
         const ephemeral = !showInChat;
-        await safeDeferReply(interaction, { ephemeral });
+        await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         const anyIncluded = filters.steam || filters.xbl || filters.psn || filters.nsw;
         if (!anyIncluded) {
             await safeReply(interaction, {
                 content: "Please enable at least one platform filter.",
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -99,7 +99,7 @@ let MultiplayerInfoCommand = class MultiplayerInfoCommand {
         if (!filtered.length) {
             await safeReply(interaction, {
                 content: "No members match the selected platforms.",
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -108,7 +108,7 @@ let MultiplayerInfoCommand = class MultiplayerInfoCommand {
             content: note,
             embeds: [embed],
             components,
-            ephemeral,
+            flags: ephemeral ? MessageFlags.Ephemeral : undefined,
         });
     }
     async handleProfileSelect(interaction) {
@@ -116,7 +116,7 @@ let MultiplayerInfoCommand = class MultiplayerInfoCommand {
         if (!userId) {
             await safeReply(interaction, {
                 content: "Could not determine which member to load.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -127,27 +127,27 @@ let MultiplayerInfoCommand = class MultiplayerInfoCommand {
             if (result.errorMessage) {
                 await safeReply(interaction, {
                     content: result.errorMessage,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
             if (!result.payload) {
                 await safeReply(interaction, {
                     content: result.notFoundMessage ?? `No profile data found for <@${userId}>.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
             await safeReply(interaction, {
                 ...result.payload,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
         catch (err) {
             const msg = err?.message ?? String(err);
             await safeReply(interaction, {
                 content: `Could not load that profile: ${msg}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
     }

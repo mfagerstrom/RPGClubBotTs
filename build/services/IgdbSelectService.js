@@ -68,7 +68,7 @@ export function deleteIgdbSession(sessionId) {
     getSessionStore().delete(sessionId);
 }
 export async function handleIgdbSelectInteraction(interaction) {
-    const [sessionId, pageRaw] = interaction.customId.split(":");
+    const [, sessionId, pageRaw] = interaction.customId.split(":");
     if (!sessionId)
         return false;
     const session = getSessionStore().get(sessionId);

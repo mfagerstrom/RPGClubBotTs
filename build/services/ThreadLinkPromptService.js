@@ -67,7 +67,7 @@ async function handleLinkButton(interaction, threadId) {
     }
     const threadName = interaction.channel?.name ?? "Unknown Thread";
     const title = threadName.split("(")[0].trim() || threadName;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     await interaction.message.edit({ components: [] }).catch(() => { });
     try {
         // First try existing GameDB by title

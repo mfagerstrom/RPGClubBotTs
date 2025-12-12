@@ -335,19 +335,19 @@ let ProfileCommand = class ProfileCommand {
     async profileView(member, showInChat, interaction) {
         const target = member ?? interaction.user;
         const ephemeral = !showInChat;
-        await safeDeferReply(interaction, { ephemeral });
+        await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         const result = await buildProfileViewPayload(target, interaction.guildId ?? undefined);
         if (result.errorMessage) {
             await safeReply(interaction, {
                 content: result.errorMessage,
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
         if (!result.payload) {
             await safeReply(interaction, {
                 content: result.notFoundMessage ?? `No profile data found for <@${target.id}>.`,
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -357,11 +357,11 @@ let ProfileCommand = class ProfileCommand {
         });
     }
     async completionAdd(completionType, gameId, query, completionDate, finalPlaytimeHours, fromNowPlaying, interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         if (!COMPLETION_TYPES.includes(completionType)) {
             await safeReply(interaction, {
                 content: "Invalid completion type.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -372,14 +372,14 @@ let ProfileCommand = class ProfileCommand {
         catch (err) {
             await safeReply(interaction, {
                 content: err?.message ?? "Invalid completion date.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
         if (finalPlaytimeHours !== undefined && (Number.isNaN(finalPlaytimeHours) || finalPlaytimeHours < 0)) {
             await safeReply(interaction, {
                 content: "Final playtime must be a non-negative number of hours.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -390,7 +390,7 @@ let ProfileCommand = class ProfileCommand {
             if (!list.length) {
                 await safeReply(interaction, {
                     content: "Your Now Playing list is empty. Add a game first or use query/game_id.",
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
@@ -412,7 +412,7 @@ let ProfileCommand = class ProfileCommand {
             await safeReply(interaction, {
                 content: "Choose the game you just completed:",
                 components: [new ActionRowBuilder().addComponents(select)],
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -421,7 +421,7 @@ let ProfileCommand = class ProfileCommand {
             if (!game) {
                 await safeReply(interaction, {
                     content: `GameDB #${gameId} was not found.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
@@ -432,7 +432,7 @@ let ProfileCommand = class ProfileCommand {
         if (!searchTerm) {
             await safeReply(interaction, {
                 content: "Provide a game_id, set from_now_playing:true, or include a search query.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -446,16 +446,16 @@ let ProfileCommand = class ProfileCommand {
     }
     async completionList(year, showInChat, interaction) {
         const ephemeral = !showInChat;
-        await safeDeferReply(interaction, { ephemeral });
+        await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         await this.renderCompletionPage(interaction, interaction.user.id, 0, year ?? null, ephemeral);
     }
     async completionEdit(interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         const completions = await Member.getCompletions({ userId: interaction.user.id, limit: 10 });
         if (!completions.length) {
             await safeReply(interaction, {
                 content: "You have no completions to edit.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -481,12 +481,12 @@ let ProfileCommand = class ProfileCommand {
         });
     }
     async completionDelete(interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         const completions = await Member.getCompletions({ userId: interaction.user.id, limit: 10 });
         if (!completions.length) {
             await safeReply(interaction, {
                 content: "You have no completions to delete.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -753,7 +753,7 @@ let ProfileCommand = class ProfileCommand {
         await this.renderCompletionPage(interaction, ownerId, nextPage, Number.isNaN(year ?? NaN) ? null : year, ephemeral);
     }
     async addNowPlaying(query, interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         try {
             const results = await Game.searchGames(query);
             const sessionId = `np-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
@@ -776,7 +776,7 @@ let ProfileCommand = class ProfileCommand {
             await safeReply(interaction, {
                 content: "Select the game to add to your Now Playing list:",
                 components: [selectRow],
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             setTimeout(async () => {
                 try {
@@ -803,7 +803,7 @@ let ProfileCommand = class ProfileCommand {
             const msg = err?.message ?? String(err);
             await safeReply(interaction, {
                 content: `Could not add to Now Playing: ${msg}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
     }
@@ -864,13 +864,13 @@ let ProfileCommand = class ProfileCommand {
         }
     }
     async removeNowPlaying(interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         try {
             const current = await Member.getNowPlayingEntries(interaction.user.id);
             if (!current.length) {
                 await safeReply(interaction, {
                     content: "Your Now Playing list is empty.",
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
@@ -892,14 +892,14 @@ let ProfileCommand = class ProfileCommand {
                         .setDescription(lines.join("\n")),
                 ],
                 components: rows,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
         catch (err) {
             const msg = err?.message ?? String(err);
             await safeReply(interaction, {
                 content: `Could not remove from Now Playing: ${msg}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
     }
@@ -954,44 +954,44 @@ let ProfileCommand = class ProfileCommand {
         if (!userId) {
             await safeReply(interaction, {
                 content: "Could not determine which member to load.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         try {
             const user = await interaction.client.users.fetch(userId);
             const result = await buildProfileViewPayload(user, interaction.guildId ?? undefined);
             if (result.errorMessage) {
                 await safeReply(interaction, {
                     content: result.errorMessage,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
             if (!result.payload) {
                 await safeReply(interaction, {
                     content: result.notFoundMessage ?? `No profile data found for <@${userId}>.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
             await safeReply(interaction, {
                 ...result.payload,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
         catch (err) {
             const msg = err?.message ?? String(err);
             await safeReply(interaction, {
                 content: `Could not load that profile: ${msg}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
     }
     async profileSearch(showInChat, userId, username, globalName, completionator, steam, psn, xbl, nsw, roleAdmin, roleModerator, roleRegular, roleMember, roleNewcomer, isBot, joinedAfter, joinedBefore, lastSeenAfter, lastSeenBefore, limit, includeDeparted, interaction) {
         const ephemeral = !showInChat;
-        await safeDeferReply(interaction, { ephemeral });
+        await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         const joinedAfterDate = parseDateInput(joinedAfter);
         const joinedBeforeDate = parseDateInput(joinedBefore);
         const lastSeenAfterDate = parseDateInput(lastSeenAfter);
@@ -999,28 +999,28 @@ let ProfileCommand = class ProfileCommand {
         if (joinedAfter && !joinedAfterDate) {
             await safeReply(interaction, {
                 content: "Invalid joinedafter date/time. Please use an ISO format.",
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
         if (joinedBefore && !joinedBeforeDate) {
             await safeReply(interaction, {
                 content: "Invalid joinedbefore date/time. Please use an ISO format.",
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
         if (lastSeenAfter && !lastSeenAfterDate) {
             await safeReply(interaction, {
                 content: "Invalid lastseenafter date/time. Please use an ISO format.",
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
         if (lastSeenBefore && !lastSeenBeforeDate) {
             await safeReply(interaction, {
                 content: "Invalid lastseenbefore date/time. Please use an ISO format.",
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -1050,7 +1050,7 @@ let ProfileCommand = class ProfileCommand {
         if (!results.length) {
             await safeReply(interaction, {
                 content: "No members matched those filters.",
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -1099,7 +1099,7 @@ let ProfileCommand = class ProfileCommand {
         const isAdmin = interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator) ?? false;
         const isSelf = target.id === interaction.user.id;
         const ephemeral = true;
-        await safeDeferReply(interaction, { ephemeral });
+        await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         if (!isSelf && !isAdmin) {
             await safeReply(interaction, {
                 content: "You can only edit your own profile.",
@@ -1165,7 +1165,7 @@ let ProfileCommand = class ProfileCommand {
         if (total === 0) {
             await safeReply(interaction, {
                 content: year ? `You have no recorded completions for ${year}.` : "You have no recorded completions yet.",
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -1185,7 +1185,7 @@ let ProfileCommand = class ProfileCommand {
             }
             await safeReply(interaction, {
                 content: "You have no recorded completions yet.",
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -1305,7 +1305,7 @@ let ProfileCommand = class ProfileCommand {
             await safeReply(interaction, {
                 content: `Select the game for "${searchTerm}".`,
                 components: [new ActionRowBuilder().addComponents(select)],
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -1313,7 +1313,7 @@ let ProfileCommand = class ProfileCommand {
         if (!igdbSearch.results.length) {
             await safeReply(interaction, {
                 content: `No GameDB or IGDB matches found for "${searchTerm}".`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }

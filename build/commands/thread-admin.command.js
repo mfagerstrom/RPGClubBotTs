@@ -7,7 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ApplicationCommandOptionType, PermissionsBitField, } from "discord.js";
+import { ApplicationCommandOptionType, MessageFlags, PermissionsBitField, } from "discord.js";
 import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { removeThreadGameLink, setThreadGameLink } from "../classes/Thread.js";
 import { safeReply } from "../functions/InteractionUtils.js";
@@ -16,21 +16,20 @@ let ThreadAdminCommands = class ThreadAdminCommands {
         if (!this.hasManageThreads(interaction)) {
             await safeReply(interaction, {
                 content: "You need Manage Threads permission to use this.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
         await setThreadGameLink(threadId, gamedbGameId);
         await safeReply(interaction, {
-            content: `Linked thread ${threadId} to GameDB game ${gamedbGameId}.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
     async unlink(threadId, gamedbGameId, interaction) {
         if (!this.hasManageThreads(interaction)) {
             await safeReply(interaction, {
                 content: "You need Manage Threads permission to use this.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -39,7 +38,7 @@ let ThreadAdminCommands = class ThreadAdminCommands {
         const suffix = removed === 0 ? " (no matching links were found)." : ".";
         await safeReply(interaction, {
             content: `Unlinked ${target} from thread ${threadId}${suffix}`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
     hasManageThreads(interaction) {

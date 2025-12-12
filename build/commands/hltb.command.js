@@ -7,7 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ApplicationCommandOptionType } from "discord.js";
+import { ApplicationCommandOptionType, MessageFlags } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import { EmbedBuilder } from "discord.js";
 import { searchHltb } from "../functions/SearchHltb.js";
@@ -15,7 +15,7 @@ import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 let hltb = class hltb {
     async hltb(title, showInChat, interaction) {
         const ephemeral = !showInChat;
-        await safeDeferReply(interaction, { ephemeral });
+        await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         try {
             const result = await searchHltb(title);
             await outputHltbResultsAsEmbed(interaction, result, title, { ephemeral });
@@ -23,7 +23,7 @@ let hltb = class hltb {
         catch {
             await safeReply(interaction, {
                 content: `Sorry, there was an error searching for "${title}". Please try again later.`,
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
         }
     }
@@ -104,12 +104,12 @@ async function outputHltbResultsAsEmbed(interaction, result, hltbQuery, options)
         })
             .setFields(fields)
             .setImage(hltb_result.imageUrl);
-        await safeReply(interaction, { embeds: [hltbEmbed], ephemeral: options.ephemeral });
+        await safeReply(interaction, { embeds: [hltbEmbed], flags: options.ephemeral ? MessageFlags.Ephemeral : undefined });
     }
     else {
         await safeReply(interaction, {
             content: `Sorry, no results were found for "${hltbQuery}"`,
-            ephemeral: options.ephemeral,
+            flags: options.ephemeral ? MessageFlags.Ephemeral : undefined,
         });
     }
 }

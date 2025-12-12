@@ -7,20 +7,20 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { EmbedBuilder, ApplicationCommandOptionType } from "discord.js";
+import { EmbedBuilder, ApplicationCommandOptionType, MessageFlags } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
 let NextVoteCommand = class NextVoteCommand {
     async nextvote(showInChat, interaction) {
         const ephemeral = !showInChat;
-        await safeDeferReply(interaction, { ephemeral });
+        await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         try {
             const current = await BotVotingInfo.getCurrentRound();
             if (!current || !current.nextVoteAt) {
                 await safeReply(interaction, {
                     content: "No next vote information is available.",
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
@@ -45,14 +45,14 @@ let NextVoteCommand = class NextVoteCommand {
                 .setDescription(descriptionLines.join("\n"));
             await safeReply(interaction, {
                 embeds: [embed],
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
         }
         catch (err) {
             const msg = err?.message ?? String(err);
             await safeReply(interaction, {
                 content: `Error fetching next vote information: ${msg}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
     }

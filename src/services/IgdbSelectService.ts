@@ -107,7 +107,7 @@ export function deleteIgdbSession(sessionId: string): void {
 export async function handleIgdbSelectInteraction(
   interaction: StringSelectMenuInteraction,
 ): Promise<boolean> {
-  const [sessionId, pageRaw] = interaction.customId.split(":");
+  const [, sessionId, pageRaw] = interaction.customId.split(":");
   if (!sessionId) return false;
   const session = getSessionStore().get(sessionId);
   if (!session) {

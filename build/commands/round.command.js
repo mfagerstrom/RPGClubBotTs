@@ -7,7 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { EmbedBuilder, ApplicationCommandOptionType } from "discord.js";
+import { EmbedBuilder, ApplicationCommandOptionType, MessageFlags } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
@@ -17,13 +17,13 @@ import { buildGotmEntryEmbed, buildNrGotmEntryEmbed, } from "../functions/GotmEn
 let CurrentRoundCommand = class CurrentRoundCommand {
     async round(showInChat, interaction) {
         const ephemeral = !showInChat;
-        await safeDeferReply(interaction, { ephemeral });
+        await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         try {
             const current = await BotVotingInfo.getCurrentRound();
             if (!current) {
                 await safeReply(interaction, {
                     content: "No voting round information is available.",
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
@@ -108,7 +108,7 @@ let CurrentRoundCommand = class CurrentRoundCommand {
             await safeReply(interaction, {
                 embeds,
                 files: files.length ? files : undefined,
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
         }
         catch (err) {

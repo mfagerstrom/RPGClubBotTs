@@ -85,7 +85,7 @@ async function showSuperAdminPresenceHistory(interaction) {
     if (!entries.length) {
         await safeReply(interaction, {
             content: "No presence history found.",
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
         return;
     }
@@ -108,7 +108,7 @@ async function showSuperAdminPresenceHistory(interaction) {
 }
 let SuperAdmin = class SuperAdmin {
     async presence(text, interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         const okToUseCommand = await isSuperAdmin(interaction);
         if (!okToUseCommand)
             return;
@@ -116,7 +116,7 @@ let SuperAdmin = class SuperAdmin {
             await setPresence(interaction, text.trim());
             await safeReply(interaction, {
                 content: `I'm now playing: ${text.trim()}!`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -176,7 +176,7 @@ let SuperAdmin = class SuperAdmin {
         }
     }
     async memberScan(interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         const okToUseCommand = await isSuperAdmin(interaction);
         if (!okToUseCommand)
             return;
@@ -336,7 +336,7 @@ let SuperAdmin = class SuperAdmin {
         await safeReply(interaction, {
             content: `Member scan complete. Upserts succeeded: ${successCount}. Failed: ${failCount}. ` +
                 `Marked departed: ${departedCount}.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
     async setNextVote(dateText, interaction) {
@@ -349,7 +349,7 @@ let SuperAdmin = class SuperAdmin {
         if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
             await safeReply(interaction, {
                 content: "Invalid date format. Please use a recognizable date such as `YYYY-MM-DD`.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -358,7 +358,7 @@ let SuperAdmin = class SuperAdmin {
             if (!current) {
                 await safeReply(interaction, {
                     content: "No voting round information is available. Create a round before setting the next vote date.",
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
@@ -371,12 +371,12 @@ let SuperAdmin = class SuperAdmin {
             const msg = err?.message ?? String(err);
             await safeReply(interaction, {
                 content: `Error updating next vote date: ${msg}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
     }
     async help(interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         const okToUseCommand = await isSuperAdmin(interaction);
         if (!okToUseCommand) {
             return;
@@ -384,7 +384,7 @@ let SuperAdmin = class SuperAdmin {
         const response = buildSuperAdminHelpResponse();
         await safeReply(interaction, {
             ...response,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
     async handleSuperAdminHelpButton(interaction) {
@@ -412,7 +412,7 @@ let SuperAdmin = class SuperAdmin {
         });
     }
     async gamedbBackfill(interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         const okToUseCommand = await isSuperAdmin(interaction);
         if (!okToUseCommand)
             return;
@@ -424,7 +424,7 @@ let SuperAdmin = class SuperAdmin {
             const msg = err?.message ?? String(err);
             await safeReply(interaction, {
                 content: `Failed to load GOTM data: ${msg}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -434,7 +434,7 @@ let SuperAdmin = class SuperAdmin {
         if (!sessionSeeds.length) {
             await safeReply(interaction, {
                 content: "No GOTM or NR-GOTM entries found to import.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -449,7 +449,6 @@ let SuperAdmin = class SuperAdmin {
         const statusMessage = await safeReply(interaction, {
             content: startMessage,
             embeds: [this.buildGamedbStatusEmbed(startMessage, status.logs, false)],
-            ephemeral: false,
             fetchReply: true,
         });
         for (const seed of sessionSeeds) {
@@ -470,7 +469,7 @@ let SuperAdmin = class SuperAdmin {
         await this.editStatusMessage(interaction, statusMessage, status, true);
     }
     async threadGameLinkBackfill(interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         const okToUseCommand = await isSuperAdmin(interaction);
         if (!okToUseCommand)
             return;
@@ -482,7 +481,7 @@ let SuperAdmin = class SuperAdmin {
             const msg = err?.message ?? String(err);
             await safeReply(interaction, {
                 content: `Failed to load GOTM/NR-GOTM data: ${msg}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -504,7 +503,7 @@ let SuperAdmin = class SuperAdmin {
         if (!assignments.length) {
             await safeReply(interaction, {
                 content: "No GOTM or NR-GOTM entries have both thread id and GameDB id set.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -526,7 +525,7 @@ let SuperAdmin = class SuperAdmin {
         }
         await safeReply(interaction, {
             content: lines.join("\n"),
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
     buildGamedbSeeds() {
@@ -625,7 +624,7 @@ let SuperAdmin = class SuperAdmin {
                 finish(`[${label}] Skipped (no selection): ${seed.title}`);
                 await safeReply(interaction, {
                     content: `[${label}] Import cancelled or timed out.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 }).catch(() => { });
             }, 120000);
             const finish = (value) => {
@@ -635,7 +634,6 @@ let SuperAdmin = class SuperAdmin {
             safeReply(interaction, {
                 content: `Multiple IGDB matches for ${seed.source} Round ${seed.round} (${seed.monthYear}).`,
                 components,
-                ephemeral: false,
                 __forceFollowUp: true,
             });
         });
@@ -734,7 +732,7 @@ let SuperAdmin = class SuperAdmin {
                 await message.edit({ embeds: [embed] });
             }
             else {
-                await safeReply(interaction, { embeds: [embed], ephemeral: false });
+                await safeReply(interaction, { embeds: [embed] });
             }
         }
         catch {

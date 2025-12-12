@@ -7,7 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
+import { ApplicationCommandOptionType, EmbedBuilder, MessageFlags } from "discord.js";
 import { Discord, Slash, SlashChoice, SlashGroup, SlashOption } from "discordx";
 import { AUDIT_NO_VALUE_SENTINEL } from "./superadmin.command.js";
 // Use relative import with .js for ts-node ESM compatibility
@@ -63,7 +63,7 @@ let NrGotmSearch = class NrGotmSearch {
     }
     async search(round, year, month, title, showInChat, interaction) {
         const ephemeral = !showInChat;
-        await safeDeferReply(interaction, { ephemeral });
+        await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         let results = [];
         let criteriaLabel;
         try {
@@ -92,7 +92,7 @@ let NrGotmSearch = class NrGotmSearch {
                 if (!all.length) {
                     await safeReply(interaction, {
                         content: "No NR-GOTM data available.",
-                        ephemeral: true,
+                        flags: MessageFlags.Ephemeral,
                     });
                     return;
                 }
@@ -102,7 +102,7 @@ let NrGotmSearch = class NrGotmSearch {
             if (!results || results.length === 0) {
                 await safeReply(interaction, {
                     content: `No NR-GOTM entries found for ${criteriaLabel}.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
@@ -143,7 +143,7 @@ let NrGotmSearch = class NrGotmSearch {
                     content: first ? content : undefined,
                     embeds,
                     files: files.length ? files : undefined,
-                    ephemeral,
+                    flags: ephemeral ? MessageFlags.Ephemeral : undefined,
                 };
                 if (first) {
                     await safeReply(interaction, payload);
@@ -167,7 +167,7 @@ let NrGotmSearch = class NrGotmSearch {
             const msg = err?.message ?? String(err);
             await safeReply(interaction, {
                 content: `Error processing request: ${msg}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
     }
@@ -177,7 +177,7 @@ let NrGotmSearch = class NrGotmSearch {
         if (!cleanedTitle) {
             await safeReply(interaction, {
                 content: "Please provide a non-empty game title to nominate.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -185,7 +185,7 @@ let NrGotmSearch = class NrGotmSearch {
         if (trimmedReason.length > 250) {
             await safeReply(interaction, {
                 content: "Reason must be 250 characters or fewer.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -195,7 +195,7 @@ let NrGotmSearch = class NrGotmSearch {
                 await safeReply(interaction, {
                     content: `Nominations for Round ${window.targetRound} are closed. ` +
                         `Voting is scheduled for ${window.nextVoteAt.toLocaleString()}.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
@@ -212,7 +212,7 @@ let NrGotmSearch = class NrGotmSearch {
                     : "";
             await safeReply(interaction, {
                 content: `${existing ? "Updated" : "Recorded"} your NR-GOTM nomination for Round ${window.targetRound}: "${saved.gameTitle}".${replaced}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             const nominations = await listNominationsForRound("nr-gotm", window.targetRound);
             const embed = buildNominationEmbed("NR-GOTM", "/nr-gotm nominate", window, nominations);
@@ -223,7 +223,7 @@ let NrGotmSearch = class NrGotmSearch {
             const msg = err?.message ?? String(err);
             await safeReply(interaction, {
                 content: `Could not save your nomination: ${msg}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
     }
@@ -235,7 +235,7 @@ let NrGotmSearch = class NrGotmSearch {
                 await safeReply(interaction, {
                     content: `Nominations for Round ${window.targetRound} are closed. ` +
                         `Voting is scheduled for ${window.nextVoteAt.toLocaleString()}.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
@@ -244,7 +244,7 @@ let NrGotmSearch = class NrGotmSearch {
             if (!existing) {
                 await safeReply(interaction, {
                     content: `You do not have an NR-GOTM nomination for Round ${window.targetRound}.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
@@ -252,7 +252,7 @@ let NrGotmSearch = class NrGotmSearch {
             const nominations = await listNominationsForRound("nr-gotm", window.targetRound);
             await safeReply(interaction, {
                 content: `Deleted your NR-GOTM nomination for Round ${window.targetRound}: "${existing.gameTitle}".`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             const embed = buildNominationEmbed("NR-GOTM", "/nr-gotm nominate", window, nominations);
             const content = `<@${interaction.user.id}> removed their NR-GOTM nomination "${existing.gameTitle}" for NR-GOTM Round ${window.targetRound}.`;
@@ -262,7 +262,7 @@ let NrGotmSearch = class NrGotmSearch {
             const msg = err?.message ?? String(err);
             await safeReply(interaction, {
                 content: `Could not delete your nomination: ${msg}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
     }
@@ -455,7 +455,7 @@ async function resolveNrGameDbGame(interaction, title) {
             await safeReply(interaction, {
                 content: "Import cancelled or timed out. Nominations must be in GameDB first. " +
                     "Use /gamedb add to import (tag @merph518 if you have trouble).",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             }).catch(() => { });
         }, 120000);
         const finish = (value) => {

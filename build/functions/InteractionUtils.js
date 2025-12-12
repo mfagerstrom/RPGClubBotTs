@@ -139,5 +139,5 @@ export async function safeUpdate(interaction, options) {
             }
         }
     }
-    await safeReply(interaction, { ...normalizedOptions, ephemeral: true });
+    await safeReply(interaction, { ...normalizedOptions, flags: MessageFlags.Ephemeral });
 }

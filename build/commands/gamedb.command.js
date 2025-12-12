@@ -7,7 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ApplicationCommandOptionType, EmbedBuilder, StringSelectMenuBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, escapeCodeBlock, } from "discord.js";
+import { ApplicationCommandOptionType, EmbedBuilder, StringSelectMenuBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, escapeCodeBlock, MessageFlags, } from "discord.js";
 import { readFileSync } from "fs";
 import path from "path";
 import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption, } from "discordx";
@@ -315,7 +315,7 @@ let GameDb = class GameDb {
         if (!searchTerm) {
             await safeReply(interaction, {
                 content: "Provide a game_id or a search query.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -326,7 +326,7 @@ let GameDb = class GameDb {
         if (!profile) {
             await safeReply(interaction, {
                 content: `No game found with ID ${gameId}.`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -592,7 +592,7 @@ let GameDb = class GameDb {
         catch (error) {
             await safeReply(interaction, {
                 content: `Failed to search games. Error: ${error.message}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
     }
@@ -624,7 +624,7 @@ let GameDb = class GameDb {
             await interaction
                 .reply({
                 content: "This menu isn't for you.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             })
                 .catch(() => { });
             return;
@@ -634,7 +634,7 @@ let GameDb = class GameDb {
             await interaction
                 .reply({
                 content: "This search session has expired.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             })
                 .catch(() => { });
             return;
@@ -644,7 +644,7 @@ let GameDb = class GameDb {
             await interaction
                 .reply({
                 content: "Invalid selection.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             })
                 .catch(() => { });
             return;
@@ -660,7 +660,7 @@ let GameDb = class GameDb {
             await interaction
                 .followUp({
                 content: "Unable to load that game.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             })
                 .catch(() => { });
             return;
@@ -688,7 +688,7 @@ let GameDb = class GameDb {
             await interaction
                 .reply({
                 content: "This menu isn't for you.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             })
                 .catch(() => { });
             return;
@@ -698,7 +698,7 @@ let GameDb = class GameDb {
             await interaction
                 .reply({
                 content: "This search session has expired.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             })
                 .catch(() => { });
             return;

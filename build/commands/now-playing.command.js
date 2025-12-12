@@ -7,7 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ApplicationCommandOptionType, EmbedBuilder, } from "discord.js";
+import { ApplicationCommandOptionType, EmbedBuilder, MessageFlags, } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import Member from "../classes/Member.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
@@ -39,7 +39,7 @@ let NowPlayingCommand = class NowPlayingCommand {
         const showAllFlag = showAll === true;
         const target = member ?? interaction.user;
         const ephemeral = !showAllFlag;
-        await safeDeferReply(interaction, { ephemeral });
+        await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         if (showAllFlag) {
             await this.showEveryone(interaction, ephemeral);
             return;
@@ -51,7 +51,7 @@ let NowPlayingCommand = class NowPlayingCommand {
         if (!entries.length) {
             await safeReply(interaction, {
                 content: `No Now Playing entries found for <@${target.id}>.`,
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -64,7 +64,7 @@ let NowPlayingCommand = class NowPlayingCommand {
         await safeReply(interaction, {
             content: `<@${target.id}>`,
             embeds: [embed],
-            ephemeral,
+            flags: ephemeral ? MessageFlags.Ephemeral : undefined,
         });
     }
     async showEveryone(interaction, ephemeral) {
@@ -72,7 +72,7 @@ let NowPlayingCommand = class NowPlayingCommand {
         if (!lists.length) {
             await safeReply(interaction, {
                 content: "No Now Playing data found for anyone yet.",
-                ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -93,7 +93,7 @@ let NowPlayingCommand = class NowPlayingCommand {
                 ? "Showing the first set of results (truncated to Discord embed limits)."
                 : undefined,
             embeds,
-            ephemeral,
+            flags: ephemeral ? MessageFlags.Ephemeral : undefined,
         });
     }
 };

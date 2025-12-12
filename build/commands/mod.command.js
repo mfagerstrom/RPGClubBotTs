@@ -88,7 +88,7 @@ let Mod = class Mod {
         });
     }
     async help(interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         const okToUseCommand = await isModerator(interaction);
         if (!okToUseCommand) {
             return;
@@ -96,7 +96,7 @@ let Mod = class Mod {
         const response = buildModHelpResponse();
         await safeReply(interaction, {
             ...response,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
     async handleModHelpButton(interaction) {
