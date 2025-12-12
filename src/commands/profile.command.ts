@@ -39,7 +39,7 @@ import {
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 
 
-const COMPLETION_TYPES = [
+export const COMPLETION_TYPES = [
   "Main Story",
   "Main Story + Side Content",
   "Completionist",
@@ -55,15 +55,15 @@ const GAME_DB_THUMB_PATH = path.join(
 );
 const gameDbThumbBuffer = readFileSync(GAME_DB_THUMB_PATH);
 
-function buildGameDbThumbAttachment(): AttachmentBuilder {
+export function buildGameDbThumbAttachment(): AttachmentBuilder {
   return new AttachmentBuilder(gameDbThumbBuffer, { name: GAME_DB_THUMB_NAME });
 }
 
-function applyGameDbThumbnail(embed: EmbedBuilder): EmbedBuilder {
+export function applyGameDbThumbnail(embed: EmbedBuilder): EmbedBuilder {
   return embed.setThumbnail(`attachment://${GAME_DB_THUMB_NAME}`);
 }
 
-type CompletionType = (typeof COMPLETION_TYPES)[number];
+export type CompletionType = (typeof COMPLETION_TYPES)[number];
 
 type CompletionAddContext = {
   userId: string;
@@ -75,7 +75,7 @@ type CompletionAddContext = {
 
 const completionAddSessions = new Map<string, CompletionAddContext>();
 
-const COMPLETION_PAGE_SIZE = 20;
+export const COMPLETION_PAGE_SIZE = 20;
 
 type ProfileField = {
   label: string;
@@ -104,7 +104,7 @@ function clampLimit(limit: number | undefined, max: number): number {
   return Math.min(Math.max(limit, 1), max);
 }
 
-function parseCompletionDateInput(value: string | undefined): Date | null {
+export function parseCompletionDateInput(value: string | undefined): Date | null {
   if (!value) return new Date();
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
@@ -113,7 +113,7 @@ function parseCompletionDateInput(value: string | undefined): Date | null {
   return parsed;
 }
 
-function formatPlaytimeHours(val: number | null | undefined): string | null {
+export function formatPlaytimeHours(val: number | null | undefined): string | null {
   if (val === null || val === undefined) return null;
   const rounded = Math.round(val * 100) / 100;
   return `${rounded} hours`;
@@ -128,7 +128,7 @@ function formatCompletionLine(
   return `${record.title} — ${record.completionType}${extras ? ` — ${extras}` : ""}`;
 }
 
-function formatTableDate(date: Date | null): string {
+export function formatTableDate(date: Date | null): string {
   if (!date) return "No date";
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -169,7 +169,7 @@ function chunkOptions<T>(items: T[], size: number): T[][] {
   return chunks;
 }
 
-function formatDiscordTimestamp(value: Date | null): string {
+export function formatDiscordTimestamp(value: Date | null): string {
   if (!value) return "Unknown";
   const seconds = Math.floor(value.getTime() / 1000);
   return `<t:${seconds}:F>`;
