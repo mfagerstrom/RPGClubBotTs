@@ -1,4 +1,4 @@
-import { type CommandInteraction, EmbedBuilder, ApplicationCommandOptionType } from "discord.js";
+import { type CommandInteraction, EmbedBuilder, ApplicationCommandOptionType, MessageFlags } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
@@ -20,14 +20,14 @@ export class NextVoteCommand {
     interaction: CommandInteraction,
   ): Promise<void> {
     const ephemeral = !showInChat;
-    await safeDeferReply(interaction, { ephemeral });
+    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
     try {
       const current = await BotVotingInfo.getCurrentRound();
       if (!current || !current.nextVoteAt) {
         await safeReply(interaction, {
           content: "No next vote information is available.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -55,13 +55,13 @@ export class NextVoteCommand {
 
       await safeReply(interaction, {
         embeds: [embed],
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
         content: `Error fetching next vote information: ${msg}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }

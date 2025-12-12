@@ -1,5 +1,5 @@
 import type { Channel, CommandInteraction } from "discord.js";
-import { ApplicationCommandOptionType } from "discord.js";
+import { ApplicationCommandOptionType, MessageFlags } from "discord.js";
 import { Discord, Slash, SlashChoice, SlashGroup, SlashOption } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import { isAdmin } from "./admin.command.js";
@@ -71,7 +71,7 @@ export class PublicReminderCommand {
     recurUnit: RecurrenceUnit | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const ok = await isAdmin(interaction);
     if (!ok) return;
@@ -96,7 +96,7 @@ export class PublicReminderCommand {
     if (!parsedDateTime) {
       await safeReply(interaction, {
         content: `Could not parse the date and time: "${dateTimeString}". Please use formats like "1/1/2026" for date and "9:00 AM" or "15:30" for time.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -105,7 +105,7 @@ export class PublicReminderCommand {
     if (parsedDate.getTime() <= Date.now()) {
       await safeReply(interaction, {
         content: "The reminder time must be in the future.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -113,7 +113,7 @@ export class PublicReminderCommand {
     if (typeof recurEvery === "number" && recurEvery > 0 && !recurUnit) {
       await safeReply(interaction, {
         content: "Please specify recurunit when recur is provided.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -121,13 +121,13 @@ export class PublicReminderCommand {
     if (recurEvery && recurEvery <= 0) {
       await safeReply(interaction, {
         content: "Recur must be a positive integer.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
     if (!message || message.trim().length === 0) {
-      await safeReply(interaction, { content: "Message cannot be empty.", ephemeral: true });
+      await safeReply(interaction, { content: "Message cannot be empty.", flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -146,20 +146,20 @@ export class PublicReminderCommand {
         content:
           `Created reminder #${reminder.reminderId} for <#${channel.id}> at <t:${timestamp}:F>.` +
           `${recurEvery && recurUnit ? ` (repeats every ${recurEvery} ${recurUnit})` : ""}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
         content: `Failed to create reminder: ${msg}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }
 
   @Slash({ description: "List upcoming public reminders", name: "list" })
   async list(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const ok = await isAdmin(interaction);
     if (!ok) return;
@@ -167,7 +167,7 @@ export class PublicReminderCommand {
     try {
       const reminders = await listUpcomingReminders(20);
       if (!reminders.length) {
-        await safeReply(interaction, { content: "No public reminders scheduled.", ephemeral: true });
+        await safeReply(interaction, { content: "No public reminders scheduled.", flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -180,13 +180,13 @@ export class PublicReminderCommand {
 
       await safeReply(interaction, {
         content: lines.join("\n"),
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
         content: `Failed to list reminders: ${msg}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }
@@ -202,7 +202,7 @@ export class PublicReminderCommand {
     reminderId: number,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const ok = await isAdmin(interaction);
     if (!ok) return;
@@ -211,13 +211,13 @@ export class PublicReminderCommand {
       const removed = await deleteReminder(reminderId);
       await safeReply(interaction, {
         content: removed ? `Deleted reminder #${reminderId}.` : `Reminder #${reminderId} not found.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
         content: `Failed to delete reminder: ${msg}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }

@@ -151,7 +151,7 @@ export class Mod {
 
   @Slash({ description: "Show help for moderator commands", name: "help" })
   async help(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const okToUseCommand: boolean = await isModerator(interaction);
     if (!okToUseCommand) {
@@ -162,7 +162,7 @@ export class Mod {
 
     await safeReply(interaction, {
       ...response,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 

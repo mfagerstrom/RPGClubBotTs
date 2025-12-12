@@ -1,6 +1,7 @@
 import {
   ApplicationCommandOptionType,
   CommandInteraction,
+  MessageFlags,
   PermissionsBitField,
 } from "discord.js";
 import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
@@ -32,16 +33,14 @@ export class ThreadAdminCommands {
     if (!this.hasManageThreads(interaction)) {
       await safeReply(interaction, {
         content: "You need Manage Threads permission to use this.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
     await setThreadGameLink(threadId, gamedbGameId);
     await safeReply(interaction, {
-      content: `Linked thread ${threadId} to GameDB game ${gamedbGameId}.`,
-      ephemeral: true,
-    });
+              flags: MessageFlags.Ephemeral,    });
   }
 
   @Slash({ description: "Unlink a thread from a GameDB game id", name: "unlink" })
@@ -65,7 +64,7 @@ export class ThreadAdminCommands {
     if (!this.hasManageThreads(interaction)) {
       await safeReply(interaction, {
         content: "You need Manage Threads permission to use this.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -75,7 +74,7 @@ export class ThreadAdminCommands {
     const suffix = removed === 0 ? " (no matching links were found)." : ".";
     await safeReply(interaction, {
       content: `Unlinked ${target} from thread ${threadId}${suffix}`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 

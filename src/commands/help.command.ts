@@ -8,6 +8,7 @@ import {
   EmbedBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
+  MessageFlags,
 } from "discord.js";
 import { ButtonComponent, Discord, SelectMenuComponent, Slash } from "discordx";
 import { buildAdminHelpResponse, isAdmin } from "./admin.command.js";
@@ -833,13 +834,13 @@ export function buildGamedbHelpResponse(
 export class BotHelp {
   @Slash({ description: "Show help for all bot commands", name: "help" })
   async help(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const response = buildMainHelpResponse();
 
     await safeReply(interaction, {
       ...response,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 

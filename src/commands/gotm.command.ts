@@ -1,5 +1,5 @@
 import type { CommandInteraction, Client, TextBasedChannel } from "discord.js";
-import { ApplicationCommandOptionType, EmbedBuilder } from "discord.js";
+import { ApplicationCommandOptionType, EmbedBuilder, MessageFlags } from "discord.js";
 import { Discord, Slash, SlashChoice, SlashGroup, SlashOption } from "discordx";
 // Use relative import with .js for ts-node ESM compatibility
 import Gotm, { IGotmEntry, IGotmGame } from "../classes/Gotm.js";
@@ -70,9 +70,9 @@ const YEAR_CHOICES = (() => {
 export class GotmSearch {
   @Slash({ description: "Show help for GOTM commands", name: "help" })
   async help(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
     const response = buildGotmHelpResponse();
-    await safeReply(interaction, { ...response, ephemeral: true });
+    await safeReply(interaction, { ...response, flags: MessageFlags.Ephemeral });
   }
 
   @Slash({ description: "Search Game of the Month (GOTM)", name: "search" })
@@ -118,7 +118,7 @@ export class GotmSearch {
 ): Promise<void> {
     const ephemeral = !showInChat;
     // Acknowledge early to avoid interaction timeouts while fetching images
-    await safeDeferReply(interaction, { ephemeral });
+    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
     // Determine search mode
     let results: IGotmEntry[] = [];
@@ -145,7 +145,7 @@ export class GotmSearch {
         // Default: show current round (highest round number in data)
         const all = Gotm.all();
         if (!all.length) {
-          await safeReply(interaction, { content: "No GOTM data available.", ephemeral: true });
+          await safeReply(interaction, { content: "No GOTM data available.", flags: MessageFlags.Ephemeral });
           return;
         }
         const currentRound = Math.max(...all.map((e) => e.round));
@@ -154,7 +154,7 @@ export class GotmSearch {
       }
 
       if (!results || results.length === 0) {
-        await safeReply(interaction, { content: `No GOTM entries found for ${criteriaLabel}.`, ephemeral: true });
+        await safeReply(interaction, { content: `No GOTM entries found for ${criteriaLabel}.`, flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -188,7 +188,7 @@ export class GotmSearch {
           content: first ? content : undefined,
           embeds,
           files: files.length ? files : undefined,
-          ephemeral,
+          flags: ephemeral ? MessageFlags.Ephemeral : undefined,
         };
         if (first) {
           await safeReply(interaction, payload);
@@ -208,7 +208,7 @@ export class GotmSearch {
       }
     } catch (err: any) {
       const msg = err?.message ?? String(err);
-      await safeReply(interaction, { content: `Error processing request: ${msg}`, ephemeral: true });
+      await safeReply(interaction, { content: `Error processing request: ${msg}`, flags: MessageFlags.Ephemeral });
     }
   }
 
@@ -233,13 +233,13 @@ export class GotmSearch {
     reason: string | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const cleanedTitle = title?.trim();
     if (!cleanedTitle) {
       await safeReply(interaction, {
         content: "Please provide a non-empty game title to nominate.",
-        ephemeral: true,
+                flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -248,7 +248,7 @@ export class GotmSearch {
     if (trimmedReason.length > 250) {
       await safeReply(interaction, {
         content: "Reason must be 250 characters or fewer.",
-        ephemeral: true,
+                flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -260,7 +260,7 @@ export class GotmSearch {
           content:
             `Nominations for Round ${window.targetRound} are closed. ` +
             `Voting is scheduled for ${window.nextVoteAt.toLocaleString()}.`,
-          ephemeral: true,
+                  flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -290,7 +290,7 @@ export class GotmSearch {
           `${existing ? "Updated" : "Recorded"} your GOTM nomination for Round ${
             window.targetRound
           }: "${saved.gameTitle}".${replaced}`,
-        ephemeral: true,
+                flags: MessageFlags.Ephemeral,
       });
 
       const nominations = await listNominationsForRound("gotm", window.targetRound);
@@ -306,7 +306,7 @@ export class GotmSearch {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
         content: `Could not save your nomination: ${msg}`,
-        ephemeral: true,
+                flags: MessageFlags.Ephemeral,
       });
     }
   }
@@ -316,7 +316,7 @@ export class GotmSearch {
     name: "delete-nomination",
   })
   async deleteNomination(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     try {
       const window = await getUpcomingNominationWindow();
@@ -325,7 +325,7 @@ export class GotmSearch {
         content:
           `Nominations for Round ${window.targetRound} are closed. ` +
             `Voting is scheduled for ${window.nextVoteAt.toLocaleString()}.`,
-        ephemeral: true,
+                flags: MessageFlags.Ephemeral,
       });
         return;
       }
@@ -335,7 +335,7 @@ export class GotmSearch {
       if (!existing) {
         await safeReply(interaction, {
           content: `You do not have a GOTM nomination for Round ${window.targetRound}.`,
-          ephemeral: true,
+                  flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -344,7 +344,7 @@ export class GotmSearch {
       const nominations = await listNominationsForRound("gotm", window.targetRound);
       await safeReply(interaction, {
         content: `Deleted your GOTM nomination for Round ${window.targetRound}: "${existing.gameTitle}".`,
-        ephemeral: true,
+                flags: MessageFlags.Ephemeral,
       });
 
       const embed = buildNominationEmbed(
@@ -359,7 +359,7 @@ export class GotmSearch {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
         content: `Could not delete your nomination: ${msg}`,
-        ephemeral: true,
+                flags: MessageFlags.Ephemeral,
       });
     }
   }
@@ -451,7 +451,7 @@ async function resolveGameDbGame(interaction: CommandInteraction, title: string)
     const msg = err?.message ?? String(err);
     await safeReply(interaction, {
       content: `IGDB search failed: ${msg}. Tag @merph518 if you need help importing.`,
-      ephemeral: true,
+              flags: MessageFlags.Ephemeral,
     });
     return null;
   }
@@ -461,7 +461,7 @@ async function resolveGameDbGame(interaction: CommandInteraction, title: string)
       content:
         `No GameDB entry found and IGDB search returned no results for "${searchTerm}". ` +
         "Use /gamedb add to import first (tag @merph518 if you need help).",
-      ephemeral: true,
+              flags: MessageFlags.Ephemeral,
     });
     return null;
   }
@@ -506,14 +506,14 @@ async function resolveGameDbGame(interaction: CommandInteraction, title: string)
         content:
           "Import cancelled or timed out. Nominations must be in GameDB first. " +
           "Use /gamedb add to import (tag @merph518 if you have trouble).",
-        ephemeral: true,
+                flags: MessageFlags.Ephemeral,
       }).catch(() => {});
     }, 120000);
 
     safeReply(interaction, {
       content: "Game not found in GameDB. Select the IGDB match to import (paged).",
       components,
-      ephemeral: true,
+              flags: MessageFlags.Ephemeral,
       __forceFollowUp: true,
     });
 
@@ -535,7 +535,7 @@ async function importGameFromIgdb(
   if (!details) {
     await safeReply(interaction, {
       content: `Could not fetch IGDB details for id ${igdbId}.`,
-      ephemeral: true,
+              flags: MessageFlags.Ephemeral,
     });
     return null;
   }

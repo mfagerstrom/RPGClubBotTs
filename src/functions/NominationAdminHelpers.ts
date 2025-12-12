@@ -3,6 +3,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  MessageFlags,
   type ButtonInteraction,
   type RepliableInteraction,
   type TextBasedChannel,
@@ -124,7 +125,7 @@ export async function handleNominationDeletionButton(
       content: `No ${kind.toUpperCase()} nomination found for Round ${round} and user <@${userId}>.`,
       components: [],
       embeds: [],
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -151,7 +152,7 @@ export async function handleNominationDeletionButton(
     content,
     embeds: [embed],
     components,
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 
   await announceNominationChange(kind, interaction, content, embed);

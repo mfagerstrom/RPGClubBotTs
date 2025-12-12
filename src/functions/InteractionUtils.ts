@@ -157,5 +157,5 @@ export async function safeUpdate(interaction: AnyRepliable, options: any): Promi
     }
   }
 
-  await safeReply(interaction, { ...normalizedOptions, ephemeral: true });
+  await safeReply(interaction, { ...normalizedOptions, flags: MessageFlags.Ephemeral });
 }

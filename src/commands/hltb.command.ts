@@ -1,5 +1,5 @@
 import type { CommandInteraction } from "discord.js";
-import { ApplicationCommandOptionType } from "discord.js";
+import { ApplicationCommandOptionType, MessageFlags } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import { EmbedBuilder } from "discord.js";
 import { searchHltb } from "../functions/SearchHltb.js";
@@ -26,7 +26,7 @@ export class hltb {
     interaction: CommandInteraction,
   ): Promise<void> {
     const ephemeral = !showInChat;
-    await safeDeferReply(interaction, { ephemeral });
+    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
     try {
       const result = await searchHltb(title);
@@ -34,7 +34,7 @@ export class hltb {
   } catch {
       await safeReply(interaction, {
         content: `Sorry, there was an error searching for "${title}". Please try again later.`,
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
     }
   }
@@ -112,11 +112,11 @@ async function outputHltbResultsAsEmbed(
       .setFields(fields)
       .setImage(hltb_result.imageUrl);
 
-    await safeReply(interaction, { embeds: [hltbEmbed], ephemeral: options.ephemeral });
+    await safeReply(interaction, { embeds: [hltbEmbed], flags: options.ephemeral ? MessageFlags.Ephemeral : undefined });
   } else {
     await safeReply(interaction, {
       content: `Sorry, no results were found for "${hltbQuery}"`,
-      ephemeral: options.ephemeral,
+      flags: options.ephemeral ? MessageFlags.Ephemeral : undefined,
     });
   }
 }

@@ -15,7 +15,7 @@
 - You are disallowed from using git commands that can result in file changes or losses
 - rules to follow while coding: keep interfaces PascalCase with `I` prefix, type all functions and variable declarations, keep lines <=100 chars, use trailing commas on multiline, semicolons always, avoid multiple blank lines, keep spaced comments.
 - Prefer npm/Node commands over Python or other languages for scripting and tooling.
-- Check the TODO.md file for development goals. Don't do these automatically but ask me if I would like you to tackle one of them when you set up a new task context.
+- Check the TODO.md file for development goals. Ask me before tackling TODO list items.
 - Do not keep making this mistake: [ERROR] (node:30760) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
 - Do not delete the build directory.
 - Table docs live in db/rpg_club_users.md (RPG_CLUB_USERS), db/bot_presence_history.md

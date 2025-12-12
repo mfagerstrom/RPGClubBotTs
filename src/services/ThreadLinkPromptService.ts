@@ -94,7 +94,7 @@ async function handleLinkButton(interaction: ButtonInteraction, threadId: string
   const threadName = (interaction.channel as any)?.name ?? "Unknown Thread";
   const title = threadName.split("(")[0].trim() || threadName;
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   await interaction.message.edit({ components: [] }).catch(() => {});
 
   try {

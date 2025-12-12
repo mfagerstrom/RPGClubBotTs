@@ -1,4 +1,4 @@
-import { type CommandInteraction, EmbedBuilder, ApplicationCommandOptionType } from "discord.js";
+import { type CommandInteraction, EmbedBuilder, ApplicationCommandOptionType, MessageFlags } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
@@ -26,14 +26,14 @@ export class CurrentRoundCommand {
     interaction: CommandInteraction,
   ): Promise<void> {
     const ephemeral = !showInChat;
-    await safeDeferReply(interaction, { ephemeral });
+    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
     try {
       const current = await BotVotingInfo.getCurrentRound();
       if (!current) {
         await safeReply(interaction, {
           content: "No voting round information is available.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -145,7 +145,7 @@ export class CurrentRoundCommand {
       await safeReply(interaction, {
         embeds,
         files: files.length ? files : undefined,
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);

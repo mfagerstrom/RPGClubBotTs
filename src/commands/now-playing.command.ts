@@ -3,6 +3,7 @@ import {
   type CommandInteraction,
   EmbedBuilder,
   type User,
+  MessageFlags,
 } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import Member, { type IMemberNowPlayingEntry } from "../classes/Member.js";
@@ -59,7 +60,7 @@ export class NowPlayingCommand {
     const showAllFlag = showAll === true;
     const target = member ?? interaction.user;
     const ephemeral = !showAllFlag;
-    await safeDeferReply(interaction, { ephemeral });
+    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
     if (showAllFlag) {
       await this.showEveryone(interaction, ephemeral);
@@ -78,7 +79,7 @@ export class NowPlayingCommand {
     if (!entries.length) {
       await safeReply(interaction, {
         content: `No Now Playing entries found for <@${target.id}>.`,
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -96,7 +97,7 @@ export class NowPlayingCommand {
     await safeReply(interaction, {
       content: `<@${target.id}>`,
       embeds: [embed],
-      ephemeral,
+      flags: ephemeral ? MessageFlags.Ephemeral : undefined,
     });
   }
 
@@ -108,7 +109,7 @@ export class NowPlayingCommand {
     if (!lists.length) {
       await safeReply(interaction, {
         content: "No Now Playing data found for anyone yet.",
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -136,7 +137,7 @@ export class NowPlayingCommand {
         ? "Showing the first set of results (truncated to Discord embed limits)."
         : undefined,
       embeds,
-      ephemeral,
+      flags: ephemeral ? MessageFlags.Ephemeral : undefined,
     });
   }
 }

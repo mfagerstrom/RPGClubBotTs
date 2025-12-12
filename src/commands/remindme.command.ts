@@ -2,6 +2,7 @@ import {
   ApplicationCommandOptionType,
   ButtonInteraction,
   CommandInteraction,
+  MessageFlags,
 } from "discord.js";
 import { DateTime } from "luxon";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
@@ -43,13 +44,13 @@ export class RemindMeCommand {
     interaction: CommandInteraction,
   ): Promise<void> {
     const ephemeral = true;
-    await safeDeferReply(interaction, { ephemeral });
+    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
     const parsedDate = parseUserDate(when);
     if (!parsedDate) {
       await safeReply(interaction, {
         content: formatDateHelpText("Sorry, I could not understand that time."),
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -59,7 +60,7 @@ export class RemindMeCommand {
     if (remindAt <= now.plus({ minutes: 1 })) {
       await safeReply(interaction, {
         content: "Reminders must be at least one minute in the future.",
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -88,7 +89,7 @@ export class RemindMeCommand {
     interaction: CommandInteraction,
   ): Promise<void> {
     const ephemeral = true;
-    await safeDeferReply(interaction, { ephemeral });
+    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
     const reminders = await Reminder.listByUser(interaction.user.id);
     const header = "**Your reminders**";
@@ -123,13 +124,13 @@ export class RemindMeCommand {
     interaction: CommandInteraction,
   ): Promise<void> {
     const ephemeral = true;
-    await safeDeferReply(interaction, { ephemeral });
+    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
     const parsedDate = parseUserDate(until);
     if (!parsedDate) {
       await safeReply(interaction, {
         content: formatDateHelpText("Sorry, I could not understand that time."),
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -138,7 +139,7 @@ export class RemindMeCommand {
     if (remindAt <= DateTime.utc().plus({ minutes: 1 })) {
       await safeReply(interaction, {
         content: "Snoozed time must be at least one minute in the future.",
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -152,7 +153,7 @@ export class RemindMeCommand {
     if (!updated) {
       await safeReply(interaction, {
         content: "I could not find that reminder for you.",
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -161,7 +162,7 @@ export class RemindMeCommand {
         content: `Reminder #${updated.reminderId} snoozed to ${formatReminderTime(
           remindAt.toJSDate(),
         )}.`,
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
   }
 
@@ -177,13 +178,13 @@ export class RemindMeCommand {
     interaction: CommandInteraction,
   ): Promise<void> {
     const ephemeral = true;
-    await safeDeferReply(interaction, { ephemeral });
+    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
     const removed = await Reminder.delete(reminderId, interaction.user.id);
     if (!removed) {
       await safeReply(interaction, {
         content: "I could not find that reminder for you.",
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -203,8 +204,7 @@ export class RemindMeButtons {
     if (!parsed) {
       await safeReply(interaction, {
         content: "Sorry, I could not understand that action.",
-        ephemeral: true,
-      });
+                flags: MessageFlags.Ephemeral,      });
       return;
     }
 
@@ -212,8 +212,7 @@ export class RemindMeButtons {
     if (!reminder || reminder.userId !== interaction.user.id) {
       await safeReply(interaction, {
         content: "That reminder is not available to you anymore.",
-        ephemeral: true,
-      });
+                flags: MessageFlags.Ephemeral,      });
       return;
     }
 
@@ -225,8 +224,7 @@ export class RemindMeButtons {
           await interaction.message.delete();
           await safeReply(interaction, {
             content: `Reminder #${reminder.reminderId} marked done.`,
-            ephemeral: true,
-          });
+                    flags: MessageFlags.Ephemeral,          });
           return;
         }
       } catch (err) {
@@ -248,8 +246,7 @@ export class RemindMeButtons {
 
       await safeReply(interaction, {
         content: `Got it. Reminder #${reminder.reminderId} is removed.`,
-        ephemeral: true,
-      });
+                flags: MessageFlags.Ephemeral,      });
       return;
     }
 
@@ -264,15 +261,13 @@ export class RemindMeButtons {
     if (!updated) {
       await safeReply(interaction, {
         content: "I could not update that reminder.",
-        ephemeral: true,
-      });
+                flags: MessageFlags.Ephemeral,      });
       return;
     }
 
     await safeReply(interaction, {
       content: `Snoozed to ${formatReminderTime(newTime.toJSDate())}.`,
-      ephemeral: true,
-    });
+              flags: MessageFlags.Ephemeral,    });
   }
 }
 

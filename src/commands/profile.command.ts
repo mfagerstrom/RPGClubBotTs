@@ -430,14 +430,14 @@ export class ProfileCommand {
   ): Promise<void> {
     const target = member ?? interaction.user;
     const ephemeral = !showInChat;
-    await safeDeferReply(interaction, { ephemeral });
+    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
     const result = await buildProfileViewPayload(target, interaction.guildId ?? undefined);
 
     if (result.errorMessage) {
       await safeReply(interaction, {
         content: result.errorMessage,
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -446,7 +446,7 @@ export class ProfileCommand {
       await safeReply(interaction, {
         content:
           result.notFoundMessage ?? `No profile data found for <@${target.id}>.`,
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -510,12 +510,12 @@ export class ProfileCommand {
     fromNowPlaying: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     if (!COMPLETION_TYPES.includes(completionType)) {
       await safeReply(interaction, {
         content: "Invalid completion type.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -526,7 +526,7 @@ export class ProfileCommand {
     } catch (err: any) {
       await safeReply(interaction, {
         content: err?.message ?? "Invalid completion date.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -534,7 +534,7 @@ export class ProfileCommand {
     if (finalPlaytimeHours !== undefined && (Number.isNaN(finalPlaytimeHours) || finalPlaytimeHours < 0)) {
       await safeReply(interaction, {
         content: "Final playtime must be a non-negative number of hours.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -547,7 +547,7 @@ export class ProfileCommand {
       if (!list.length) {
         await safeReply(interaction, {
           content: "Your Now Playing list is empty. Add a game first or use query/game_id.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -572,7 +572,7 @@ export class ProfileCommand {
       await safeReply(interaction, {
         content: "Choose the game you just completed:",
         components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -582,7 +582,7 @@ export class ProfileCommand {
       if (!game) {
         await safeReply(interaction, {
           content: `GameDB #${gameId} was not found.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -594,7 +594,7 @@ export class ProfileCommand {
     if (!searchTerm) {
       await safeReply(interaction, {
         content: "Provide a game_id, set from_now_playing:true, or include a search query.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -628,7 +628,7 @@ export class ProfileCommand {
     interaction: CommandInteraction,
   ): Promise<void> {
     const ephemeral = !showInChat;
-    await safeDeferReply(interaction, { ephemeral });
+    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
     await this.renderCompletionPage(interaction, interaction.user.id, 0, year ?? null, ephemeral);
   }
 
@@ -637,12 +637,12 @@ export class ProfileCommand {
   async completionEdit(
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
     const completions = await Member.getCompletions({ userId: interaction.user.id, limit: 10 });
     if (!completions.length) {
       await safeReply(interaction, {
         content: "You have no completions to edit.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -680,12 +680,12 @@ export class ProfileCommand {
   async completionDelete(
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
     const completions = await Member.getCompletions({ userId: interaction.user.id, limit: 10 });
     if (!completions.length) {
       await safeReply(interaction, {
         content: "You have no completions to delete.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -998,7 +998,7 @@ export class ProfileCommand {
     query: string,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
     try {
       const results = await Game.searchGames(query);
       const sessionId = `np-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
@@ -1027,7 +1027,7 @@ export class ProfileCommand {
       await safeReply(interaction, {
         content: "Select the game to add to your Now Playing list:",
         components: [selectRow],
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
 
       setTimeout(async () => {
@@ -1052,7 +1052,7 @@ export class ProfileCommand {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
         content: `Could not add to Now Playing: ${msg}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }
@@ -1122,13 +1122,13 @@ export class ProfileCommand {
   @Slash({ description: "Remove a game from your Now Playing list", name: "nowplaying-remove" })
   @SlashGroup("profile")
   async removeNowPlaying(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
     try {
       const current = await Member.getNowPlayingEntries(interaction.user.id);
       if (!current.length) {
         await safeReply(interaction, {
           content: "Your Now Playing list is empty.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -1156,13 +1156,13 @@ export class ProfileCommand {
             .setDescription(lines.join("\n")),
         ],
         components: rows,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
         content: `Could not remove from Now Playing: ${msg}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }
@@ -1224,12 +1224,12 @@ export class ProfileCommand {
     if (!userId) {
       await safeReply(interaction, {
         content: "Could not determine which member to load.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     try {
       const user = await interaction.client.users.fetch(userId);
@@ -1238,7 +1238,7 @@ export class ProfileCommand {
       if (result.errorMessage) {
         await safeReply(interaction, {
           content: result.errorMessage,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -1247,20 +1247,20 @@ export class ProfileCommand {
         await safeReply(interaction, {
           content:
             result.notFoundMessage ?? `No profile data found for <@${userId}>.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
 
       await safeReply(interaction, {
         ...result.payload,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
         content: `Could not load that profile: ${msg}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }
@@ -1418,7 +1418,7 @@ export class ProfileCommand {
     interaction: CommandInteraction,
   ): Promise<void> {
     const ephemeral = !showInChat;
-    await safeDeferReply(interaction, { ephemeral });
+    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
     const joinedAfterDate = parseDateInput(joinedAfter);
     const joinedBeforeDate = parseDateInput(joinedBefore);
@@ -1428,7 +1428,7 @@ export class ProfileCommand {
     if (joinedAfter && !joinedAfterDate) {
       await safeReply(interaction, {
         content: "Invalid joinedafter date/time. Please use an ISO format.",
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -1436,7 +1436,7 @@ export class ProfileCommand {
     if (joinedBefore && !joinedBeforeDate) {
       await safeReply(interaction, {
         content: "Invalid joinedbefore date/time. Please use an ISO format.",
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -1444,7 +1444,7 @@ export class ProfileCommand {
     if (lastSeenAfter && !lastSeenAfterDate) {
       await safeReply(interaction, {
         content: "Invalid lastseenafter date/time. Please use an ISO format.",
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -1452,7 +1452,7 @@ export class ProfileCommand {
     if (lastSeenBefore && !lastSeenBeforeDate) {
       await safeReply(interaction, {
         content: "Invalid lastseenbefore date/time. Please use an ISO format.",
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -1484,7 +1484,7 @@ export class ProfileCommand {
     if (!results.length) {
       await safeReply(interaction, {
         content: "No members matched those filters.",
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -1593,7 +1593,7 @@ export class ProfileCommand {
       interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator) ?? false;
     const isSelf = target.id === interaction.user.id;
     const ephemeral = true;
-    await safeDeferReply(interaction, { ephemeral });
+    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
     if (!isSelf && !isAdmin) {
       await safeReply(interaction, {
@@ -1671,7 +1671,7 @@ export class ProfileCommand {
     if (total === 0) {
       await safeReply(interaction as any, {
         content: year ? `You have no recorded completions for ${year}.` : "You have no recorded completions yet.",
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -1694,7 +1694,7 @@ export class ProfileCommand {
       }
       await safeReply(interaction as any, {
         content: "You have no recorded completions yet.",
-        ephemeral,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
     }
@@ -1841,7 +1841,7 @@ export class ProfileCommand {
       await safeReply(interaction, {
         content: `Select the game for "${searchTerm}".`,
         components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -1850,7 +1850,7 @@ export class ProfileCommand {
     if (!igdbSearch.results.length) {
       await safeReply(interaction, {
         content: `No GameDB or IGDB matches found for "${searchTerm}".`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }

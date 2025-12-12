@@ -11,6 +11,7 @@ import {
   type Message,
   AttachmentBuilder,
   escapeCodeBlock,
+  MessageFlags,
 } from "discord.js";
 import { readFileSync } from "fs";
 import path from "path";
@@ -472,7 +473,7 @@ export class GameDb {
     if (!searchTerm) {
       await safeReply(interaction, {
         content: "Provide a game_id or a search query.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -488,7 +489,7 @@ export class GameDb {
     if (!profile) {
       await safeReply(interaction, {
         content: `No game found with ID ${gameId}.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -832,7 +833,7 @@ export class GameDb {
     } catch (error: any) {
       await safeReply(interaction, {
         content: `Failed to search games. Error: ${error.message}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }
@@ -877,7 +878,7 @@ export class GameDb {
       await interaction
         .reply({
           content: "This menu isn't for you.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         })
         .catch(() => {});
       return;
@@ -888,7 +889,7 @@ export class GameDb {
       await interaction
         .reply({
           content: "This search session has expired.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         })
         .catch(() => {});
       return;
@@ -899,7 +900,7 @@ export class GameDb {
       await interaction
         .reply({
           content: "Invalid selection.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         })
         .catch(() => {});
       return;
@@ -916,7 +917,7 @@ export class GameDb {
       await interaction
         .followUp({
           content: "Unable to load that game.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         })
         .catch(() => {});
       return;
@@ -948,7 +949,7 @@ export class GameDb {
       await interaction
         .reply({
           content: "This menu isn't for you.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         })
         .catch(() => {});
       return;
@@ -959,7 +960,7 @@ export class GameDb {
       await interaction
         .reply({
           content: "This search session has expired.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         })
         .catch(() => {});
       return;

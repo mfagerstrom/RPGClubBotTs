@@ -1,5 +1,5 @@
 import type { CommandInteraction } from "discord.js";
-import { ApplicationCommandOptionType, type Channel } from "discord.js";
+import { ApplicationCommandOptionType, MessageFlags, type Channel } from "discord.js";
 import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import { isAdmin } from "./admin.command.js";
@@ -20,13 +20,13 @@ function normalizeList(value: string | undefined): string[] {
 export class RssCommand {
   @Slash({ description: "Show help for RSS commands", name: "help" })
   async help(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const ok = await isAdmin(interaction);
     if (!ok) return;
 
     const response = buildRssHelpResponse();
-    await safeReply(interaction, { ...response, ephemeral: true });
+    await safeReply(interaction, { ...response, flags: MessageFlags.Ephemeral });
   }
 
   @Slash({ description: "Add an RSS feed relay", name: "add" })
@@ -68,7 +68,7 @@ export class RssCommand {
     exclude: string | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const ok = await isAdmin(interaction);
     if (!ok) return;
@@ -80,13 +80,13 @@ export class RssCommand {
       const id = await addFeed(feedName ?? null, url, channelId, includeKeywords, excludeKeywords);
       await safeReply(interaction, {
         content: `Added feed #${id} (${feedName ?? "unnamed"}) -> <#${channelId}> (url=${url}).`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
         content: `Failed to add feed: ${msg}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }
@@ -102,7 +102,7 @@ export class RssCommand {
     feedId: number,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const ok = await isAdmin(interaction);
     if (!ok) return;
@@ -111,13 +111,13 @@ export class RssCommand {
       const removed = await removeFeed(feedId);
       await safeReply(interaction, {
         content: removed ? `Removed feed #${feedId}.` : `Feed #${feedId} not found.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
         content: `Failed to remove feed: ${msg}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }
@@ -168,7 +168,7 @@ export class RssCommand {
     exclude: string | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const ok = await isAdmin(interaction);
     if (!ok) return;
@@ -182,7 +182,7 @@ export class RssCommand {
     ) {
       await safeReply(interaction, {
         content: "Nothing to update. Provide at least one field (url/channel/include/exclude).",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -203,20 +203,20 @@ export class RssCommand {
         content: updated
           ? `Updated feed #${feedId}.`
           : `Feed #${feedId} not found or no changes applied.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
         content: `Failed to edit feed: ${msg}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }
 
   @Slash({ description: "List RSS feed relays", name: "list" })
   async list(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const ok = await isAdmin(interaction);
     if (!ok) return;
@@ -224,7 +224,7 @@ export class RssCommand {
     try {
       const feeds = await listFeeds();
       if (!feeds.length) {
-        await safeReply(interaction, { content: "No feeds configured.", ephemeral: true });
+        await safeReply(interaction, { content: "No feeds configured.", flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -237,13 +237,13 @@ export class RssCommand {
 
       await safeReply(interaction, {
         content: lines.join("\n"),
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
         content: `Failed to list feeds: ${msg}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }

@@ -5,6 +5,7 @@ import {
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
   ApplicationCommandOptionType,
+  MessageFlags,
 } from "discord.js";
 import { Discord, SelectMenuComponent, Slash, SlashOption } from "discordx";
 import Member, { type IMemberPlatformRecord } from "../classes/Member.js";
@@ -142,14 +143,13 @@ export class MultiplayerInfoCommand {
           nsw: nsw ?? true,
         };
     const ephemeral = !showInChat;
-    await safeDeferReply(interaction, { ephemeral });
+    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
     const anyIncluded = filters.steam || filters.xbl || filters.psn || filters.nsw;
     if (!anyIncluded) {
       await safeReply(interaction, {
         content: "Please enable at least one platform filter.",
-        ephemeral,
-      });
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,      });
       return;
     }
 
@@ -159,8 +159,7 @@ export class MultiplayerInfoCommand {
     if (!filtered.length) {
       await safeReply(interaction, {
         content: "No members match the selected platforms.",
-        ephemeral,
-      });
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,      });
       return;
     }
 
@@ -170,8 +169,7 @@ export class MultiplayerInfoCommand {
       content: note,
       embeds: [embed],
       components,
-      ephemeral,
-    });
+              flags: ephemeral ? MessageFlags.Ephemeral : undefined,    });
   }
 
   @SelectMenuComponent({ id: "mpinfo-select" })
@@ -180,7 +178,7 @@ export class MultiplayerInfoCommand {
     if (!userId) {
       await safeReply(interaction, {
         content: "Could not determine which member to load.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -194,7 +192,7 @@ export class MultiplayerInfoCommand {
       if (result.errorMessage) {
         await safeReply(interaction, {
           content: result.errorMessage,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -203,20 +201,20 @@ export class MultiplayerInfoCommand {
         await safeReply(interaction, {
           content:
             result.notFoundMessage ?? `No profile data found for <@${userId}>.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
 
       await safeReply(interaction, {
         ...result.payload,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
         content: `Could not load that profile: ${msg}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }
