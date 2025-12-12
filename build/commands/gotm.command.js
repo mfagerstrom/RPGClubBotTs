@@ -430,7 +430,7 @@ async function resolveGameDbGame(interaction, title) {
             }).catch(() => { });
         }, 120000);
         safeReply(interaction, {
-            content: "Game not found in GameDB. Select the IGDB match to import (paged).",
+            content: "Game not found in GameDB. Select the IGDB match to import.",
             components,
             flags: MessageFlags.Ephemeral,
             __forceFollowUp: true,

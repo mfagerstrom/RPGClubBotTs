@@ -151,7 +151,7 @@ export class CurrentRoundCommand {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
         content: `Error fetching current round information: ${msg}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }

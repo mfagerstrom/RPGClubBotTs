@@ -183,7 +183,7 @@ export class MultiplayerInfoCommand {
       return;
     }
 
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     try {
       const user = await interaction.client.users.fetch(userId);

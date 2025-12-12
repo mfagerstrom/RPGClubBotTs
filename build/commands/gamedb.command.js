@@ -193,7 +193,7 @@ let GameDb = class GameDb {
                 await this.addGameToDatabase(sel, igdbId, { selectionMessage: sel.message });
             });
             await safeReply(interaction, {
-                content: `Found ${results.length} results for "${title}". Please select one (paged):`,
+                content: `Found ${results.length} results for "${title}". Please select one:`,
                 components,
                 files: attachment ? [attachment] : undefined,
                 __forceFollowUp: true,

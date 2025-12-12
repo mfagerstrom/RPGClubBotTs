@@ -511,7 +511,7 @@ async function resolveGameDbGame(interaction: CommandInteraction, title: string)
     }, 120000);
 
     safeReply(interaction, {
-      content: "Game not found in GameDB. Select the IGDB match to import (paged).",
+      content: "Game not found in GameDB. Select the IGDB match to import.",
       components,
               flags: MessageFlags.Ephemeral,
       __forceFollowUp: true,

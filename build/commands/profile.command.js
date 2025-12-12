@@ -477,7 +477,7 @@ let ProfileCommand = class ProfileCommand {
                     .setDescription(lines.join("\n")),
             ],
             components: rows,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
     async completionDelete(interaction) {
@@ -508,7 +508,7 @@ let ProfileCommand = class ProfileCommand {
                     .setDescription(lines.join("\n")),
             ],
             components: rows,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
     async handleCompletionAddSelect(interaction) {
@@ -1334,7 +1334,7 @@ let ProfileCommand = class ProfileCommand {
         await safeReply(interaction, {
             content: `No GameDB match; select an IGDB result to import for "${searchTerm}".`,
             components,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
     async processCompletionSelection(interaction, value, ctx) {

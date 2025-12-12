@@ -57,9 +57,9 @@ const YEAR_CHOICES = (() => {
 })();
 let NrGotmSearch = class NrGotmSearch {
     async help(interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         const response = buildNrGotmHelpResponse();
-        await safeReply(interaction, { ...response, ephemeral: true });
+        await safeReply(interaction, { ...response, flags: MessageFlags.Ephemeral });
     }
     async search(round, year, month, title, showInChat, interaction) {
         const ephemeral = !showInChat;
@@ -172,7 +172,7 @@ let NrGotmSearch = class NrGotmSearch {
         }
     }
     async nominate(title, reason, interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         const cleanedTitle = title?.trim();
         if (!cleanedTitle) {
             await safeReply(interaction, {
@@ -228,7 +228,7 @@ let NrGotmSearch = class NrGotmSearch {
         }
     }
     async deleteNomination(interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         try {
             const window = await getUpcomingNominationWindow();
             if (areNominationsClosed(window)) {
@@ -410,7 +410,7 @@ async function resolveNrGameDbGame(interaction, title) {
         const msg = err?.message ?? String(err);
         await safeReply(interaction, {
             content: `IGDB search failed: ${msg}. Tag @merph518 if you need help importing.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
         return null;
     }
@@ -418,7 +418,7 @@ async function resolveNrGameDbGame(interaction, title) {
         await safeReply(interaction, {
             content: `No GameDB entry found and IGDB search returned no results for "${searchTerm}". ` +
                 "Use /gamedb add to import first (tag @merph518 if you need help).",
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
         return null;
     }
@@ -463,10 +463,9 @@ async function resolveNrGameDbGame(interaction, title) {
             resolve(value);
         };
         void safeReply(interaction, {
-            content: "Game not found in GameDB. Select the IGDB match to import (paged).",
+            content: "Game not found in GameDB. Select the IGDB match to import.",
             components,
-            ephemeral: true,
-            __forceFollowUp: true,
+            flags: MessageFlags.Ephemeral, __forceFollowUp: true,
         });
     });
 }
@@ -478,7 +477,7 @@ async function importNrGameFromIgdb(interaction, igdbId) {
     if (!details) {
         await safeReply(interaction, {
             content: `Could not fetch IGDB details for id ${igdbId}.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
         return null;
     }

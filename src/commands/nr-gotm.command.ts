@@ -76,9 +76,9 @@ export class NrGotmSearch {
     name: "help",
   })
   async help(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
     const response = buildNrGotmHelpResponse();
-    await safeReply(interaction, { ...response, ephemeral: true });
+    await safeReply(interaction, { ...response, flags: MessageFlags.Ephemeral });
   }
 
   @Slash({
@@ -268,7 +268,7 @@ export class NrGotmSearch {
     reason: string | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const cleanedTitle = title?.trim();
     if (!cleanedTitle) {
@@ -351,7 +351,7 @@ export class NrGotmSearch {
     name: "delete-nomination",
   })
   async deleteNomination(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: true });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     try {
       const window = await getUpcomingNominationWindow();
@@ -485,8 +485,7 @@ async function resolveNrGameDbGame(interaction: CommandInteraction, title: strin
     const msg = err?.message ?? String(err);
     await safeReply(interaction, {
       content: `IGDB search failed: ${msg}. Tag @merph518 if you need help importing.`,
-      ephemeral: true,
-    });
+              flags: MessageFlags.Ephemeral,    });
     return null;
   }
 
@@ -495,8 +494,7 @@ async function resolveNrGameDbGame(interaction: CommandInteraction, title: strin
       content:
         `No GameDB entry found and IGDB search returned no results for "${searchTerm}". ` +
         "Use /gamedb add to import first (tag @merph518 if you need help).",
-      ephemeral: true,
-    });
+              flags: MessageFlags.Ephemeral,    });
     return null;
   }
 
@@ -550,10 +548,9 @@ async function resolveNrGameDbGame(interaction: CommandInteraction, title: strin
     };
 
     void safeReply(interaction, {
-      content: "Game not found in GameDB. Select the IGDB match to import (paged).",
+      content: "Game not found in GameDB. Select the IGDB match to import.",
       components,
-      ephemeral: true,
-      __forceFollowUp: true,
+              flags: MessageFlags.Ephemeral,      __forceFollowUp: true,
     });
   });
 }
@@ -569,8 +566,7 @@ async function importNrGameFromIgdb(
   if (!details) {
     await safeReply(interaction, {
       content: `Could not fetch IGDB details for id ${igdbId}.`,
-      ephemeral: true,
-    });
+              flags: MessageFlags.Ephemeral,    });
     return null;
   }
 

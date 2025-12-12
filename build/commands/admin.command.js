@@ -124,7 +124,7 @@ let Admin = class Admin {
         if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
             await safeReply(interaction, {
                 content: "Invalid date format. Please use a recognizable date such as `YYYY-MM-DD`.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -133,7 +133,7 @@ let Admin = class Admin {
             if (!current) {
                 await safeReply(interaction, {
                     content: "No voting round information is available. Create a round before setting the next vote date.",
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
@@ -146,7 +146,7 @@ let Admin = class Admin {
             const msg = err?.message ?? String(err);
             await safeReply(interaction, {
                 content: `Error updating next vote date: ${msg}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
     }
@@ -165,7 +165,7 @@ let Admin = class Admin {
             if (!nomination) {
                 await safeReply(interaction, {
                     content: `No GOTM nomination found for Round ${targetRound} by ${targetName}.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
@@ -181,7 +181,7 @@ let Admin = class Admin {
             const msg = err?.message ?? String(err);
             await safeReply(interaction, {
                 content: `Failed to delete nomination: ${msg}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
     }
@@ -189,7 +189,7 @@ let Admin = class Admin {
         await safeDeferReply(interaction);
         const okToUseCommand = await isAdmin(interaction);
         if (!okToUseCommand) {
-            await safeReply(interaction, { content: "Access denied. Command requires Administrator role.", ephemeral: true });
+            await safeReply(interaction, { content: "Access denied. Command requires Administrator role.", flags: MessageFlags.Ephemeral });
             return;
         }
         try {
@@ -201,7 +201,7 @@ let Admin = class Admin {
             if (!nomination) {
                 await safeReply(interaction, {
                     content: `No NR-GOTM nomination found for Round ${targetRound} by ${targetName}.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
                 return;
             }
@@ -217,7 +217,7 @@ let Admin = class Admin {
             const msg = err?.message ?? String(err);
             await safeReply(interaction, {
                 content: `Failed to delete nomination: ${msg}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
     }
@@ -232,7 +232,7 @@ let Admin = class Admin {
         if (!view) {
             await safeReply(interaction, {
                 content: `No GOTM nominations found for Round ${window.targetRound}.`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -240,11 +240,11 @@ let Admin = class Admin {
             content: `Select a GOTM nomination to delete for Round ${window.targetRound}.`,
             embeds: [view.embed],
             components: view.components,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
     async votingSetup(interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         const okToUseCommand = await isAdmin(interaction);
         if (!okToUseCommand)
             return;
@@ -304,13 +304,13 @@ let Admin = class Admin {
                 await adminChannel.send({ content: messageContent });
                 await safeReply(interaction, {
                     content: "Voting setup commands posted to #admin.",
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
             }
             else {
                 await safeReply(interaction, {
                     content: messageContent,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
             }
         }
@@ -318,12 +318,12 @@ let Admin = class Admin {
             const msg = err?.message ?? String(err);
             await safeReply(interaction, {
                 content: `Could not generate vote commands: ${msg}`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
     }
     async deleteNrGotmNomsPanel(interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         const okToUseCommand = await isAdmin(interaction);
         if (!okToUseCommand) {
             return;
@@ -333,7 +333,7 @@ let Admin = class Admin {
         if (!view) {
             await safeReply(interaction, {
                 content: `No NR-GOTM nominations found for Round ${window.targetRound}.`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -341,7 +341,7 @@ let Admin = class Admin {
             content: `Select an NR-GOTM nomination to delete for Round ${window.targetRound}.`,
             embeds: [view.embed],
             components: view.components,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
     async handleAdminNominationDeleteButton(interaction) {
@@ -825,7 +825,7 @@ let Admin = class Admin {
         }
     }
     async help(interaction) {
-        await safeDeferReply(interaction, { ephemeral: true });
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         const okToUseCommand = await isAdmin(interaction);
         if (!okToUseCommand) {
             return;
@@ -833,7 +833,7 @@ let Admin = class Admin {
         const response = buildAdminHelpResponse();
         await safeReply(interaction, {
             ...response,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
     async handleAdminHelpMenu(interaction) {

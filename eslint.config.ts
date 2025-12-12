@@ -79,6 +79,13 @@ export default [
     files: ["**/*.ts"],
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Property[key.name='ephemeral'][value.value=true]",
+          message: "Use 'flags: MessageFlags.Ephemeral' instead of 'ephemeral: true'.",
+        },
+      ],
     },
   },
 ];

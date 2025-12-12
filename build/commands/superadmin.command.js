@@ -94,7 +94,7 @@ async function showSuperAdminPresenceHistory(interaction) {
     await safeReply(interaction, {
         embeds: [embed],
         components,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
     });
     try {
         const msg = (await interaction.fetchReply());
@@ -182,7 +182,7 @@ let SuperAdmin = class SuperAdmin {
             return;
         const guild = interaction.guild;
         if (!guild) {
-            await safeReply(interaction, { content: "This command must be run in a guild.", ephemeral: true });
+            await safeReply(interaction, { content: "This command must be run in a guild.", flags: MessageFlags.Ephemeral });
             return;
         }
         const roleMap = {
@@ -192,7 +192,7 @@ let SuperAdmin = class SuperAdmin {
             member: process.env.MEMBER_ROLE_ID?.replace(/[<@&>]/g, "").trim() || null,
             newcomer: process.env.NEWCOMER_ROLE_ID?.replace(/[<@&>]/g, "").trim() || null,
         };
-        await safeReply(interaction, { content: "Fetching all guild members... this may take a moment.", ephemeral: true });
+        await safeReply(interaction, { content: "Fetching all guild members... this may take a moment.", flags: MessageFlags.Ephemeral });
         const members = await guild.members.fetch();
         const departedCount = await Member.markDepartedNotIn(Array.from(members.keys()));
         const pool = getOraclePool();
