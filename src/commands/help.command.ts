@@ -92,7 +92,7 @@ type ProfileHelpTopic = {
   notes?: string;
 };
 
-type GameDbHelpTopicId = "add" | "search" | "view";
+type GameDbHelpTopicId = "add" | "search" | "view" | "igdb_api_dump";
 
 type GameDbHelpTopic = {
   id: GameDbHelpTopicId;
@@ -739,6 +739,13 @@ const GAMEDB_HELP_TOPICS: GameDbHelpTopic[] = [
       "Returns a dropdown of IGDB matches; if only one result, it imports automatically. " +
       "Use igdb_id to skip search or bulk_titles (comma-separated) to import up to 5 at once. " +
       "Duplicate titles already in GameDB show an 'already imported' message.",
+  },
+  {
+    id: "igdb_api_dump",
+    label: "/gamedb igdb_api_dump",
+    summary: "Dump raw IGDB API data for a title (debug/dev).",
+    syntax: "Syntax: /gamedb igdb_api_dump title:<string>",
+    notes: "Fetches raw JSON from IGDB search endpoint and attaches it as a file.",
   },
   {
     id: "search",

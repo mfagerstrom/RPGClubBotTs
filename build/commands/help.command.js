@@ -525,6 +525,13 @@ const GAMEDB_HELP_TOPICS = [
             "Duplicate titles already in GameDB show an 'already imported' message.",
     },
     {
+        id: "igdb_api_dump",
+        label: "/gamedb igdb_api_dump",
+        summary: "Dump raw IGDB API data for a title (debug/dev).",
+        syntax: "Syntax: /gamedb igdb_api_dump title:<string>",
+        notes: "Fetches raw JSON from IGDB search endpoint and attaches it as a file.",
+    },
+    {
         id: "search",
         label: "/gamedb search",
         summary: "Search GameDB titles with paged dropdown navigation.",

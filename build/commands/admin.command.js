@@ -71,6 +71,20 @@ export const ADMIN_HELP_TOPICS = [
         notes: "Targets the upcoming nomination set. A public update is posted with the refreshed list.",
     },
     {
+        id: "delete-gotm-noms",
+        label: "/admin delete-gotm-noms",
+        summary: "Interactive panel to delete GOTM nominations.",
+        syntax: "Syntax: /admin delete-gotm-noms",
+        notes: "Shows buttons to select nominations for deletion.",
+    },
+    {
+        id: "delete-nr-gotm-noms",
+        label: "/admin delete-nr-gotm-noms",
+        summary: "Interactive panel to delete NR-GOTM nominations.",
+        syntax: "Syntax: /admin delete-nr-gotm-noms",
+        notes: "Shows buttons to select nominations for deletion.",
+    },
+    {
         id: "set-nextvote",
         label: "/admin set-nextvote",
         summary: "Set when the next GOTM/NR-GOTM vote will happen.",
@@ -367,6 +381,12 @@ let Admin = class Admin {
     }
     async nextRoundSetup(testModeInput, interaction) {
         await safeDeferReply(interaction);
+        if (interaction.channelId !== ADMIN_CHANNEL_ID) {
+            await safeReply(interaction, {
+                content: `This command can only be used in <#${ADMIN_CHANNEL_ID}>.`,
+            });
+            return;
+        }
         const okToUseCommand = await isAdmin(interaction);
         if (!okToUseCommand)
             return;
@@ -1153,10 +1173,58 @@ function calculateNextVoteDate() {
     return d;
 }
 const NOW_PLAYING_FORUM_ID = "1059875931356938240";
+const ADMIN_CHANNEL_ID = "428142514222923776";
 async function setupRoundGames(interaction, label, roundNumber, testMode) {
-    await safeReply(interaction, {
-        content: `**Setting up ${label} for Round ${roundNumber}.**`,
-    });
+    const kind = label.toLowerCase();
+    const nominations = await listNominationsForRound(kind, roundNumber);
+    if (nominations.length > 0) {
+        const lines = nominations.map((n, idx) => `${idx + 1}. **${n.gameTitle}** (by <@${n.userId}>)`);
+        await safeReply(interaction, {
+            content: `**${label} Nominations for Round ${roundNumber}:**\n${lines.join("\n")}`,
+        });
+        const choiceRaw = await promptUserForInput(interaction, `Enter the number(s) of the winning game(s) (comma-separated for ties, e.g. \`1\` or \`1,3\`).\nOr type \`manual\` to enter GameDB IDs manually.`);
+        if (!choiceRaw)
+            return null;
+        if (choiceRaw.trim().toLowerCase() !== "manual") {
+            const indices = choiceRaw
+                .split(",")
+                .map((s) => Number(s.trim()))
+                .filter((n) => Number.isInteger(n));
+            if (indices.length === 0) {
+                await safeReply(interaction, { content: "No valid numbers found. Switching to manual mode." });
+            }
+            else {
+                const selectedNoms = indices
+                    .map((i) => nominations[i - 1])
+                    .filter((n) => n !== undefined);
+                if (selectedNoms.length === 0) {
+                    await safeReply(interaction, {
+                        content: "Invalid selection indices. Switching to manual mode.",
+                    });
+                }
+                else {
+                    // Process selected nominations
+                    const games = [];
+                    for (const nom of selectedNoms) {
+                        await safeReply(interaction, {
+                            content: `Processing winner: **${nom.gameTitle}** (GameDB #${nom.gamedbGameId}).`,
+                        });
+                        const gameData = await processWinnerGame(interaction, nom.gamedbGameId, nom.gameTitle, testMode);
+                        if (!gameData)
+                            return null;
+                        games.push(gameData);
+                    }
+                    return games;
+                }
+            }
+        }
+    }
+    else {
+        await safeReply(interaction, {
+            content: `No nominations found for ${label} Round ${roundNumber}. Using manual mode.`,
+        });
+    }
+    // Manual Mode
     const countRaw = await promptUserForInput(interaction, `How many ${label} winners? (1-5). Type \`cancel\` to abort.`);
     if (!countRaw)
         return null;
@@ -1181,80 +1249,86 @@ async function setupRoundGames(interaction, label, roundNumber, testMode) {
             await safeReply(interaction, { content: "Game not found." });
             return null;
         }
-        // Check for thread
-        const threads = await getThreadsByGameId(gamedbId);
-        let threadId = threads.length ? threads[0] : null;
-        if (threadId) {
-            await safeReply(interaction, {
-                content: `Found existing thread <#${threadId}> linked to this game. Using it.`,
-            });
-        }
-        else {
-            // Prompt to create
-            const createResp = await promptUserForInput(interaction, `No linked thread found for "${game.title}". Create one in Now Playing? (yes/no/id)`);
-            if (!createResp)
-                return null;
-            if (createResp.toLowerCase() === "yes") {
-                if (testMode) {
-                    await safeReply(interaction, {
-                        content: `[Test Mode] Would create and link thread for "${game.title}".`,
-                    });
-                    threadId = "TEST-THREAD-ID";
-                }
-                else {
-                    try {
-                        const forum = (await interaction.guild?.channels.fetch(NOW_PLAYING_FORUM_ID));
-                        if (forum) {
-                            const thread = await forum.threads.create({
-                                name: testMode ? `Sidegame - ${game.title}` : game.title,
-                                message: { content: `Discussion thread for **${game.title}**.` },
-                            });
-                            threadId = thread.id;
-                            await setThreadGameLink(threadId, gamedbId);
-                            await safeReply(interaction, {
-                                content: `Created and linked thread <#${threadId}>.`,
-                            });
-                        }
-                        else {
-                            await safeReply(interaction, {
-                                content: "Could not find Now Playing forum channel.",
-                            });
-                        }
-                    }
-                    catch (e) {
-                        await safeReply(interaction, { content: `Failed to create thread: ${e.message}` });
-                    }
-                }
+        const gameData = await processWinnerGame(interaction, gamedbId, game.title, testMode);
+        if (!gameData)
+            return null;
+        games.push(gameData);
+    }
+    return games;
+}
+async function processWinnerGame(interaction, gamedbId, gameTitle, testMode) {
+    // Check for thread
+    const threads = await getThreadsByGameId(gamedbId);
+    let threadId = threads.length ? threads[0] : null;
+    if (threadId) {
+        await safeReply(interaction, {
+            content: `Found existing thread <#${threadId}> linked to this game. Using it.`,
+        });
+    }
+    else {
+        // Prompt to create
+        const createResp = await promptUserForInput(interaction, `No linked thread found for "${gameTitle}". Create one in Now Playing? (yes/no/id)`);
+        if (!createResp)
+            return null;
+        if (createResp.toLowerCase() === "yes") {
+            if (testMode) {
+                await safeReply(interaction, {
+                    content: `[Test Mode] Would create and link thread for "${gameTitle}".`,
+                });
+                threadId = "TEST-THREAD-ID";
             }
-            else if (createResp.toLowerCase() !== "no") {
-                // Assume ID
-                if (/^\d+$/.test(createResp)) {
-                    threadId = createResp;
-                    if (testMode) {
+            else {
+                try {
+                    const forum = (await interaction.guild?.channels.fetch(NOW_PLAYING_FORUM_ID));
+                    if (forum) {
+                        const thread = await forum.threads.create({
+                            name: testMode ? `Sidegame - ${gameTitle}` : gameTitle,
+                            message: { content: `Discussion thread for **${gameTitle}**.` },
+                        });
+                        threadId = thread.id;
+                        await setThreadGameLink(threadId, gamedbId);
                         await safeReply(interaction, {
-                            content: `[Test Mode] Would link thread <#${threadId}>.`,
+                            content: `Created and linked thread <#${threadId}>.`,
                         });
                     }
                     else {
-                        await setThreadGameLink(threadId, gamedbId);
-                        await safeReply(interaction, { content: `Linked thread <#${threadId}>.` });
+                        await safeReply(interaction, {
+                            content: "Could not find Now Playing forum channel.",
+                        });
                     }
+                }
+                catch (e) {
+                    await safeReply(interaction, { content: `Failed to create thread: ${e.message}` });
                 }
             }
         }
-        // Reddit
-        const redditRaw = await promptUserForInput(interaction, `Enter Reddit URL for ${label} #${n} (or 'none').`);
-        if (!redditRaw)
-            return null;
-        const redditUrl = redditRaw.toLowerCase() === "none" ? null : redditRaw;
-        games.push({
-            title: game.title,
-            threadId,
-            redditUrl,
-            gamedbGameId: gamedbId,
-        });
+        else if (createResp.toLowerCase() !== "no") {
+            // Assume ID
+            if (/^\d+$/.test(createResp)) {
+                threadId = createResp;
+                if (testMode) {
+                    await safeReply(interaction, {
+                        content: `[Test Mode] Would link thread <#${threadId}>.`,
+                    });
+                }
+                else {
+                    await setThreadGameLink(threadId, gamedbId);
+                    await safeReply(interaction, { content: `Linked thread <#${threadId}>.` });
+                }
+            }
+        }
     }
-    return games;
+    // Reddit
+    const redditRaw = await promptUserForInput(interaction, `Enter Reddit URL for "${gameTitle}" (or 'none').`);
+    if (!redditRaw)
+        return null;
+    const redditUrl = redditRaw.toLowerCase() === "none" ? null : redditRaw;
+    return {
+        title: gameTitle,
+        threadId,
+        redditUrl,
+        gamedbGameId: gamedbId,
+    };
 }
 export async function isAdmin(interaction) {
     const anyInteraction = interaction;

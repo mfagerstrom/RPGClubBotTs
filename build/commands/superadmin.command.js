@@ -15,7 +15,6 @@ import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionU
 import Gotm, { updateGotmGameFieldInDatabase, } from "../classes/Gotm.js";
 import NrGotm, { updateNrGotmGameFieldInDatabase, } from "../classes/NrGotm.js";
 import Member from "../classes/Member.js";
-import BotVotingInfo from "../classes/BotVotingInfo.js";
 import { getOraclePool } from "../db/oracleClient.js";
 import Game from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
@@ -46,6 +45,13 @@ export const SUPERADMIN_HELP_TOPICS = [
         summary: "Backfill thread-to-GameDB links using existing GOTM/NR-GOTM data.",
         syntax: "Syntax: /superadmin thread-game-link-backfill",
         notes: "Uses GOTM/NR-GOTM tables to set missing GameDB IDs on threads.",
+    },
+    {
+        id: "presence",
+        label: "/superadmin presence",
+        summary: "Set the bot's 'Now Playing' text (owner override).",
+        syntax: "Syntax: /superadmin presence [text:<string>]",
+        notes: "Leave text empty to browse/restore history.",
     },
 ];
 function buildSuperAdminHelpButtons(activeId) {
@@ -338,42 +344,6 @@ let SuperAdmin = class SuperAdmin {
                 `Marked departed: ${departedCount}.`,
             flags: MessageFlags.Ephemeral,
         });
-    }
-    async setNextVote(dateText, interaction) {
-        await safeDeferReply(interaction);
-        const okToUseCommand = await isSuperAdmin(interaction);
-        if (!okToUseCommand) {
-            return;
-        }
-        const parsed = new Date(dateText);
-        if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
-            await safeReply(interaction, {
-                content: "Invalid date format. Please use a recognizable date such as `YYYY-MM-DD`.",
-                flags: MessageFlags.Ephemeral,
-            });
-            return;
-        }
-        try {
-            const current = await BotVotingInfo.getCurrentRound();
-            if (!current) {
-                await safeReply(interaction, {
-                    content: "No voting round information is available. Create a round before setting the next vote date.",
-                    flags: MessageFlags.Ephemeral,
-                });
-                return;
-            }
-            await BotVotingInfo.updateNextVoteAt(current.roundNumber, parsed);
-            await safeReply(interaction, {
-                content: `Next vote date updated to ${parsed.toLocaleDateString()}. `,
-            });
-        }
-        catch (err) {
-            const msg = err?.message ?? String(err);
-            await safeReply(interaction, {
-                content: `Error updating next vote date: ${msg}`,
-                flags: MessageFlags.Ephemeral,
-            });
-        }
     }
     async help(interaction) {
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
@@ -784,18 +754,6 @@ __decorate([
 __decorate([
     Slash({ description: "Scan guild members and upsert into RPG_CLUB_USERS", name: "memberscan" })
 ], SuperAdmin.prototype, "memberScan", null);
-__decorate([
-    Slash({
-        description: "Votes are typically held the last Friday of the month",
-        name: "set-nextvote",
-    }),
-    __param(0, SlashOption({
-        description: "Next vote date. Votes are typically held the last Friday of the month.",
-        name: "date",
-        required: true,
-        type: ApplicationCommandOptionType.String,
-    }))
-], SuperAdmin.prototype, "setNextVote", null);
 __decorate([
     Slash({ description: "Show help for server owner commands", name: "help" })
 ], SuperAdmin.prototype, "help", null);

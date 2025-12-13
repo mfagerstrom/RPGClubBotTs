@@ -32,7 +32,6 @@ import NrGotm, {
   updateNrGotmGameFieldInDatabase,
 } from "../classes/NrGotm.js";
 import Member, { type IMemberRecord } from "../classes/Member.js";
-import BotVotingInfo from "../classes/BotVotingInfo.js";
 import { getOraclePool } from "../db/oracleClient.js";
 import Game, { type IGame } from "../classes/Game.js";
 import { igdbService, type IGDBGame, type IGDBGameDetails } from "../services/IgdbService.js";
@@ -48,7 +47,8 @@ import {
 type SuperAdminHelpTopicId =
   | "memberscan"
   | "gamedb-backfill"
-  | "thread-game-link-backfill";
+  | "thread-game-link-backfill"
+  | "presence";
 
 type SuperAdminHelpTopic = {
   id: SuperAdminHelpTopicId;
@@ -92,6 +92,13 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
     summary: "Backfill thread-to-GameDB links using existing GOTM/NR-GOTM data.",
     syntax: "Syntax: /superadmin thread-game-link-backfill",
     notes: "Uses GOTM/NR-GOTM tables to set missing GameDB IDs on threads.",
+  },
+  {
+    id: "presence",
+    label: "/superadmin presence",
+    summary: "Set the bot's 'Now Playing' text (owner override).",
+    syntax: "Syntax: /superadmin presence [text:<string>]",
+    notes: "Leave text empty to browse/restore history.",
   },
 ];
 
@@ -441,63 +448,7 @@ export class SuperAdmin {
     });
   }
 
-  @Slash({
-    description: "Votes are typically held the last Friday of the month",
-    name: "set-nextvote",
-  })
-  async setNextVote(
-    @SlashOption({
-      description:
-        "Next vote date. Votes are typically held the last Friday of the month.",
-      name: "date",
-      required: true,
-      type: ApplicationCommandOptionType.String,
-    })
-    dateText: string,
-    interaction: CommandInteraction,
-  ): Promise<void> {
-    await safeDeferReply(interaction);
 
-    const okToUseCommand: boolean = await isSuperAdmin(interaction);
-    if (!okToUseCommand) {
-      return;
-    }
-
-    const parsed = new Date(dateText);
-    if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
-      await safeReply(interaction, {
-        content:
-          "Invalid date format. Please use a recognizable date such as `YYYY-MM-DD`.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    try {
-      const current = await BotVotingInfo.getCurrentRound();
-      if (!current) {
-        await safeReply(interaction, {
-          content:
-            "No voting round information is available. Create a round before setting the next vote date.",
-          flags: MessageFlags.Ephemeral,
-        });
-        return;
-      }
-
-      await BotVotingInfo.updateNextVoteAt(current.roundNumber, parsed);
-
-      await safeReply(interaction, {
-        content:
-          `Next vote date updated to ${parsed.toLocaleDateString()}. `,
-      });
-    } catch (err: any) {
-      const msg = err?.message ?? String(err);
-      await safeReply(interaction, {
-        content: `Error updating next vote date: ${msg}`,
-        flags: MessageFlags.Ephemeral,
-      });
-    }
-  }
 
   @Slash({ description: "Show help for server owner commands", name: "help" })
   async help(interaction: CommandInteraction): Promise<void> {
