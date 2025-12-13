@@ -841,7 +841,9 @@ let NowPlayingCompletionCommands = class NowPlayingCompletionCommands {
         const total = await Member.countCompletions(userId, year);
         if (total === 0) {
             await safeReply(interaction, {
-                content: year ? `You have no recorded completions for ${year}.` : "You have no recorded completions yet.",
+                content: year
+                    ? `You have no recorded completions for ${year}.`
+                    : "You have no recorded completions yet.",
                 flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
@@ -849,13 +851,14 @@ let NowPlayingCompletionCommands = class NowPlayingCompletionCommands {
         const totalPages = Math.max(1, Math.ceil(total / COMPLETION_PAGE_SIZE));
         const safePage = Math.min(Math.max(page, 0), totalPages - 1);
         const offset = safePage * COMPLETION_PAGE_SIZE;
-        const completions = await Member.getCompletions({
+        // Fetch all (up to 1000) to calculate year-based numbering correctly across pages
+        const allCompletions = await Member.getCompletions({
             userId,
-            limit: COMPLETION_PAGE_SIZE,
-            offset,
+            limit: 1000,
+            offset: 0,
             year,
         });
-        if (!completions.length) {
+        if (!allCompletions.length) {
             if (safePage > 0) {
                 await this.renderCompletionPage(interaction, userId, 0, year, ephemeral);
                 return;
@@ -866,14 +869,28 @@ let NowPlayingCompletionCommands = class NowPlayingCompletionCommands {
             });
             return;
         }
-        const maxIndexLabelLength = `${offset + completions.length}.`.length;
+        // Calculate year-based index for every completion
+        const yearCounts = {};
+        const yearIndices = new Map(); // completionId -> sequential index
+        for (const c of allCompletions) {
+            const yr = c.completedAt ? String(c.completedAt.getFullYear()) : "Unknown";
+            yearCounts[yr] = (yearCounts[yr] ?? 0) + 1;
+            yearIndices.set(c.completionId, yearCounts[yr]);
+        }
+        // Slice for the requested page
+        const pageCompletions = allCompletions.slice(offset, offset + COMPLETION_PAGE_SIZE);
+        // If fetch limit truncated results and we are on a high page, we might be missing data.
+        // But 1000 is high enough for now.
         const dateWidth = 10; // MM/DD/YYYY
-        const counts = {};
-        const grouped = completions.reduce((acc, c) => {
+        // Determine max index width for padding (based on max count in any year on this page? Or global max?)
+        // Using 3 chars is safe for < 1000. Or calculate dynamically from yearCounts.
+        // Let's use dynamic.
+        const maxIndexLabelLength = String(Math.max(...pageCompletions.map((c) => yearIndices.get(c.completionId) ?? 0))).length + 1; // +1 for dot
+        const grouped = pageCompletions.reduce((acc, c) => {
             const yr = c.completedAt ? String(c.completedAt.getFullYear()) : "Unknown";
             acc[yr] = acc[yr] || [];
-            counts[yr] = (counts[yr] ?? 0) + 1;
-            const idxLabelRaw = `${counts[yr]}.`;
+            const yearIdx = yearIndices.get(c.completionId);
+            const idxLabelRaw = `${yearIdx}.`;
             const idxLabel = idxLabelRaw.padStart(maxIndexLabelLength, " ");
             const formattedDate = formatTableDate(c.completedAt);
             const dateLabel = formattedDate.padStart(dateWidth, " ");
@@ -888,9 +905,7 @@ let NowPlayingCompletionCommands = class NowPlayingCompletionCommands {
             acc[yr].push(line);
             return acc;
         }, {});
-        const authorName = interaction.user?.displayName ??
-            interaction.user?.username ??
-            "User";
+        const authorName = interaction.user?.displayName ?? interaction.user?.username ?? "User";
         const authorIcon = interaction.user?.displayAvatarURL?.({
             size: 64,
             forceStatic: false,
@@ -950,12 +965,8 @@ let NowPlayingCompletionCommands = class NowPlayingCompletionCommands {
             .setLabel("Next")
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(safePage >= totalPages - 1);
-        const components = totalPages > 1
-            ? [new ActionRowBuilder().addComponents(prev, next)]
-            : [];
-        const footerLines = [
-            "M = Main Story • M+S = Main Story + Side Content • C = Completionist",
-        ];
+        const components = totalPages > 1 ? [new ActionRowBuilder().addComponents(prev, next)] : [];
+        const footerLines = ["M = Main Story • M+S = Main Story + Side Content • C = Completionist"];
         if (totalPages > 1) {
             footerLines.push(`${total} results. Page ${safePage + 1} of ${totalPages}.`);
         }

@@ -78,11 +78,7 @@ type RemindMeHelpTopic = {
 type ProfileHelpTopicId =
   | "view"
   | "edit"
-  | "search"
-  | "completion-add"
-  | "completion-list"
-  | "completion-edit"
-  | "completion-delete";
+  | "search";
 
 type ProfileHelpTopic = {
   id: ProfileHelpTopicId;
@@ -659,40 +655,16 @@ const PROFILE_HELP_TOPICS: ProfileHelpTopic[] = [
     notes:
       "Filters default to partial matches; date/times use ISO formats; limit max 100; departed members are excluded unless include-departed-members is true.",
   },
-  {
-    id: "completion-add",
-    label: "/profile completion-add",
-    summary: "Log that you completed a game (removes it from Now Playing if present).",
-    syntax:
-      "Syntax: /profile completion-add [game_id:<int> | query:<string> | from_now_playing:<bool>] completion_type:<choice> [completion_date:<date>] [final_playtime_hours:<number>]",
-    notes:
-      "Completion type choices: Main Story, Main Story + Side Content, Completionist. Completion date defaults to today; playtime is optional (e.g., 42.5). Uses GameDB lookup/import if you provide a query.",
-  },
-  {
-    id: "completion-list",
-    label: "/profile completion-list",
-    summary: "List your recent completions.",
-    syntax: "Syntax: /profile completion-list [limit:<1-25>]",
-    notes: "Shows up to 25 of your completions, newest first.",
-  },
-  {
-    id: "completion-edit",
-    label: "/profile completion-edit",
-    summary: "Edit one of your completion records.",
-    syntax:
-      "Syntax: /profile completion-edit completion_id:<int> [completion_type:<choice>] [completion_date:<date>] [final_playtime_hours:<number>]",
-    notes: "You can only edit your own completions. Completion date accepts formats like 2025-12-11; playtime accepts decimals.",
-  },
-  {
-    id: "completion-delete",
-    label: "/profile completion-delete",
-    summary: "Delete one of your completion records.",
-    syntax: "Syntax: /profile completion-delete completion_id:<int>",
-    notes: "You can only delete your own completions.",
-  },
 ];
 
-type NowPlayingHelpTopicId = "list" | "add" | "remove";
+type NowPlayingHelpTopicId =
+  | "list"
+  | "add"
+  | "remove"
+  | "completion-add"
+  | "completion-list"
+  | "completion-edit"
+  | "completion-delete";
 
 type NowPlayingHelpTopic = {
   id: NowPlayingHelpTopicId;
@@ -726,6 +698,36 @@ const NOW_PLAYING_HELP_TOPICS: NowPlayingHelpTopic[] = [
     syntax: "Syntax: /now-playing remove",
     notes:
       "Shows a dropdown of your current list to pick what to remove.",
+  },
+  {
+    id: "completion-add",
+    label: "/now-playing completion add",
+    summary: "Log that you completed a game (removes it from Now Playing if present).",
+    syntax:
+      "Syntax: /now-playing completion add [game_id:<int> | query:<string> | from_now_playing:<bool>] completion_type:<choice> [completion_date:<date>] [final_playtime_hours:<number>]",
+    notes:
+      "Completion type choices: Main Story, Main Story + Side Content, Completionist. Completion date defaults to today; playtime is optional (e.g., 42.5). Uses GameDB lookup/import if you provide a query.",
+  },
+  {
+    id: "completion-list",
+    label: "/now-playing completion list",
+    summary: "List your recent completions.",
+    syntax: "Syntax: /now-playing completion list [year:<int>] [showinchat:<bool>]",
+    notes: "Shows your completions, paging through them.",
+  },
+  {
+    id: "completion-edit",
+    label: "/now-playing completion edit",
+    summary: "Edit one of your completion records.",
+    syntax: "Syntax: /now-playing completion edit",
+    notes: "Interactive menu to pick a completion and field to update.",
+  },
+  {
+    id: "completion-delete",
+    label: "/now-playing completion delete",
+    summary: "Delete one of your completion records.",
+    syntax: "Syntax: /now-playing completion delete",
+    notes: "Interactive menu to pick a completion to delete.",
   },
 ];
 
