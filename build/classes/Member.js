@@ -247,7 +247,7 @@ export default class Member {
           FROM USER_GAME_COMPLETIONS c
           JOIN GAMEDB_GAMES g ON g.GAME_ID = c.GAMEDB_GAME_ID
          WHERE ${clauses.join(" AND ")}
-         ORDER BY c.COMPLETED_AT ASC NULLS LAST, c.CREATED_AT ASC, c.COMPLETION_ID ASC
+         ORDER BY c.COMPLETED_AT DESC NULLS LAST, c.CREATED_AT DESC, c.COMPLETION_ID DESC
          OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
         `, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
             return (res.rows ?? []).map((row) => ({

@@ -1,13 +1,11 @@
-- Create admin function for creating a new round and doing everything needed so that it's not a manual process.
+- Adding a completion for a new game that requires an import from IGDB shows failed interaction, but it actually works.
+- Editing completion data is completly broken
+- /admin newround-setup needs some work, see feedback in #admin
 - Normalize all embed styles / colors / etc
-- Normalize behavior between /gamedb add, search and view
-- Finish developing now-playing commands, the embeds could use some work, especially removing a now playing entry
-- Move /profile nowplaying commands to /nowplaying
-- Add paging to results from IGDB during game import
+- Finish developing now-playing commands, the embeds could use some work
 - Add parameters to /gamedb add to narrow down to certain categories
 - Add note(s) to now playing entries, that would only be visible using /now-playing, not in profile
-- Update <#927727584148611102>, also incorporate that content into the bot's help menu
-- Address this: ``[ERROR] (node:23592) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.``
+- Update help channel content, also incorporate that content into the bot's help menu
 - Do a UI Pass over all embeds and try to make things look nicer, incorporate thumbnail images and/or emoji.  MP info emoji for platforms
 - Linking of different versions of same game in game view (remaster, remake, port, etc)
 - /now-playing create-thread, tag it, auto-source image and link to game all in one go
@@ -15,7 +13,6 @@
 - Add "Add to Now Playing" and "Add Completion" buttons below gamedb view embed
 - Implement voting functionality, replacing Subo and canceling my subscription to it
 - /superadmin todo functionality with sub commands to edit rank
-- model help after /statbot's help
 - Game backlog functionality
 - Game collection functionality
 - Bot release notes
