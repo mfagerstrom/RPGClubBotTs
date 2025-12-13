@@ -1092,6 +1092,19 @@ export class NowPlayingCompletionCommands {
       year,
     });
 
+    // Sort: Years Descending, then Date Ascending within year
+    allCompletions.sort((a, b) => {
+      const dateA = a.completedAt ? a.completedAt.getTime() : 0;
+      const dateB = b.completedAt ? b.completedAt.getTime() : 0;
+      const yearA = a.completedAt ? a.completedAt.getFullYear() : 0;
+      const yearB = b.completedAt ? b.completedAt.getFullYear() : 0;
+
+      if (yearA !== yearB) {
+        return yearB - yearA;
+      }
+      return dateA - dateB;
+    });
+
     if (!allCompletions.length) {
       if (safePage > 0) {
         await this.renderCompletionPage(interaction, userId, 0, year, ephemeral);
