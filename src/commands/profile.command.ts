@@ -5,14 +5,10 @@ import {
   EmbedBuilder,
   type User,
   MessageFlags,
-  type Message,
   PermissionsBitField,
   ActionRowBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
-  ButtonBuilder,
-  ButtonStyle,
-  ButtonInteraction,
 } from "discord.js";
 import { readFileSync } from "fs";
 import path from "path";
@@ -22,20 +18,12 @@ import {
   Slash,
   SlashGroup,
   SlashOption,
-  ButtonComponent,
-  SlashChoice,
 } from "discordx";
 import axios from "axios";
 import Member, {
   type IMemberRecord,
   type IMemberSearchFilters,
 } from "../classes/Member.js";
-import Game from "../classes/Game.js";
-import { igdbService } from "../services/IgdbService.js";
-import {
-  createIgdbSession,
-  type IgdbSelectOption,
-} from "../services/IgdbSelectService.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 
 
