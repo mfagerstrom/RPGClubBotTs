@@ -1,6 +1,9 @@
 import {
   ActionRowBuilder,
   ApplicationCommandOptionType,
+  ButtonBuilder,
+  ButtonStyle,
+  ComponentType,
   EmbedBuilder,
   MessageFlags,
   PermissionsBitField,
@@ -223,7 +226,8 @@ export class Admin {
     dateText: string,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction);
+    // Run publicly; avoid default ephemeral deferral for admin commands
+    await safeDeferReply(interaction, { ephemeral: false });
 
     const okToUseCommand: boolean = await isAdmin(interaction);
     if (!okToUseCommand) {
@@ -571,7 +575,7 @@ export class Admin {
     testModeInput: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction);
+    await safeDeferReply(interaction, { ephemeral: false });
 
     if (interaction.channelId !== ADMIN_CHANNEL_ID) {
       await safeReply(interaction, {
@@ -594,7 +598,8 @@ export class Admin {
       embed.setFooter({ text: "TEST MODE ENABLED" });
     }
 
-    const message = await safeReply(interaction, { embeds: [embed] });
+    await safeReply(interaction, { embeds: [embed] });
+    const message = await interaction.fetchReply();
     let logHistory = "";
 
     const updateEmbed = async (log?: string) => {
@@ -606,7 +611,7 @@ export class Admin {
       }
       embed.setDescription(logHistory || "Processing...");
       try {
-        await message.edit({ embeds: [embed] });
+        await interaction.editReply({ embeds: [embed] });
       } catch {
         // ignore
       }
@@ -778,16 +783,17 @@ export class Admin {
           .setStyle(ButtonStyle.Danger),
       );
 
-      await message.edit({ components: [row] });
+      await interaction.editReply({ components: [row] });
 
       let decision = "cancel";
       try {
         const collected = await message.awaitMessageComponent({
-          filter: (i) => i.user.id === interaction.user.id,
+          componentType: ComponentType.Button,
+          filter: (i: ButtonInteraction) => i.user.id === interaction.user.id,
           time: 300_000,
         });
         await collected.deferUpdate();
-        await message.edit({ components: [] });
+        await interaction.editReply({ components: [] });
 
         if (collected.customId === "wiz-commit") decision = "commit";
         else if (collected.customId === "wiz-edit") decision = "edit";

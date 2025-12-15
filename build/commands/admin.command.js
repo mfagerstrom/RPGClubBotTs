@@ -7,7 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ActionRowBuilder, ApplicationCommandOptionType, EmbedBuilder, MessageFlags, PermissionsBitField, StringSelectMenuBuilder, } from "discord.js";
+import { ActionRowBuilder, ApplicationCommandOptionType, ButtonBuilder, ButtonStyle, ComponentType, EmbedBuilder, MessageFlags, PermissionsBitField, StringSelectMenuBuilder, } from "discord.js";
 import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption } from "discordx";
 import { DateTime } from "luxon";
 import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
@@ -137,7 +137,8 @@ export function buildAdminHelpResponse(activeTopicId) {
 }
 let Admin = class Admin {
     async setNextVote(dateText, interaction) {
-        await safeDeferReply(interaction);
+        // Run publicly; avoid default ephemeral deferral for admin commands
+        await safeDeferReply(interaction, { ephemeral: false });
         const okToUseCommand = await isAdmin(interaction);
         if (!okToUseCommand) {
             return;
@@ -380,7 +381,7 @@ let Admin = class Admin {
         await handleNominationDeletionButton(interaction, kind, round, userId, "admin");
     }
     async nextRoundSetup(testModeInput, interaction) {
-        await safeDeferReply(interaction);
+        await safeDeferReply(interaction, { ephemeral: false });
         if (interaction.channelId !== ADMIN_CHANNEL_ID) {
             await safeReply(interaction, {
                 content: `This command can only be used in <#${ADMIN_CHANNEL_ID}>.`,
@@ -398,7 +399,8 @@ let Admin = class Admin {
         if (testMode) {
             embed.setFooter({ text: "TEST MODE ENABLED" });
         }
-        const message = await safeReply(interaction, { embeds: [embed] });
+        await safeReply(interaction, { embeds: [embed] });
+        const message = await interaction.fetchReply();
         let logHistory = "";
         const updateEmbed = async (log) => {
             if (log) {
@@ -409,7 +411,7 @@ let Admin = class Admin {
             }
             embed.setDescription(logHistory || "Processing...");
             try {
-                await message.edit({ embeds: [embed] });
+                await interaction.editReply({ embeds: [embed] });
             }
             catch {
                 // ignore
@@ -545,15 +547,16 @@ let Admin = class Admin {
                 .setCustomId("wiz-cancel")
                 .setLabel("Cancel")
                 .setStyle(ButtonStyle.Danger));
-            await message.edit({ components: [row] });
+            await interaction.editReply({ components: [row] });
             let decision = "cancel";
             try {
                 const collected = await message.awaitMessageComponent({
+                    componentType: ComponentType.Button,
                     filter: (i) => i.user.id === interaction.user.id,
                     time: 300_000,
                 });
                 await collected.deferUpdate();
-                await message.edit({ components: [] });
+                await interaction.editReply({ components: [] });
                 if (collected.customId === "wiz-commit")
                     decision = "commit";
                 else if (collected.customId === "wiz-edit")
