@@ -15,9 +15,10 @@ import Game from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
 import { createIgdbSession, } from "../services/IgdbSelectService.js";
 import { COMPLETION_TYPES, COMPLETION_PAGE_SIZE, formatDiscordTimestamp, formatPlaytimeHours, parseCompletionDateInput, formatTableDate, buildGameDbThumbAttachment, applyGameDbThumbnail, } from "./profile.command.js";
+const ANNOUNCEMENT_CHANNEL_ID = "360819470836695042";
 const completionAddSessions = new Map();
 let GameCompletionCommands = class GameCompletionCommands {
-    async completionAdd(completionType, gameId, query, completionDate, finalPlaytimeHours, fromNowPlaying, interaction) {
+    async completionAdd(completionType, gameId, query, completionDate, finalPlaytimeHours, fromNowPlaying, announce, interaction) {
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         if (!COMPLETION_TYPES.includes(completionType)) {
             await safeReply(interaction, {
@@ -62,6 +63,7 @@ let GameCompletionCommands = class GameCompletionCommands {
                 completedAt,
                 finalPlaytimeHours: playtime,
                 source: "existing",
+                announce,
             });
             const select = new StringSelectMenuBuilder()
                 .setCustomId(`completion-add-select:${sessionId}`)
@@ -87,7 +89,7 @@ let GameCompletionCommands = class GameCompletionCommands {
                 });
                 return;
             }
-            await this.saveCompletion(interaction, userId, game.id, completionType, completedAt, playtime, game.title);
+            await this.saveCompletion(interaction, userId, game.id, completionType, completedAt, playtime, game.title, announce);
             return;
         }
         const searchTerm = (query ?? "").trim();
@@ -105,6 +107,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             finalPlaytimeHours: playtime,
             source: "existing",
             query: searchTerm,
+            announce,
         });
     }
     async completionList(showAll, year, member, showInChat, interaction) {
@@ -736,7 +739,7 @@ let GameCompletionCommands = class GameCompletionCommands {
                 components: [],
             }).catch(() => { });
             const imported = await this.importGameFromIgdb(gameId);
-            await this.saveCompletion(sel, ctx.userId, imported.gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, imported.title);
+            await this.saveCompletion(sel, ctx.userId, imported.gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, imported.title, ctx.announce);
         });
         const content = `No GameDB match; select an IGDB result to import for "${searchTerm}".`;
         if (interaction.isMessageComponent()) {
@@ -818,7 +821,7 @@ let GameCompletionCommands = class GameCompletionCommands {
                 });
                 return;
             }
-            await this.saveCompletion(interaction, ctx.userId, gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, gameTitle ?? undefined);
+            await this.saveCompletion(interaction, ctx.userId, gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, gameTitle ?? undefined, ctx.announce);
         }
         catch (err) {
             const msg = err?.message ?? String(err);
@@ -841,7 +844,7 @@ let GameCompletionCommands = class GameCompletionCommands {
         await Game.saveFullGameMetadata(newGame.id, details);
         return { gameId: newGame.id, title: details.name };
     }
-    async saveCompletion(interaction, userId, gameId, completionType, completedAt, finalPlaytimeHours, gameTitle) {
+    async saveCompletion(interaction, userId, gameId, completionType, completedAt, finalPlaytimeHours, gameTitle, announce) {
         if (interaction.user.id !== userId) {
             await interaction.followUp({
                 content: "You can only log completions for yourself.",
@@ -857,10 +860,8 @@ let GameCompletionCommands = class GameCompletionCommands {
             });
             return;
         }
-        let completionId;
         try {
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            completionId = await Member.addCompletion({
+            await Member.addCompletion({
                 userId,
                 gameId,
                 completionType,
@@ -888,6 +889,37 @@ let GameCompletionCommands = class GameCompletionCommands {
             content: `Logged completion for **${gameTitle ?? game.title}** (${details}).`,
             flags: MessageFlags.Ephemeral,
         });
+        if (announce) {
+            try {
+                const channel = await interaction.client.channels.fetch(ANNOUNCEMENT_CHANNEL_ID);
+                if (channel && "send" in channel) {
+                    const user = interaction.user;
+                    const completions = await Game.getGameCompletions(gameId);
+                    const isFirst = completions.length === 1;
+                    const dateStr = completedAt ? formatDiscordTimestamp(completedAt) : "No date";
+                    const hoursStr = playtimeText ? ` - ${playtimeText}` : "";
+                    const desc = `<@${user.id}> has added a game completion: **${game.title}** - ${completionType} - ${dateStr}${hoursStr}`;
+                    const embed = new EmbedBuilder()
+                        .setAuthor({
+                        name: user.displayName ?? user.username,
+                        iconURL: user.displayAvatarURL(),
+                    })
+                        .setDescription(desc)
+                        .setColor(0x00ff00);
+                    applyGameDbThumbnail(embed);
+                    if (isFirst) {
+                        embed.addFields({
+                            name: "First Completion!",
+                            value: "This is the first recorded completion for this game in the club!",
+                        });
+                    }
+                    await channel.send({ embeds: [embed], files: [buildGameDbThumbAttachment()] });
+                }
+            }
+            catch (err) {
+                console.error("Failed to announce completion:", err);
+            }
+        }
     }
 };
 __decorate([
@@ -929,6 +961,12 @@ __decorate([
     __param(5, SlashOption({
         description: "Pick a game from your Now Playing list",
         name: "from_now_playing",
+        required: false,
+        type: ApplicationCommandOptionType.Boolean,
+    })),
+    __param(6, SlashOption({
+        description: "Announce this completion in the completions channel?",
+        name: "announce",
         required: false,
         type: ApplicationCommandOptionType.Boolean,
     }))

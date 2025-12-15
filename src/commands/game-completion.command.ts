@@ -1267,7 +1267,7 @@ export class GameCompletionCommands {
           const completions = await Game.getGameCompletions(gameId);
           const isFirst = completions.length === 1;
 
-          const dateStr = completedAt ? formatDiscordTimestamp(completedAt) : "No date";
+          const dateStr = completedAt ? formatTableDate(completedAt) : "No date";
           const hoursStr = playtimeText ? ` - ${playtimeText}` : "";
           const desc = `<@${user.id}> has added a game completion: **${game.title}** - ${completionType} - ${dateStr}${hoursStr}`;
 
