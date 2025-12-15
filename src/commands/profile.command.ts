@@ -101,11 +101,14 @@ export function formatPlaytimeHours(val: number | null | undefined): string | nu
 
 function formatCompletionLine(
   record: Awaited<ReturnType<typeof Member.getCompletions>>[number],
+  guildId?: string,
 ): string {
-  const date = record.completedAt ? formatDiscordTimestamp(record.completedAt) : "Date not set";
   const playtime = formatPlaytimeHours(record.finalPlaytimeHours);
-  const extras = [date, playtime].filter(Boolean).join(" — ");
-  return `${record.title} — ${record.completionType}${extras ? ` — ${extras}` : ""}`;
+  const title =
+    record.threadId && guildId
+      ? `[${record.title}](https://discord.com/channels/${guildId}/${record.threadId})`
+      : record.title;
+  return `${title}${playtime ? ` — ${playtime}` : ""}`;
 }
 
 export function formatTableDate(date: Date | null): string {
@@ -244,7 +247,7 @@ function buildProfileFields(
   }
 
   if (completions.length) {
-    const lines = completions.map((c) => formatCompletionLine(c));
+    const lines = completions.map((c) => formatCompletionLine(c, guildId));
     fields.push({
       label: "Completed (recent)",
       value: lines.join("\n"),
