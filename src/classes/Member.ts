@@ -470,7 +470,7 @@ export default class Member {
   }): Promise<ICompletionRecord[]> {
     const { userId, limit, offset = 0, year = null } = params;
     const connection = await getOraclePool().getConnection();
-    const safeLimit = Math.min(Math.max(limit, 1), 50);
+    const safeLimit = Math.min(Math.max(limit, 1), 1000);
     const safeOffset = Math.max(offset, 0);
 
     const clauses: string[] = ["c.USER_ID = :userId"];
