@@ -391,100 +391,199 @@ let Admin = class Admin {
         if (!okToUseCommand)
             return;
         const testMode = !!testModeInput;
+        const embed = new EmbedBuilder()
+            .setTitle("Round Setup Wizard")
+            .setColor(0x0099ff)
+            .setDescription("Initializing...");
         if (testMode) {
-            await safeReply(interaction, {
-                content: "Running in **TEST MODE**. No changes will be committed.",
-            });
+            embed.setFooter({ text: "TEST MODE ENABLED" });
         }
-        let allEntries;
-        try {
-            allEntries = Gotm.all();
-        }
-        catch (err) {
-            await safeReply(interaction, { content: `Error loading data: ${err.message}` });
-            return;
-        }
-        const nextRound = allEntries.length > 0 ? Math.max(...allEntries.map((e) => e.round)) + 1 : 1;
-        await safeReply(interaction, {
-            content: `**Starting setup for Round ${nextRound}.**`,
-        });
-        // 1. Month/Year
-        const monthYearRaw = await promptUserForInput(interaction, `Enter the label for Round ${nextRound} (e.g. "April 2024").`);
-        if (!monthYearRaw)
-            return;
-        const monthYear = monthYearRaw.trim();
-        // 2. GOTM
-        const gotmGames = await setupRoundGames(interaction, "GOTM", nextRound, testMode);
-        if (!gotmGames) {
-            await safeReply(interaction, { content: "Aborted during GOTM setup." });
-            return;
-        }
-        // 3. NR-GOTM
-        const nrGotmGames = await setupRoundGames(interaction, "NR-GOTM", nextRound, testMode);
-        if (!nrGotmGames) {
-            await safeReply(interaction, { content: "Aborted during NR-GOTM setup." });
-            return;
-        }
-        // 4. Confirm
-        const confirm = await promptUserForInput(interaction, `Ready to commit Round ${nextRound} (${monthYear})?${testMode ? " (TEST MODE)" : ""}\n` +
-            `GOTM: ${gotmGames.map((g) => g.title).join(", ")}\n` +
-            `NR-GOTM: ${nrGotmGames.map((g) => g.title).join(", ")}\n` +
-            `Type 'yes' to proceed.`);
-        if (confirm?.toLowerCase() !== "yes") {
-            await safeReply(interaction, { content: "Cancelled." });
-            return;
-        }
-        // 5. Commit
-        if (testMode) {
-            await safeReply(interaction, {
-                content: `[Test Mode] Would commit rounds to DB and set round info for Round ${nextRound}.`,
-            });
-        }
-        else {
-            try {
-                await insertGotmRoundInDatabase(nextRound, monthYear, gotmGames);
-                Gotm.addRound(nextRound, monthYear, gotmGames);
-                await insertNrGotmRoundInDatabase(nextRound, monthYear, nrGotmGames);
-                NrGotm.addRound(nextRound, monthYear, nrGotmGames);
-                await safeReply(interaction, { content: "Rounds created in database." });
+        const message = await safeReply(interaction, { embeds: [embed] });
+        let logHistory = "";
+        const updateEmbed = async (log) => {
+            if (log) {
+                logHistory += `${log}\n`;
             }
-            catch (e) {
-                await safeReply(interaction, { content: `Failed to commit rounds: ${e.message}` });
+            if (logHistory.length > 3500) {
+                logHistory = "..." + logHistory.slice(logHistory.length - 3500);
+            }
+            embed.setDescription(logHistory || "Processing...");
+            try {
+                await message.edit({ embeds: [embed] });
+            }
+            catch {
+                // ignore
+            }
+        };
+        const wizardLog = async (msg) => {
+            await updateEmbed(`✅ ${msg}`);
+        };
+        const wizardPrompt = async (question) => {
+            await updateEmbed(`\n❓ **${question}**`);
+            const channel = interaction.channel;
+            const userId = interaction.user.id;
+            try {
+                const collected = await channel.awaitMessages({
+                    filter: (m) => m.author.id === userId,
+                    max: 1,
+                    time: 120_000,
+                });
+                const first = collected.first();
+                if (first) {
+                    const content = first.content.trim();
+                    await first.delete().catch(() => { });
+                    await updateEmbed(`> *${content}*`);
+                    if (/^cancel$/i.test(content)) {
+                        await updateEmbed("❌ Cancelled by user.");
+                        return null;
+                    }
+                    return content;
+                }
+                await updateEmbed("❌ Timed out.");
+                return null;
+            }
+            catch {
+                await updateEmbed("❌ Error waiting for input.");
+                return null;
+            }
+        };
+        let allActions = [];
+        while (true) {
+            logHistory = "";
+            allActions = [];
+            await updateEmbed("Starting setup...");
+            let allEntries;
+            try {
+                allEntries = Gotm.all();
+            }
+            catch (err) {
+                await wizardLog(`Error loading data: ${err.message}`);
+                return;
+            }
+            const nextRound = allEntries.length > 0 ? Math.max(...allEntries.map((e) => e.round)) + 1 : 1;
+            await wizardLog(`**Starting setup for Round ${nextRound}.**`);
+            // 1. Month/Year
+            const nextMonthDate = new Date();
+            nextMonthDate.setMonth(nextMonthDate.getMonth() + 1);
+            const monthYear = nextMonthDate.toLocaleString("en-US", { month: "long", year: "numeric" });
+            await wizardLog(`Auto-assigned label: **${monthYear}**`);
+            // 2. GOTM
+            const gotmResult = await setupRoundGames("GOTM", nextRound, testMode, wizardLog, wizardPrompt, interaction);
+            if (!gotmResult) {
+                await wizardLog("Aborted during GOTM setup.");
+                return;
+            }
+            const gotmGames = gotmResult.games;
+            allActions.push(...gotmResult.actions);
+            // 3. NR-GOTM
+            const nrGotmResult = await setupRoundGames("NR-GOTM", nextRound, testMode, wizardLog, wizardPrompt, interaction);
+            if (!nrGotmResult) {
+                await wizardLog("Aborted during NR-GOTM setup.");
+                return;
+            }
+            const nrGotmGames = nrGotmResult.games;
+            allActions.push(...nrGotmResult.actions);
+            // 4. DB Actions (Prepare)
+            allActions.push({
+                description: `Insert GOTM Round ${nextRound} (${gotmGames.length} games)`,
+                execute: async () => {
+                    if (testMode) {
+                        await wizardLog("[Test] Would insert GOTM round.");
+                        return;
+                    }
+                    await insertGotmRoundInDatabase(nextRound, monthYear, gotmGames);
+                    Gotm.addRound(nextRound, monthYear, gotmGames);
+                },
+            });
+            allActions.push({
+                description: `Insert NR-GOTM Round ${nextRound} (${nrGotmGames.length} games)`,
+                execute: async () => {
+                    if (testMode) {
+                        await wizardLog("[Test] Would insert NR-GOTM round.");
+                        return;
+                    }
+                    await insertNrGotmRoundInDatabase(nextRound, monthYear, nrGotmGames);
+                    NrGotm.addRound(nextRound, monthYear, nrGotmGames);
+                },
+            });
+            // 5. Next Vote Date
+            const defaultDate = calculateNextVoteDate();
+            const dateStr = defaultDate.toLocaleDateString("en-US");
+            const dateResp = await wizardPrompt(`When should the *next* vote be? (Default: ${dateStr}). Type 'default' or a date (YYYY-MM-DD).`);
+            if (!dateResp)
+                return;
+            let finalDate = defaultDate;
+            if (dateResp.toLowerCase() !== "default") {
+                const parsed = new Date(dateResp);
+                if (!Number.isNaN(parsed.getTime())) {
+                    finalDate = parsed;
+                }
+                else {
+                    await wizardLog("Invalid date. Using default.");
+                }
+            }
+            allActions.push({
+                description: `Set next vote date to ${finalDate.toLocaleDateString()}`,
+                execute: async () => {
+                    if (testMode) {
+                        await wizardLog("[Test] Would set round info.");
+                        return;
+                    }
+                    await BotVotingInfo.setRoundInfo(nextRound, finalDate, null);
+                },
+            });
+            // Confirmation
+            const lines = allActions.map((a, i) => `${i + 1}. ${a.description}`);
+            await updateEmbed(`\n**Review planned actions:**\n${lines.join("\n")}`);
+            const row = new ActionRowBuilder().addComponents(new ButtonBuilder()
+                .setCustomId("wiz-commit")
+                .setLabel("Commit")
+                .setStyle(ButtonStyle.Success), new ButtonBuilder()
+                .setCustomId("wiz-edit")
+                .setLabel("Edit (Restart)")
+                .setStyle(ButtonStyle.Secondary), new ButtonBuilder()
+                .setCustomId("wiz-cancel")
+                .setLabel("Cancel")
+                .setStyle(ButtonStyle.Danger));
+            await message.edit({ components: [row] });
+            let decision = "cancel";
+            try {
+                const collected = await message.awaitMessageComponent({
+                    filter: (i) => i.user.id === interaction.user.id,
+                    time: 300_000,
+                });
+                await collected.deferUpdate();
+                await message.edit({ components: [] });
+                if (collected.customId === "wiz-commit")
+                    decision = "commit";
+                else if (collected.customId === "wiz-edit")
+                    decision = "edit";
+            }
+            catch {
+                decision = "cancel";
+            }
+            if (decision === "cancel") {
+                await wizardLog("Cancelled.");
+                return;
+            }
+            if (decision === "commit") {
+                break;
+            }
+        }
+        // Execute Actions
+        await wizardLog("\n**Executing actions...**");
+        for (const action of allActions) {
+            try {
+                await wizardLog(`Executing: ${action.description}`);
+                await action.execute();
+            }
+            catch (err) {
+                await wizardLog(`❌ Error executing action: ${err.message}`);
+                await wizardLog("Stopping execution.");
                 return;
             }
         }
-        // 6. Next Vote Date
-        const defaultDate = calculateNextVoteDate();
-        const dateStr = defaultDate.toLocaleDateString("en-US");
-        const dateResp = await promptUserForInput(interaction, `When should the *next* vote be? (Default: ${dateStr}). Type 'default' or a date (YYYY-MM-DD).`);
-        if (!dateResp)
-            return;
-        let finalDate = defaultDate;
-        if (dateResp.toLowerCase() !== "default") {
-            const parsed = new Date(dateResp);
-            if (!Number.isNaN(parsed.getTime())) {
-                finalDate = parsed;
-            }
-            else {
-                await safeReply(interaction, { content: "Invalid date. Using default." });
-            }
-        }
-        if (testMode) {
-            await safeReply(interaction, {
-                content: `[Test Mode] Would set next vote date to ${finalDate.toLocaleDateString()}.`,
-            });
-        }
-        else {
-            try {
-                await BotVotingInfo.setRoundInfo(nextRound, finalDate, null);
-                await safeReply(interaction, {
-                    content: `Round ${nextRound} is now active! Next vote set to ${finalDate.toLocaleDateString()}.`,
-                });
-            }
-            catch (e) {
-                await safeReply(interaction, { content: `Failed to set round info: ${e.message}` });
-            }
-        }
+        await wizardLog("Setup complete! 🎉");
     }
     async addGotm(interaction) {
         await safeDeferReply(interaction);
@@ -1174,15 +1273,15 @@ function calculateNextVoteDate() {
 }
 const NOW_PLAYING_FORUM_ID = "1059875931356938240";
 const ADMIN_CHANNEL_ID = "428142514222923776";
-async function setupRoundGames(interaction, label, roundNumber, testMode) {
+async function setupRoundGames(label, roundNumber, testMode, log, prompt, interaction) {
     const kind = label.toLowerCase();
     const nominations = await listNominationsForRound(kind, roundNumber);
+    const games = [];
+    const actions = [];
     if (nominations.length > 0) {
         const lines = nominations.map((n, idx) => `${idx + 1}. **${n.gameTitle}** (by <@${n.userId}>)`);
-        await safeReply(interaction, {
-            content: `**${label} Nominations for Round ${roundNumber}:**\n${lines.join("\n")}`,
-        });
-        const choiceRaw = await promptUserForInput(interaction, `Enter the number(s) of the winning game(s) (comma-separated for ties, e.g. \`1\` or \`1,3\`).\nOr type \`manual\` to enter GameDB IDs manually.`);
+        await log(`**${label} Nominations for Round ${roundNumber}:**\n${lines.join("\n")}`);
+        const choiceRaw = await prompt(`Enter the number(s) of the winning game(s) (comma-separated for ties, e.g. \`1\` or \`1,3\`).\nOr type \`manual\` to enter GameDB IDs manually.`);
         if (!choiceRaw)
             return null;
         if (choiceRaw.trim().toLowerCase() !== "manual") {
@@ -1191,144 +1290,117 @@ async function setupRoundGames(interaction, label, roundNumber, testMode) {
                 .map((s) => Number(s.trim()))
                 .filter((n) => Number.isInteger(n));
             if (indices.length === 0) {
-                await safeReply(interaction, { content: "No valid numbers found. Switching to manual mode." });
+                await log("No valid numbers found. Switching to manual mode.");
             }
             else {
                 const selectedNoms = indices
                     .map((i) => nominations[i - 1])
                     .filter((n) => n !== undefined);
                 if (selectedNoms.length === 0) {
-                    await safeReply(interaction, {
-                        content: "Invalid selection indices. Switching to manual mode.",
-                    });
+                    await log("Invalid selection indices. Switching to manual mode.");
                 }
                 else {
-                    // Process selected nominations
-                    const games = [];
                     for (const nom of selectedNoms) {
-                        await safeReply(interaction, {
-                            content: `Processing winner: **${nom.gameTitle}** (GameDB #${nom.gamedbGameId}).`,
-                        });
-                        const gameData = await processWinnerGame(interaction, nom.gamedbGameId, nom.gameTitle, testMode);
-                        if (!gameData)
+                        await log(`Processing winner: **${nom.gameTitle}** (GameDB #${nom.gamedbGameId}).`);
+                        const result = await processWinnerGame(interaction, nom.gamedbGameId, nom.gameTitle, testMode, log, prompt);
+                        if (!result)
                             return null;
-                        games.push(gameData);
+                        games.push(result.data);
+                        actions.push(...result.actions);
                     }
-                    return games;
+                    return { games, actions };
                 }
             }
         }
     }
     else {
-        await safeReply(interaction, {
-            content: `No nominations found for ${label} Round ${roundNumber}. Using manual mode.`,
-        });
+        await log(`No nominations found for ${label} Round ${roundNumber}. Using manual mode.`);
     }
     // Manual Mode
-    const countRaw = await promptUserForInput(interaction, `How many ${label} winners? (1-5). Type \`cancel\` to abort.`);
+    const countRaw = await prompt(`How many ${label} winners? (1-5). Type \`cancel\` to abort.`);
     if (!countRaw)
         return null;
     const count = Number(countRaw);
     if (!Number.isInteger(count) || count < 1 || count > 5) {
-        await safeReply(interaction, { content: "Invalid count." });
+        await log("Invalid count.");
         return null;
     }
-    const games = [];
     for (let i = 0; i < count; i++) {
         const n = i + 1;
-        const gamedbRaw = await promptUserForInput(interaction, `Enter GameDB ID for ${label} #${n}.`);
+        const gamedbRaw = await prompt(`Enter GameDB ID for ${label} #${n}.`);
         if (!gamedbRaw)
             return null;
         const gamedbId = Number(gamedbRaw);
         if (!Number.isInteger(gamedbId)) {
-            await safeReply(interaction, { content: "Invalid ID." });
+            await log("Invalid ID.");
             return null;
         }
         const game = await Game.getGameById(gamedbId);
         if (!game) {
-            await safeReply(interaction, { content: "Game not found." });
+            await log("Game not found.");
             return null;
         }
-        const gameData = await processWinnerGame(interaction, gamedbId, game.title, testMode);
-        if (!gameData)
+        const result = await processWinnerGame(interaction, gamedbId, game.title, testMode, log, prompt);
+        if (!result)
             return null;
-        games.push(gameData);
+        games.push(result.data);
+        actions.push(...result.actions);
     }
-    return games;
+    return { games, actions };
 }
-async function processWinnerGame(interaction, gamedbId, gameTitle, testMode) {
-    // Check for thread
+async function processWinnerGame(interaction, gamedbId, gameTitle, testMode, log, prompt) {
+    const actions = [];
     const threads = await getThreadsByGameId(gamedbId);
-    let threadId = threads.length ? threads[0] : null;
+    const threadId = threads.length ? threads[0] : null;
+    const gameData = {
+        title: gameTitle,
+        threadId,
+        redditUrl: null,
+        gamedbGameId: gamedbId,
+    };
     if (threadId) {
-        await safeReply(interaction, {
-            content: `Found existing thread <#${threadId}> linked to this game. Using it.`,
-        });
+        await log(`Found existing thread <#${threadId}> linked to this game. Using it.`);
     }
     else {
-        // Prompt to create
-        const createResp = await promptUserForInput(interaction, `No linked thread found for "${gameTitle}". Create one in Now Playing? (yes/no/id)`);
+        const createResp = await prompt(`No linked thread found for "${gameTitle}". Create one in Now Playing? (yes/no/id)`);
         if (!createResp)
             return null;
         if (createResp.toLowerCase() === "yes") {
-            if (testMode) {
-                await safeReply(interaction, {
-                    content: `[Test Mode] Would create and link thread for "${gameTitle}".`,
-                });
-                threadId = "TEST-THREAD-ID";
-            }
-            else {
-                try {
+            actions.push({
+                description: `Create and link thread for "**${gameTitle}**"`,
+                execute: async () => {
+                    if (testMode) {
+                        gameData.threadId = "TEST-THREAD";
+                        return;
+                    }
                     const forum = (await interaction.guild?.channels.fetch(NOW_PLAYING_FORUM_ID));
                     if (forum) {
                         const thread = await forum.threads.create({
-                            name: testMode ? `Sidegame - ${gameTitle}` : gameTitle,
+                            name: gameTitle,
                             message: { content: `Discussion thread for **${gameTitle}**.` },
                         });
-                        threadId = thread.id;
-                        await setThreadGameLink(threadId, gamedbId);
-                        await safeReply(interaction, {
-                            content: `Created and linked thread <#${threadId}>.`,
-                        });
+                        await setThreadGameLink(thread.id, gamedbId);
+                        gameData.threadId = thread.id;
                     }
-                    else {
-                        await safeReply(interaction, {
-                            content: "Could not find Now Playing forum channel.",
-                        });
-                    }
-                }
-                catch (e) {
-                    await safeReply(interaction, { content: `Failed to create thread: ${e.message}` });
-                }
-            }
+                },
+            });
         }
         else if (createResp.toLowerCase() !== "no") {
-            // Assume ID
             if (/^\d+$/.test(createResp)) {
-                threadId = createResp;
-                if (testMode) {
-                    await safeReply(interaction, {
-                        content: `[Test Mode] Would link thread <#${threadId}>.`,
-                    });
-                }
-                else {
-                    await setThreadGameLink(threadId, gamedbId);
-                    await safeReply(interaction, { content: `Linked thread <#${threadId}>.` });
-                }
+                const manualId = createResp;
+                gameData.threadId = manualId;
+                actions.push({
+                    description: `Link thread <#${manualId}> to "**${gameTitle}**"`,
+                    execute: async () => {
+                        if (!testMode) {
+                            await setThreadGameLink(manualId, gamedbId);
+                        }
+                    },
+                });
             }
         }
     }
-    // Reddit
-    const redditRaw = await promptUserForInput(interaction, `Enter Reddit URL for "${gameTitle}" (or 'none').`);
-    if (!redditRaw)
-        return null;
-    const redditUrl = redditRaw.toLowerCase() === "none" ? null : redditRaw;
-    return {
-        title: gameTitle,
-        threadId,
-        redditUrl,
-        gamedbGameId: gamedbId,
-    };
+    return { data: gameData, actions };
 }
 export async function isAdmin(interaction) {
     const anyInteraction = interaction;
