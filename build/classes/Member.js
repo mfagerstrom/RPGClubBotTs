@@ -243,7 +243,19 @@ export default class Member {
                c.COMPLETION_TYPE,
                c.COMPLETED_AT,
                c.FINAL_PLAYTIME_HRS,
-               c.CREATED_AT
+               c.CREATED_AT,
+               COALESCE(
+                  (
+                    SELECT MIN(tgl.THREAD_ID)
+                    FROM THREAD_GAME_LINKS tgl
+                    WHERE tgl.GAMEDB_GAME_ID = c.GAMEDB_GAME_ID
+                  ),
+                  (
+                    SELECT MIN(th.THREAD_ID)
+                    FROM THREADS th
+                    WHERE th.GAMEDB_GAME_ID = c.GAMEDB_GAME_ID
+                  )
+                ) AS THREAD_ID
           FROM USER_GAME_COMPLETIONS c
           JOIN GAMEDB_GAMES g ON g.GAME_ID = c.GAMEDB_GAME_ID
          WHERE ${clauses.join(" AND ")}
@@ -266,6 +278,7 @@ export default class Member {
                     : row.CREATED_AT
                         ? new Date(row.CREATED_AT)
                         : new Date(),
+                threadId: row.THREAD_ID ?? null,
             }));
         }
         finally {

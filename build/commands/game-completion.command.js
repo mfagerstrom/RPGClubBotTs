@@ -593,7 +593,12 @@ let GameCompletionCommands = class GameCompletionCommands {
         if (!igdbSearch.results.length) {
             const content = `No GameDB or IGDB matches found for "${searchTerm}".`;
             if (interaction.isMessageComponent()) {
-                await interaction.update({ content, components: [] });
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.editReply({ content, components: [] });
+                }
+                else {
+                    await interaction.update({ content, components: [] });
+                }
             }
             else {
                 await safeReply(interaction, {
@@ -626,7 +631,12 @@ let GameCompletionCommands = class GameCompletionCommands {
         });
         const content = `No GameDB match; select an IGDB result to import for "${searchTerm}".`;
         if (interaction.isMessageComponent()) {
-            await interaction.update({ content, components });
+            if (interaction.deferred || interaction.replied) {
+                await interaction.editReply({ content, components });
+            }
+            else {
+                await interaction.update({ content, components });
+            }
         }
         else {
             await safeReply(interaction, {
@@ -763,9 +773,8 @@ let GameCompletionCommands = class GameCompletionCommands {
         catch {
             // Ignore cleanup errors
         }
-        const dateText = completedAt ? formatDiscordTimestamp(completedAt) : "today";
         const playtimeText = formatPlaytimeHours(finalPlaytimeHours);
-        const details = [completionType, dateText, playtimeText].filter(Boolean).join(" — ");
+        const details = [completionType, playtimeText].filter(Boolean).join(" — ");
         await interaction.followUp({
             content: `Logged completion for **${gameTitle ?? game.title}** (${details}).`,
             flags: MessageFlags.Ephemeral,

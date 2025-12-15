@@ -57,11 +57,12 @@ export function formatPlaytimeHours(val) {
     const rounded = Math.round(val * 100) / 100;
     return `${rounded} hours`;
 }
-function formatCompletionLine(record) {
-    const date = record.completedAt ? formatDiscordTimestamp(record.completedAt) : "Date not set";
+function formatCompletionLine(record, guildId) {
     const playtime = formatPlaytimeHours(record.finalPlaytimeHours);
-    const extras = [date, playtime].filter(Boolean).join(" — ");
-    return `${record.title} — ${record.completionType}${extras ? ` — ${extras}` : ""}`;
+    const title = record.threadId && guildId
+        ? `[${record.title}](https://discord.com/channels/${guildId}/${record.threadId})`
+        : record.title;
+    return `${title}${playtime ? ` — ${playtime}` : ""}`;
 }
 export function formatTableDate(date) {
     if (!date)
@@ -194,7 +195,7 @@ function buildProfileFields(record, nickHistory, nowPlaying, completions, guildI
         });
     }
     if (completions.length) {
-        const lines = completions.map((c) => formatCompletionLine(c));
+        const lines = completions.map((c) => formatCompletionLine(c, guildId));
         fields.push({
             label: "Completed (recent)",
             value: lines.join("\n"),
