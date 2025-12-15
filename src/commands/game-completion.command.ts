@@ -222,6 +222,13 @@ export class GameCompletionCommands {
   @Slash({ description: "List your completed games", name: "list" })
   async completionList(
     @SlashOption({
+      description: "Show a leaderboard of all members with completions.",
+      name: "all",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    showAll: boolean | undefined,
+    @SlashOption({
       description: "Filter to a specific year (optional)",
       name: "year",
       required: false,
@@ -239,13 +246,42 @@ export class GameCompletionCommands {
   ): Promise<void> {
     const ephemeral = !showInChat;
     await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
+
+    if (showAll) {
+      await this.renderCompletionLeaderboard(interaction, ephemeral);
+      return;
+    }
+
     await this.renderCompletionPage(interaction, interaction.user.id, 0, year ?? null, ephemeral);
   }
 
   @Slash({ description: "Edit one of your completion records", name: "edit" })
-  async completionEdit(interaction: CommandInteraction): Promise<void> {
+  async completionEdit(
+    @SlashOption({
+      description: "Filter by title (optional)",
+      name: "query",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    query: string | undefined,
+    @SlashOption({
+      description: "Filter by year (optional)",
+      name: "year",
+      required: false,
+      type: ApplicationCommandOptionType.Integer,
+    })
+    year: number | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-    await this.renderSelectionPage(interaction, interaction.user.id, 0, "edit");
+    await this.renderSelectionPage(
+      interaction,
+      interaction.user.id,
+      0,
+      "edit",
+      year ?? null,
+      query,
+    );
   }
 
   @Slash({ description: "Delete one of your completion records", name: "delete" })
@@ -538,7 +574,7 @@ export class GameCompletionCommands {
     }
   }
 
-  @ButtonComponent({ id: /^comp-(list|edit|delete)-page:[^:]+:[^:]*:\d+:(prev|next)$/ })
+  @ButtonComponent({ id: /^comp-(list|edit|delete)-page:[^:]+:[^:]*:\d+:(prev|next)(?::.*)?$/ })
   async handleCompletionPaging(interaction: ButtonInteraction): Promise<void> {
     const parts = interaction.customId.split(":");
     const mode = parts[0].split("-")[1] as "list" | "edit" | "delete";
@@ -546,8 +582,9 @@ export class GameCompletionCommands {
     const yearRaw = parts[2];
     const pageRaw = parts[3];
     const dir = parts[4];
+    const query = parts.slice(5).join(":") || undefined;
 
-    if (interaction.user.id !== ownerId) {
+    if (mode !== "list" && interaction.user.id !== ownerId) {
       await interaction.reply({
         content: "This list isn't for you.",
         flags: MessageFlags.Ephemeral,
@@ -575,8 +612,55 @@ export class GameCompletionCommands {
         ephemeral,
       );
     } else {
-      await this.renderSelectionPage(interaction, ownerId, nextPage, mode);
+      await this.renderSelectionPage(interaction, ownerId, nextPage, mode, year, query);
     }
+  }
+
+  private async renderCompletionLeaderboard(
+    interaction: CommandInteraction,
+    ephemeral: boolean,
+  ): Promise<void> {
+    const leaderboard = await Member.getCompletionLeaderboard(25);
+    if (!leaderboard.length) {
+      await safeReply(interaction, {
+        content: "No completions recorded yet.",
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+      });
+      return;
+    }
+
+    const lines = leaderboard.map((m, idx) => {
+      const name = m.globalName ?? m.username ?? m.userId;
+      return `${idx + 1}. **${name}**: ${m.count} completions`;
+    });
+
+    const embed = new EmbedBuilder()
+      .setTitle("Game Completion Leaderboard")
+      .setDescription(lines.join("\n"));
+
+    const options = leaderboard.map((m) => ({
+      label: (m.globalName ?? m.username ?? m.userId).slice(0, 100),
+      value: m.userId,
+      description: `${m.count} completions`,
+    }));
+
+    const select = new StringSelectMenuBuilder()
+      .setCustomId("comp-leaderboard-select")
+      .setPlaceholder("View completions for a member")
+      .addOptions(options);
+
+    await safeReply(interaction, {
+      embeds: [embed],
+      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
+      flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+    });
+  }
+
+  @SelectMenuComponent({ id: "comp-leaderboard-select" })
+  async handleCompletionLeaderboardSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const userId = interaction.values[0];
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await this.renderCompletionPage(interaction, userId, 0, null, true);
   }
 
   private createCompletionSession(ctx: CompletionAddContext): string {
@@ -590,6 +674,7 @@ export class GameCompletionCommands {
     page: number,
     year: number | null,
     interactionUser: User,
+    query?: string,
   ): Promise<{
     embed: EmbedBuilder;
     attachment: AttachmentBuilder;
@@ -598,7 +683,7 @@ export class GameCompletionCommands {
     safePage: number;
     pageCompletions: any[];
   } | null> {
-    const total = await Member.countCompletions(userId, year);
+    const total = await Member.countCompletions(userId, year, query);
     if (total === 0) return null;
 
     const totalPages = Math.max(1, Math.ceil(total / COMPLETION_PAGE_SIZE));
@@ -610,6 +695,7 @@ export class GameCompletionCommands {
       limit: 1000,
       offset: 0,
       year,
+      title: query,
     });
 
     allCompletions.sort((a, b) => {
@@ -740,7 +826,7 @@ export class GameCompletionCommands {
   }
 
   private async renderCompletionPage(
-    interaction: CommandInteraction | ButtonInteraction,
+    interaction: CommandInteraction | ButtonInteraction | StringSelectMenuInteraction,
     userId: string,
     page: number,
     year: number | null,
@@ -793,20 +879,25 @@ export class GameCompletionCommands {
     userId: string,
     page: number,
     mode: "edit" | "delete",
+    year: number | null = null,
+    query?: string,
   ): Promise<void> {
     const user =
       interaction.user.id === userId
         ? interaction.user
         : await interaction.client.users.fetch(userId).catch(() => interaction.user);
 
-    const result = await this.buildCompletionEmbed(userId, page, null, user);
+    const result = await this.buildCompletionEmbed(userId, page, year, user, query);
 
     if (!result) {
-      const msg = mode === "edit" ? "You have no completions to edit." : "You have no completions to delete.";
+      const msg =
+        mode === "edit"
+          ? "You have no completions to edit matching your filters."
+          : "You have no completions to delete matching your filters.";
       if (interaction.isMessageComponent() && !interaction.deferred && !interaction.replied) {
-         await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
       } else {
-         await safeReply(interaction, { content: msg, flags: MessageFlags.Ephemeral });
+        await safeReply(interaction, { content: msg, flags: MessageFlags.Ephemeral });
       }
       return;
     }
@@ -816,7 +907,10 @@ export class GameCompletionCommands {
     const selectOptions = pageCompletions.map((c) => ({
       label: c.title.slice(0, 100),
       value: String(c.completionId),
-      description: `${c.completionType} (${c.completedAt ? formatDiscordTimestamp(c.completedAt) : "No date"})`.slice(0, 100),
+      description: `${c.completionType} (${c.completedAt ? formatDiscordTimestamp(c.completedAt) : "No date"})`.slice(
+        0,
+        100,
+      ),
     }));
 
     const selectId = mode === "edit" ? "comp-edit-menu" : "comp-del-menu";
@@ -827,13 +921,14 @@ export class GameCompletionCommands {
 
     const selectRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
 
+    const queryPart = query ? `:${query.slice(0, 50)}` : "";
     const prev = new ButtonBuilder()
-      .setCustomId(`comp-${mode}-page:${userId}::${safePage}:prev`)
+      .setCustomId(`comp-${mode}-page:${userId}:${year ?? ""}:${safePage}:prev${queryPart}`)
       .setLabel("Previous")
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(safePage <= 0);
     const next = new ButtonBuilder()
-      .setCustomId(`comp-${mode}-page:${userId}::${safePage}:next`)
+      .setCustomId(`comp-${mode}-page:${userId}:${year ?? ""}:${safePage}:next${queryPart}`)
       .setLabel("Next")
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(safePage >= totalPages - 1);
