@@ -104,6 +104,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             completedAt,
             finalPlaytimeHours: playtime,
             source: "existing",
+            query: searchTerm,
         });
     }
     async completionList(year, showInChat, interaction) {
@@ -564,14 +565,20 @@ let GameCompletionCommands = class GameCompletionCommands {
         const localResults = await Game.searchGames(searchTerm);
         if (localResults.length) {
             const sessionId = this.createCompletionSession(ctx);
-            const select = new StringSelectMenuBuilder()
-                .setCustomId(`completion-add-select:${sessionId}`)
-                .setPlaceholder("Select a game to log completion")
-                .addOptions(localResults.slice(0, 25).map((game) => ({
+            const options = localResults.slice(0, 24).map((game) => ({
                 label: game.title.slice(0, 100),
                 value: String(game.id),
                 description: `GameDB #${game.id}`,
-            })));
+            }));
+            options.push({
+                label: "Import another game from IGDB",
+                value: "import-igdb",
+                description: "Search IGDB and import a new GameDB entry",
+            });
+            const select = new StringSelectMenuBuilder()
+                .setCustomId(`completion-add-select:${sessionId}`)
+                .setPlaceholder("Select a game to log completion")
+                .addOptions(options);
             await safeReply(interaction, {
                 content: `Select the game for "${searchTerm}".`,
                 components: [new ActionRowBuilder().addComponents(select)],
@@ -579,12 +586,21 @@ let GameCompletionCommands = class GameCompletionCommands {
             });
             return;
         }
+        await this.promptIgdbSelection(interaction, searchTerm, ctx);
+    }
+    async promptIgdbSelection(interaction, searchTerm, ctx) {
         const igdbSearch = await igdbService.searchGames(searchTerm);
         if (!igdbSearch.results.length) {
-            await safeReply(interaction, {
-                content: `No GameDB or IGDB matches found for "${searchTerm}".`,
-                flags: MessageFlags.Ephemeral,
-            });
+            const content = `No GameDB or IGDB matches found for "${searchTerm}".`;
+            if (interaction.isMessageComponent()) {
+                await interaction.update({ content, components: [] });
+            }
+            else {
+                await safeReply(interaction, {
+                    content,
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
             return;
         }
         const opts = igdbSearch.results.map((game) => {
@@ -598,16 +614,40 @@ let GameCompletionCommands = class GameCompletionCommands {
             };
         });
         const { components } = createIgdbSession(interaction.user.id, opts, async (sel, gameId) => {
+            if (!sel.deferred && !sel.replied) {
+                await sel.deferUpdate().catch(() => { });
+            }
+            await sel.editReply({
+                content: "Importing game details from IGDB...",
+                components: [],
+            }).catch(() => { });
             const imported = await this.importGameFromIgdb(gameId);
             await this.saveCompletion(sel, ctx.userId, imported.gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, imported.title);
         });
-        await safeReply(interaction, {
-            content: `No GameDB match; select an IGDB result to import for "${searchTerm}".`,
-            components,
-            flags: MessageFlags.Ephemeral,
-        });
+        const content = `No GameDB match; select an IGDB result to import for "${searchTerm}".`;
+        if (interaction.isMessageComponent()) {
+            await interaction.update({ content, components });
+        }
+        else {
+            await safeReply(interaction, {
+                content,
+                components,
+                flags: MessageFlags.Ephemeral,
+            });
+        }
     }
     async processCompletionSelection(interaction, value, ctx) {
+        if (value === "import-igdb") {
+            if (!ctx.query) {
+                await interaction.reply({
+                    content: "Original search query lost. Please try again.",
+                    flags: MessageFlags.Ephemeral,
+                });
+                return;
+            }
+            await this.promptIgdbSelection(interaction, ctx.query, ctx);
+            return;
+        }
         if (!interaction.deferred && !interaction.replied) {
             try {
                 await interaction.deferUpdate();

@@ -97,6 +97,9 @@ let GameDb = class GameDb {
                 };
             });
             const { components } = createIgdbSession(interaction.user.id, opts, async (sel, igdbId) => {
+                if (!sel.deferred && !sel.replied) {
+                    await sel.deferUpdate().catch(() => { });
+                }
                 await this.addGameToDatabase(sel, igdbId, { selectionMessage: sel.message });
             });
             const totalLabel = typeof searchRes.total === "number" ? searchRes.total : results.length;
@@ -190,6 +193,9 @@ let GameDb = class GameDb {
                 })
                 : null;
             const { components } = createIgdbSession(interaction.user.id, opts, async (sel, igdbId) => {
+                if (!sel.deferred && !sel.replied) {
+                    await sel.deferUpdate().catch(() => { });
+                }
                 await this.addGameToDatabase(sel, igdbId, { selectionMessage: sel.message });
             });
             await safeReply(interaction, {
