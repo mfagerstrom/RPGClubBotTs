@@ -365,8 +365,7 @@ export class GameCompletionCommands {
       return;
     }
 
-    const completions = await Member.getCompletions({ userId: ownerId, limit: 25 });
-    const completion = completions.find((c) => c.completionId === completionId);
+    const completion = await Member.getCompletion(completionId);
     if (!completion) {
       await interaction.reply({
         content: "Completion not found.",

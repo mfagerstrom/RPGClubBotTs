@@ -392,6 +392,76 @@ export default class Member {
     }
   }
 
+  static async getCompletion(completionId: number): Promise<ICompletionRecord | null> {
+    const connection = await getOraclePool().getConnection();
+    try {
+      const res = await connection.execute<{
+        COMPLETION_ID: number;
+        GAME_ID: number;
+        TITLE: string;
+        COMPLETION_TYPE: string;
+        COMPLETED_AT: Date | null;
+        FINAL_PLAYTIME_HRS: number | null;
+        CREATED_AT: Date;
+        THREAD_ID: string | null;
+      }>(
+        `
+        SELECT c.COMPLETION_ID,
+               g.GAME_ID,
+               g.TITLE,
+               c.COMPLETION_TYPE,
+               c.COMPLETED_AT,
+               c.FINAL_PLAYTIME_HRS,
+               c.CREATED_AT,
+               COALESCE(
+                  (
+                    SELECT MIN(tgl.THREAD_ID)
+                    FROM THREAD_GAME_LINKS tgl
+                    WHERE tgl.GAMEDB_GAME_ID = c.GAMEDB_GAME_ID
+                  ),
+                  (
+                    SELECT MIN(th.THREAD_ID)
+                    FROM THREADS th
+                    WHERE th.GAMEDB_GAME_ID = c.GAMEDB_GAME_ID
+                  )
+                ) AS THREAD_ID
+          FROM USER_GAME_COMPLETIONS c
+          JOIN GAMEDB_GAMES g ON g.GAME_ID = c.GAMEDB_GAME_ID
+         WHERE c.COMPLETION_ID = :completionId
+        `,
+        { completionId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      const row = (res.rows ?? [])[0];
+      if (!row) return null;
+
+      return {
+        completionId: Number(row.COMPLETION_ID),
+        gameId: Number(row.GAME_ID),
+        title: String(row.TITLE),
+        completionType: String(row.COMPLETION_TYPE),
+        completedAt:
+          row.COMPLETED_AT instanceof Date
+            ? row.COMPLETED_AT
+            : row.COMPLETED_AT
+              ? new Date(row.COMPLETED_AT as any)
+              : null,
+        finalPlaytimeHours:
+          row.FINAL_PLAYTIME_HRS == null ? null : Number(row.FINAL_PLAYTIME_HRS),
+        createdAt:
+          row.CREATED_AT instanceof Date
+            ? row.CREATED_AT
+            : row.CREATED_AT
+              ? new Date(row.CREATED_AT as any)
+              : new Date(),
+        threadId: row.THREAD_ID ?? null,
+      };
+    } finally {
+      await connection.close();
+    }
+  }
+
   static async getCompletions(params: {
     userId: string;
     limit: number;
