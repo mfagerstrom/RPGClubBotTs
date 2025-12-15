@@ -595,6 +595,46 @@ export class GameCompletionCommands {
     }
   }
 
+  @SelectMenuComponent({ id: /^comp-page-select:.+$/ })
+  async handleCompletionPageSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const parts = interaction.customId.split(":");
+    const ownerId = parts[1];
+    const yearRaw = parts[2];
+    const mode = parts[3] as "list" | "edit" | "delete";
+    const query = parts.slice(4).join(":") || undefined;
+
+    if (mode !== "list" && interaction.user.id !== ownerId) {
+      await interaction.reply({
+        content: "This list isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const page = Number(interaction.values[0]);
+    if (Number.isNaN(page)) return;
+    const year = yearRaw ? Number(yearRaw) : null;
+    const ephemeral = interaction.message?.flags?.has(MessageFlags.Ephemeral) ?? true;
+
+    try {
+      await interaction.deferUpdate();
+    } catch {
+      // ignore
+    }
+
+    if (mode === "list") {
+      await this.renderCompletionPage(
+        interaction,
+        ownerId,
+        page,
+        Number.isNaN(year ?? NaN) ? null : year,
+        ephemeral,
+      );
+    } else {
+      await this.renderSelectionPage(interaction, ownerId, page, mode, year, query);
+    }
+  }
+
   @ButtonComponent({ id: /^comp-(list|edit|delete)-page:[^:]+:[^:]*:\d+:(prev|next)(?::.*)?$/ })
   async handleCompletionPaging(interaction: ButtonInteraction): Promise<void> {
     const parts = interaction.customId.split(":");
@@ -873,19 +913,49 @@ export class GameCompletionCommands {
     const { embed, attachment, totalPages, safePage } = result;
 
     const yearPart = year ? String(year) : "";
-    const prev = new ButtonBuilder()
-      .setCustomId(`comp-list-page:${userId}:${yearPart}:${safePage}:prev`)
-      .setLabel("Previous")
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(safePage <= 0);
-    const next = new ButtonBuilder()
-      .setCustomId(`comp-list-page:${userId}:${yearPart}:${safePage}:next`)
-      .setLabel("Next")
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(safePage >= totalPages - 1);
+    const components: any[] = [];
 
-    const components =
-      totalPages > 1 ? [new ActionRowBuilder<ButtonBuilder>().addComponents(prev, next)] : [];
+    if (totalPages > 1) {
+      const options = [];
+      const maxOptions = 25;
+      let startPage = 0;
+      let endPage = totalPages - 1;
+
+      if (totalPages > maxOptions) {
+        const half = Math.floor(maxOptions / 2);
+        startPage = Math.max(0, safePage - half);
+        endPage = Math.min(totalPages - 1, startPage + maxOptions - 1);
+        startPage = Math.max(0, endPage - maxOptions + 1);
+      }
+
+      for (let i = startPage; i <= endPage; i++) {
+        options.push({
+          label: `Page ${i + 1}`,
+          value: String(i),
+          default: i === safePage,
+        });
+      }
+
+      const select = new StringSelectMenuBuilder()
+        .setCustomId(`comp-page-select:${userId}:${yearPart}:list`)
+        .setPlaceholder(`Page ${safePage + 1} of ${totalPages}`)
+        .addOptions(options);
+
+      components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select));
+
+      const prev = new ButtonBuilder()
+        .setCustomId(`comp-list-page:${userId}:${yearPart}:${safePage}:prev`)
+        .setLabel("Previous")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(safePage <= 0);
+      const next = new ButtonBuilder()
+        .setCustomId(`comp-list-page:${userId}:${yearPart}:${safePage}:next`)
+        .setLabel("Next")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(safePage >= totalPages - 1);
+
+      components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(prev, next));
+    }
 
     await safeReply(interaction as any, {
       embeds: [embed],
@@ -943,21 +1013,48 @@ export class GameCompletionCommands {
     const selectRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
 
     const queryPart = query ? `:${query.slice(0, 50)}` : "";
-    const prev = new ButtonBuilder()
-      .setCustomId(`comp-${mode}-page:${userId}:${year ?? ""}:${safePage}:prev${queryPart}`)
-      .setLabel("Previous")
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(safePage <= 0);
-    const next = new ButtonBuilder()
-      .setCustomId(`comp-${mode}-page:${userId}:${year ?? ""}:${safePage}:next${queryPart}`)
-      .setLabel("Next")
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(safePage >= totalPages - 1);
-
-    const navRow = new ActionRowBuilder<ButtonBuilder>().addComponents(prev, next);
     const components: any[] = [selectRow];
+
     if (totalPages > 1) {
-      components.push(navRow);
+      const options = [];
+      const maxOptions = 25;
+      let startPage = 0;
+      let endPage = totalPages - 1;
+
+      if (totalPages > maxOptions) {
+        const half = Math.floor(maxOptions / 2);
+        startPage = Math.max(0, safePage - half);
+        endPage = Math.min(totalPages - 1, startPage + maxOptions - 1);
+        startPage = Math.max(0, endPage - maxOptions + 1);
+      }
+
+      for (let i = startPage; i <= endPage; i++) {
+        options.push({
+          label: `Page ${i + 1}`,
+          value: String(i),
+          default: i === safePage,
+        });
+      }
+
+      const pageSelect = new StringSelectMenuBuilder()
+        .setCustomId(`comp-page-select:${userId}:${year ?? ""}:${mode}${queryPart}`)
+        .setPlaceholder(`Page ${safePage + 1} of ${totalPages}`)
+        .addOptions(options);
+
+      components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(pageSelect));
+
+      const prev = new ButtonBuilder()
+        .setCustomId(`comp-${mode}-page:${userId}:${year ?? ""}:${safePage}:prev${queryPart}`)
+        .setLabel("Previous")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(safePage <= 0);
+      const next = new ButtonBuilder()
+        .setCustomId(`comp-${mode}-page:${userId}:${year ?? ""}:${safePage}:next${queryPart}`)
+        .setLabel("Next")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(safePage >= totalPages - 1);
+
+      components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(prev, next));
     }
 
     if (interaction.isMessageComponent()) {
@@ -1017,15 +1114,20 @@ export class GameCompletionCommands {
     searchTerm: string,
     ctx: CompletionAddContext,
   ): Promise<void> {
+    if (interaction.isMessageComponent()) {
+      const loading = { content: `Searching IGDB for "${searchTerm}"...`, components: [] };
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply(loading);
+      } else {
+        await interaction.update(loading);
+      }
+    }
+
     const igdbSearch = await igdbService.searchGames(searchTerm);
     if (!igdbSearch.results.length) {
       const content = `No GameDB or IGDB matches found for "${searchTerm}" (len: ${searchTerm.length}).`;
       if (interaction.isMessageComponent()) {
-        if (interaction.deferred || interaction.replied) {
-          await interaction.editReply({ content, components: [] });
-        } else {
-          await interaction.update({ content, components: [] });
-        }
+        await interaction.editReply({ content, components: [] });
       } else {
         await safeReply(interaction, {
           content,
@@ -1074,11 +1176,11 @@ export class GameCompletionCommands {
 
     const content = `No GameDB match; select an IGDB result to import for "${searchTerm}".`;
     if (interaction.isMessageComponent()) {
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ content, components });
-      } else {
-        await interaction.update({ content, components });
-      }
+      await interaction.editReply({
+        content: "Found results on IGDB. Please see the new message below.",
+        components: [],
+      });
+      await interaction.followUp({ content, components, flags: MessageFlags.Ephemeral });
     } else {
       await safeReply(interaction, {
         content,
@@ -1092,17 +1194,17 @@ export class GameCompletionCommands {
     interaction: StringSelectMenuInteraction,
     value: string,
     ctx: CompletionAddContext,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (value === "import-igdb") {
       if (!ctx.query) {
         await interaction.reply({
           content: "Original search query lost. Please try again.",
           flags: MessageFlags.Ephemeral,
         });
-        return;
+        return false;
       }
       await this.promptIgdbSelection(interaction, ctx.query, ctx);
-      return;
+      return true;
     }
 
     if (!interaction.deferred && !interaction.replied) {
@@ -1124,7 +1226,7 @@ export class GameCompletionCommands {
             content: "Invalid IGDB selection.",
             flags: MessageFlags.Ephemeral,
           });
-          return;
+          return false;
         }
         const imported = await this.importGameFromIgdb(igdbId);
         gameId = imported.gameId;
@@ -1136,7 +1238,7 @@ export class GameCompletionCommands {
             content: "Invalid selection.",
             flags: MessageFlags.Ephemeral,
           });
-          return;
+          return false;
         }
         const game = await Game.getGameById(parsedId);
         if (!game) {
@@ -1144,7 +1246,7 @@ export class GameCompletionCommands {
             content: "Selected game was not found in GameDB.",
             flags: MessageFlags.Ephemeral,
           });
-          return;
+          return false;
         }
         gameId = game.id;
         gameTitle = game.title;
@@ -1155,7 +1257,7 @@ export class GameCompletionCommands {
           content: "Could not determine a game to log.",
           flags: MessageFlags.Ephemeral,
         });
-        return;
+        return false;
       }
 
       await this.saveCompletion(
@@ -1168,12 +1270,14 @@ export class GameCompletionCommands {
         gameTitle ?? undefined,
         ctx.announce,
       );
+      return false;
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await interaction.followUp({
         content: `Failed to add completion: ${msg}`,
         flags: MessageFlags.Ephemeral,
       });
+      return false;
     }
   }
 
