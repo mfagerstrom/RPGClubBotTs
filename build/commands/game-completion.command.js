@@ -107,14 +107,15 @@ let GameCompletionCommands = class GameCompletionCommands {
             query: searchTerm,
         });
     }
-    async completionList(showAll, year, showInChat, interaction) {
+    async completionList(showAll, year, member, showInChat, interaction) {
         const ephemeral = !showInChat;
         await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         if (showAll) {
             await this.renderCompletionLeaderboard(interaction, ephemeral);
             return;
         }
-        await this.renderCompletionPage(interaction, interaction.user.id, 0, year ?? null, ephemeral);
+        const targetUserId = member ? member.id : interaction.user.id;
+        await this.renderCompletionPage(interaction, targetUserId, 0, year ?? null, ephemeral);
     }
     async completionEdit(query, year, interaction) {
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
@@ -947,6 +948,12 @@ __decorate([
         type: ApplicationCommandOptionType.Integer,
     })),
     __param(2, SlashOption({
+        description: "Member to view; defaults to you.",
+        name: "member",
+        required: false,
+        type: ApplicationCommandOptionType.User,
+    })),
+    __param(3, SlashOption({
         description: "If true, show in channel instead of ephemerally.",
         name: "showinchat",
         required: false,

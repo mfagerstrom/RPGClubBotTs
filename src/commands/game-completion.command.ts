@@ -42,6 +42,8 @@ import {
   applyGameDbThumbnail,
 } from "./profile.command.js";
 
+const ANNOUNCEMENT_CHANNEL_ID = "360819470836695042";
+
 type CompletionAddContext = {
   userId: string;
   completionType: CompletionType;
@@ -49,6 +51,7 @@ type CompletionAddContext = {
   finalPlaytimeHours: number | null;
   source: "existing" | "igdb";
   query?: string;
+  announce?: boolean;
 };
 
 const completionAddSessions = new Map<string, CompletionAddContext>();
@@ -107,6 +110,13 @@ export class GameCompletionCommands {
       type: ApplicationCommandOptionType.Boolean,
     })
     fromNowPlaying: boolean | undefined,
+    @SlashOption({
+      description: "Announce this completion in the completions channel?",
+      name: "announce",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    announce: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
@@ -159,6 +169,7 @@ export class GameCompletionCommands {
         completedAt,
         finalPlaytimeHours: playtime,
         source: "existing",
+        announce,
       });
       const select = new StringSelectMenuBuilder()
         .setCustomId(`completion-add-select:${sessionId}`)
@@ -196,6 +207,7 @@ export class GameCompletionCommands {
         completedAt,
         playtime,
         game.title,
+        announce,
       );
       return;
     }
@@ -216,6 +228,7 @@ export class GameCompletionCommands {
       finalPlaytimeHours: playtime,
       source: "existing",
       query: searchTerm,
+      announce,
     });
   }
 
@@ -1054,6 +1067,7 @@ export class GameCompletionCommands {
           ctx.completedAt,
           ctx.finalPlaytimeHours,
           imported.title,
+          ctx.announce,
         );
       },
     );
@@ -1152,6 +1166,7 @@ export class GameCompletionCommands {
         ctx.completedAt,
         ctx.finalPlaytimeHours,
         gameTitle ?? undefined,
+        ctx.announce,
       );
     } catch (err: any) {
       const msg = err?.message ?? String(err);
@@ -1194,6 +1209,7 @@ export class GameCompletionCommands {
     completedAt: Date | null,
     finalPlaytimeHours: number | null,
     gameTitle?: string,
+    announce?: boolean,
   ): Promise<void> {
     if (interaction.user.id !== userId) {
       await interaction.followUp({
@@ -1212,10 +1228,8 @@ export class GameCompletionCommands {
       return;
     }
 
-    let completionId: number;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      completionId = await Member.addCompletion({
+      await Member.addCompletion({
         userId,
         gameId,
         completionType,
@@ -1244,5 +1258,41 @@ export class GameCompletionCommands {
       content: `Logged completion for **${gameTitle ?? game.title}** (${details}).`,
       flags: MessageFlags.Ephemeral,
     });
+
+    if (announce) {
+      try {
+        const channel = await interaction.client.channels.fetch(ANNOUNCEMENT_CHANNEL_ID);
+        if (channel && "send" in channel) {
+          const user = interaction.user;
+          const completions = await Game.getGameCompletions(gameId);
+          const isFirst = completions.length === 1;
+
+          const dateStr = completedAt ? formatDiscordTimestamp(completedAt) : "No date";
+          const hoursStr = playtimeText ? ` - ${playtimeText}` : "";
+          const desc = `<@${user.id}> has added a game completion: **${game.title}** - ${completionType} - ${dateStr}${hoursStr}`;
+
+          const embed = new EmbedBuilder()
+            .setAuthor({
+              name: user.displayName ?? user.username,
+              iconURL: user.displayAvatarURL(),
+            })
+            .setDescription(desc)
+            .setColor(0x00ff00);
+
+          applyGameDbThumbnail(embed);
+
+          if (isFirst) {
+            embed.addFields({
+              name: "First Completion!",
+              value: "This is the first recorded completion for this game in the club!",
+            });
+          }
+
+          await channel.send({ embeds: [embed], files: [buildGameDbThumbAttachment()] });
+        }
+      } catch (err) {
+        console.error("Failed to announce completion:", err);
+      }
+    }
   }
 }
