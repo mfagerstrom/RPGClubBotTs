@@ -110,7 +110,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             announce,
         });
     }
-    async completionList(showAll, year, member, showInChat, interaction) {
+    async completionList(showAll, year, query, member, showInChat, interaction) {
         const ephemeral = !showInChat;
         await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         if (showAll) {
@@ -118,15 +118,15 @@ let GameCompletionCommands = class GameCompletionCommands {
             return;
         }
         const targetUserId = member ? member.id : interaction.user.id;
-        await this.renderCompletionPage(interaction, targetUserId, 0, year ?? null, ephemeral);
+        await this.renderCompletionPage(interaction, targetUserId, 0, year ?? null, ephemeral, query);
     }
     async completionEdit(query, year, interaction) {
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         await this.renderSelectionPage(interaction, interaction.user.id, 0, "edit", year ?? null, query);
     }
-    async completionDelete(interaction) {
+    async completionDelete(query, interaction) {
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-        await this.renderSelectionPage(interaction, interaction.user.id, 0, "delete");
+        await this.renderSelectionPage(interaction, interaction.user.id, 0, "delete", null, query);
     }
     async handleCompletionAddSelect(interaction) {
         const [, sessionId] = interaction.customId.split(":");
@@ -404,7 +404,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             // ignore
         }
         if (mode === "list") {
-            await this.renderCompletionPage(interaction, ownerId, page, Number.isNaN(year ?? NaN) ? null : year, ephemeral);
+            await this.renderCompletionPage(interaction, ownerId, page, Number.isNaN(year ?? NaN) ? null : year, ephemeral, query);
         }
         else {
             await this.renderSelectionPage(interaction, ownerId, page, mode, year, query);
@@ -438,7 +438,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             // ignore
         }
         if (mode === "list") {
-            await this.renderCompletionPage(interaction, ownerId, nextPage, Number.isNaN(year ?? NaN) ? null : year, ephemeral);
+            await this.renderCompletionPage(interaction, ownerId, nextPage, Number.isNaN(year ?? NaN) ? null : year, ephemeral, query);
         }
         else {
             await this.renderSelectionPage(interaction, ownerId, nextPage, mode, year, query);
@@ -608,11 +608,11 @@ let GameCompletionCommands = class GameCompletionCommands {
             pageCompletions,
         };
     }
-    async renderCompletionPage(interaction, userId, page, year, ephemeral) {
+    async renderCompletionPage(interaction, userId, page, year, ephemeral, query) {
         const user = interaction.user.id === userId
             ? interaction.user
             : await interaction.client.users.fetch(userId).catch(() => interaction.user);
-        const result = await this.buildCompletionEmbed(userId, page, year, user);
+        const result = await this.buildCompletionEmbed(userId, page, year, user, query);
         if (!result) {
             await safeReply(interaction, {
                 content: year
@@ -624,6 +624,7 @@ let GameCompletionCommands = class GameCompletionCommands {
         }
         const { embed, attachment, totalPages, safePage } = result;
         const yearPart = year ? String(year) : "";
+        const queryPart = query ? `:${query.slice(0, 50)}` : "";
         const components = [];
         if (totalPages > 1) {
             const options = [];
@@ -644,17 +645,17 @@ let GameCompletionCommands = class GameCompletionCommands {
                 });
             }
             const select = new StringSelectMenuBuilder()
-                .setCustomId(`comp-page-select:${userId}:${yearPart}:list`)
+                .setCustomId(`comp-page-select:${userId}:${yearPart}:list${queryPart}`)
                 .setPlaceholder(`Page ${safePage + 1} of ${totalPages}`)
                 .addOptions(options);
             components.push(new ActionRowBuilder().addComponents(select));
             const prev = new ButtonBuilder()
-                .setCustomId(`comp-list-page:${userId}:${yearPart}:${safePage}:prev`)
+                .setCustomId(`comp-list-page:${userId}:${yearPart}:${safePage}:prev${queryPart}`)
                 .setLabel("Previous")
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(safePage <= 0);
             const next = new ButtonBuilder()
-                .setCustomId(`comp-list-page:${userId}:${yearPart}:${safePage}:next`)
+                .setCustomId(`comp-list-page:${userId}:${yearPart}:${safePage}:next${queryPart}`)
                 .setLabel("Next")
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(safePage >= totalPages - 1);
@@ -1068,12 +1069,18 @@ __decorate([
         type: ApplicationCommandOptionType.Integer,
     })),
     __param(2, SlashOption({
+        description: "Filter by title (optional)",
+        name: "query",
+        required: false,
+        type: ApplicationCommandOptionType.String,
+    })),
+    __param(3, SlashOption({
         description: "Member to view; defaults to you.",
         name: "member",
         required: false,
         type: ApplicationCommandOptionType.User,
     })),
-    __param(3, SlashOption({
+    __param(4, SlashOption({
         description: "If true, show in channel instead of ephemerally.",
         name: "showinchat",
         required: false,
@@ -1096,7 +1103,13 @@ __decorate([
     }))
 ], GameCompletionCommands.prototype, "completionEdit", null);
 __decorate([
-    Slash({ description: "Delete one of your completion records", name: "delete" })
+    Slash({ description: "Delete one of your completion records", name: "delete" }),
+    __param(0, SlashOption({
+        description: "Filter by title (optional)",
+        name: "query",
+        required: false,
+        type: ApplicationCommandOptionType.String,
+    }))
 ], GameCompletionCommands.prototype, "completionDelete", null);
 __decorate([
     SelectMenuComponent({ id: /^completion-add-select:.+/ })

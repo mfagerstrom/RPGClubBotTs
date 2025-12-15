@@ -249,6 +249,13 @@ export class GameCompletionCommands {
     })
     year: number | undefined,
     @SlashOption({
+      description: "Filter by title (optional)",
+      name: "query",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    query: string | undefined,
+    @SlashOption({
       description: "Member to view; defaults to you.",
       name: "member",
       required: false,
@@ -273,7 +280,7 @@ export class GameCompletionCommands {
     }
 
     const targetUserId = member ? member.id : interaction.user.id;
-    await this.renderCompletionPage(interaction, targetUserId, 0, year ?? null, ephemeral);
+    await this.renderCompletionPage(interaction, targetUserId, 0, year ?? null, ephemeral, query);
   }
 
   @Slash({ description: "Edit one of your completion records", name: "edit" })
@@ -306,9 +313,25 @@ export class GameCompletionCommands {
   }
 
   @Slash({ description: "Delete one of your completion records", name: "delete" })
-  async completionDelete(interaction: CommandInteraction): Promise<void> {
+  async completionDelete(
+    @SlashOption({
+      description: "Filter by title (optional)",
+      name: "query",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    query: string | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-    await this.renderSelectionPage(interaction, interaction.user.id, 0, "delete");
+    await this.renderSelectionPage(
+      interaction,
+      interaction.user.id,
+      0,
+      "delete",
+      null,
+      query,
+    );
   }
 
   @SelectMenuComponent({ id: /^completion-add-select:.+/ })
@@ -629,6 +652,7 @@ export class GameCompletionCommands {
         page,
         Number.isNaN(year ?? NaN) ? null : year,
         ephemeral,
+        query,
       );
     } else {
       await this.renderSelectionPage(interaction, ownerId, page, mode, year, query);
@@ -671,6 +695,7 @@ export class GameCompletionCommands {
         nextPage,
         Number.isNaN(year ?? NaN) ? null : year,
         ephemeral,
+        query,
       );
     } else {
       await this.renderSelectionPage(interaction, ownerId, nextPage, mode, year, query);
@@ -892,13 +917,14 @@ export class GameCompletionCommands {
     page: number,
     year: number | null,
     ephemeral: boolean,
+    query?: string,
   ): Promise<void> {
     const user =
       interaction.user.id === userId
         ? interaction.user
         : await interaction.client.users.fetch(userId).catch(() => interaction.user);
 
-    const result = await this.buildCompletionEmbed(userId, page, year, user);
+    const result = await this.buildCompletionEmbed(userId, page, year, user, query);
 
     if (!result) {
       await safeReply(interaction as any, {
@@ -913,6 +939,7 @@ export class GameCompletionCommands {
     const { embed, attachment, totalPages, safePage } = result;
 
     const yearPart = year ? String(year) : "";
+    const queryPart = query ? `:${query.slice(0, 50)}` : "";
     const components: any[] = [];
 
     if (totalPages > 1) {
@@ -937,19 +964,19 @@ export class GameCompletionCommands {
       }
 
       const select = new StringSelectMenuBuilder()
-        .setCustomId(`comp-page-select:${userId}:${yearPart}:list`)
+        .setCustomId(`comp-page-select:${userId}:${yearPart}:list${queryPart}`)
         .setPlaceholder(`Page ${safePage + 1} of ${totalPages}`)
         .addOptions(options);
 
       components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select));
 
       const prev = new ButtonBuilder()
-        .setCustomId(`comp-list-page:${userId}:${yearPart}:${safePage}:prev`)
+        .setCustomId(`comp-list-page:${userId}:${yearPart}:${safePage}:prev${queryPart}`)
         .setLabel("Previous")
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(safePage <= 0);
       const next = new ButtonBuilder()
-        .setCustomId(`comp-list-page:${userId}:${yearPart}:${safePage}:next`)
+        .setCustomId(`comp-list-page:${userId}:${yearPart}:${safePage}:next${queryPart}`)
         .setLabel("Next")
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(safePage >= totalPages - 1);
