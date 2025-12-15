@@ -421,12 +421,24 @@ export class GameCompletionCommands {
       return;
     }
 
+    if (field === "type") {
+      const select = new StringSelectMenuBuilder()
+        .setCustomId(`comp-edit-type-select:${ownerId}:${completionId}`)
+        .setPlaceholder("Select completion type")
+        .addOptions(COMPLETION_TYPES.map((t) => ({ label: t, value: t })));
+
+      await interaction.reply({
+        content: "Select the new completion type:",
+        components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
     const prompt =
-      field === "type"
-        ? "Type the new completion type (Main Story | Main Story + Side Content | Completionist):"
-        : field === "date"
-          ? "Type the new completion date (e.g., 2025-12-11)."
-          : "Type the new final playtime in hours (e.g., 42.5).";
+      field === "date"
+        ? "Type the new completion date (e.g., 2025-12-11)."
+        : "Type the new final playtime in hours (e.g., 42.5).";
 
     await interaction.reply({
       content: prompt,
@@ -461,13 +473,7 @@ export class GameCompletionCommands {
 
     const value = message.content.trim();
     try {
-      if (field === "type") {
-        const normalized = COMPLETION_TYPES.find((t) => t.toLowerCase() === value.toLowerCase());
-        if (!normalized) {
-          throw new Error("Invalid completion type.");
-        }
-        await Member.updateCompletion(ownerId, completionId, { completionType: normalized });
-      } else if (field === "date") {
+      if (field === "date") {
         const dt = parseCompletionDateInput(value);
         await Member.updateCompletion(ownerId, completionId, { completedAt: dt });
       } else if (field === "playtime") {
@@ -492,6 +498,43 @@ export class GameCompletionCommands {
       } catch {
         // ignore
       }
+    }
+  }
+
+  @SelectMenuComponent({ id: /^comp-edit-type-select:[^:]+:\d+$/ })
+  async handleCompletionTypeSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const [, ownerId, completionIdRaw] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await interaction.reply({
+        content: "This edit prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const completionId = Number(completionIdRaw);
+    const value = interaction.values[0];
+    const normalized = COMPLETION_TYPES.find((t) => t.toLowerCase() === value.toLowerCase());
+
+    if (!normalized) {
+      await interaction.reply({
+        content: "Invalid completion type selected.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await Member.updateCompletion(ownerId, completionId, { completionType: normalized });
+
+    await interaction.reply({
+      content: `Completion type updated to **${normalized}**.`,
+      flags: MessageFlags.Ephemeral,
+    });
+
+    try {
+      await interaction.message.edit({ components: [] }).catch(() => {});
+    } catch {
+      // ignore
     }
   }
 
@@ -643,7 +686,11 @@ export class GameCompletionCommands {
     });
 
     const addChunkedField = (yr: string, content: string, chunkIndex: number): void => {
-      const name = chunkIndex === 0 ? yr : "";
+      let name = "";
+      if (chunkIndex === 0) {
+        const count = yearCounts[yr] ?? 0;
+        name = `${yr} (${count})`;
+      }
       embed.addFields({ name, value: content || "None", inline: false });
     };
 
@@ -856,7 +903,7 @@ export class GameCompletionCommands {
   ): Promise<void> {
     const igdbSearch = await igdbService.searchGames(searchTerm);
     if (!igdbSearch.results.length) {
-      const content = `No GameDB or IGDB matches found for "${searchTerm}".`;
+      const content = `No GameDB or IGDB matches found for "${searchTerm}" (len: ${searchTerm.length}).`;
       if (interaction.isMessageComponent()) {
         if (interaction.deferred || interaction.replied) {
           await interaction.editReply({ content, components: [] });
