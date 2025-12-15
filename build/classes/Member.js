@@ -278,7 +278,7 @@ export default class Member {
         }
     }
     static async getCompletions(params) {
-        const { userId, limit, offset = 0, year = null } = params;
+        const { userId, limit, offset = 0, year = null, title } = params;
         const connection = await getOraclePool().getConnection();
         const safeLimit = Math.min(Math.max(limit, 1), 1000);
         const safeOffset = Math.max(offset, 0);
@@ -287,6 +287,10 @@ export default class Member {
         if (year) {
             clauses.push("EXTRACT(YEAR FROM c.COMPLETED_AT) = :year");
             binds.year = year;
+        }
+        if (title) {
+            clauses.push("UPPER(g.TITLE) LIKE '%' || UPPER(:title) || '%'");
+            binds.title = title;
         }
         try {
             const res = await connection.execute(`
@@ -338,18 +342,23 @@ export default class Member {
             await connection.close();
         }
     }
-    static async countCompletions(userId, year) {
+    static async countCompletions(userId, year, title) {
         const connection = await getOraclePool().getConnection();
-        const clauses = ["USER_ID = :userId"];
+        const clauses = ["c.USER_ID = :userId"];
         const binds = { userId };
         if (year) {
-            clauses.push("EXTRACT(YEAR FROM COMPLETED_AT) = :year");
+            clauses.push("EXTRACT(YEAR FROM c.COMPLETED_AT) = :year");
             binds.year = year;
+        }
+        if (title) {
+            clauses.push("UPPER(g.TITLE) LIKE '%' || UPPER(:title) || '%'");
+            binds.title = title;
         }
         try {
             const res = await connection.execute(`
         SELECT COUNT(*) AS CNT
-          FROM USER_GAME_COMPLETIONS
+          FROM USER_GAME_COMPLETIONS c
+          JOIN GAMEDB_GAMES g ON g.GAME_ID = c.GAMEDB_GAME_ID
          WHERE ${clauses.join(" AND ")}
         `, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
             return Number((res.rows ?? [])[0]?.CNT ?? 0);
@@ -430,6 +439,30 @@ export default class Member {
             const msg = err?.message ?? String(err);
             console.error(`[Member] Failed to load nick history for ${userId}: ${msg}`);
             return [];
+        }
+        finally {
+            await connection.close();
+        }
+    }
+    static async getCompletionLeaderboard(limit = 25) {
+        const connection = await getOraclePool().getConnection();
+        const safeLimit = Math.min(Math.max(limit, 1), 100);
+        try {
+            const res = await connection.execute(`
+        SELECT c.USER_ID, u.USERNAME, u.GLOBAL_NAME, COUNT(*) AS CNT
+          FROM USER_GAME_COMPLETIONS c
+          JOIN RPG_CLUB_USERS u ON u.USER_ID = c.USER_ID
+         WHERE u.SERVER_LEFT_AT IS NULL
+         GROUP BY c.USER_ID, u.USERNAME, u.GLOBAL_NAME
+         ORDER BY CNT DESC
+         FETCH FIRST :limit ROWS ONLY
+        `, { limit: safeLimit }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+            return (res.rows ?? []).map((row) => ({
+                userId: row.USER_ID,
+                username: row.USERNAME ?? null,
+                globalName: row.GLOBAL_NAME ?? null,
+                count: Number(row.CNT),
+            }));
         }
         finally {
             await connection.close();

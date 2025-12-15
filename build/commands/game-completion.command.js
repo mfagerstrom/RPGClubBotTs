@@ -107,14 +107,18 @@ let GameCompletionCommands = class GameCompletionCommands {
             query: searchTerm,
         });
     }
-    async completionList(year, showInChat, interaction) {
+    async completionList(showAll, year, showInChat, interaction) {
         const ephemeral = !showInChat;
         await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
+        if (showAll) {
+            await this.renderCompletionLeaderboard(interaction, ephemeral);
+            return;
+        }
         await this.renderCompletionPage(interaction, interaction.user.id, 0, year ?? null, ephemeral);
     }
-    async completionEdit(interaction) {
+    async completionEdit(query, year, interaction) {
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-        await this.renderSelectionPage(interaction, interaction.user.id, 0, "edit");
+        await this.renderSelectionPage(interaction, interaction.user.id, 0, "edit", year ?? null, query);
     }
     async completionDelete(interaction) {
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
@@ -378,7 +382,8 @@ let GameCompletionCommands = class GameCompletionCommands {
         const yearRaw = parts[2];
         const pageRaw = parts[3];
         const dir = parts[4];
-        if (interaction.user.id !== ownerId) {
+        const query = parts.slice(5).join(":") || undefined;
+        if (mode !== "list" && interaction.user.id !== ownerId) {
             await interaction.reply({
                 content: "This list isn't for you.",
                 flags: MessageFlags.Ephemeral,
@@ -401,16 +406,52 @@ let GameCompletionCommands = class GameCompletionCommands {
             await this.renderCompletionPage(interaction, ownerId, nextPage, Number.isNaN(year ?? NaN) ? null : year, ephemeral);
         }
         else {
-            await this.renderSelectionPage(interaction, ownerId, nextPage, mode);
+            await this.renderSelectionPage(interaction, ownerId, nextPage, mode, year, query);
         }
+    }
+    async renderCompletionLeaderboard(interaction, ephemeral) {
+        const leaderboard = await Member.getCompletionLeaderboard(25);
+        if (!leaderboard.length) {
+            await safeReply(interaction, {
+                content: "No completions recorded yet.",
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+            });
+            return;
+        }
+        const lines = leaderboard.map((m, idx) => {
+            const name = m.globalName ?? m.username ?? m.userId;
+            return `${idx + 1}. **${name}**: ${m.count} completions`;
+        });
+        const embed = new EmbedBuilder()
+            .setTitle("Game Completion Leaderboard")
+            .setDescription(lines.join("\n"));
+        const options = leaderboard.map((m) => ({
+            label: (m.globalName ?? m.username ?? m.userId).slice(0, 100),
+            value: m.userId,
+            description: `${m.count} completions`,
+        }));
+        const select = new StringSelectMenuBuilder()
+            .setCustomId("comp-leaderboard-select")
+            .setPlaceholder("View completions for a member")
+            .addOptions(options);
+        await safeReply(interaction, {
+            embeds: [embed],
+            components: [new ActionRowBuilder().addComponents(select)],
+            flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+        });
+    }
+    async handleCompletionLeaderboardSelect(interaction) {
+        const userId = interaction.values[0];
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        await this.renderCompletionPage(interaction, userId, 0, null, true);
     }
     createCompletionSession(ctx) {
         const sessionId = `comp-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
         completionAddSessions.set(sessionId, ctx);
         return sessionId;
     }
-    async buildCompletionEmbed(userId, page, year, interactionUser) {
-        const total = await Member.countCompletions(userId, year);
+    async buildCompletionEmbed(userId, page, year, interactionUser, query) {
+        const total = await Member.countCompletions(userId, year, query);
         if (total === 0)
             return null;
         const totalPages = Math.max(1, Math.ceil(total / COMPLETION_PAGE_SIZE));
@@ -421,6 +462,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             limit: 1000,
             offset: 0,
             year,
+            title: query,
         });
         allCompletions.sort((a, b) => {
             const dateA = a.completedAt ? a.completedAt.getTime() : 0;
@@ -565,13 +607,15 @@ let GameCompletionCommands = class GameCompletionCommands {
             flags: ephemeral ? MessageFlags.Ephemeral : undefined,
         });
     }
-    async renderSelectionPage(interaction, userId, page, mode) {
+    async renderSelectionPage(interaction, userId, page, mode, year = null, query) {
         const user = interaction.user.id === userId
             ? interaction.user
             : await interaction.client.users.fetch(userId).catch(() => interaction.user);
-        const result = await this.buildCompletionEmbed(userId, page, null, user);
+        const result = await this.buildCompletionEmbed(userId, page, year, user, query);
         if (!result) {
-            const msg = mode === "edit" ? "You have no completions to edit." : "You have no completions to delete.";
+            const msg = mode === "edit"
+                ? "You have no completions to edit matching your filters."
+                : "You have no completions to delete matching your filters.";
             if (interaction.isMessageComponent() && !interaction.deferred && !interaction.replied) {
                 await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
             }
@@ -592,13 +636,14 @@ let GameCompletionCommands = class GameCompletionCommands {
             .setPlaceholder(`Select a completion to ${mode}`)
             .addOptions(selectOptions);
         const selectRow = new ActionRowBuilder().addComponents(select);
+        const queryPart = query ? `:${query.slice(0, 50)}` : "";
         const prev = new ButtonBuilder()
-            .setCustomId(`comp-${mode}-page:${userId}::${safePage}:prev`)
+            .setCustomId(`comp-${mode}-page:${userId}:${year ?? ""}:${safePage}:prev${queryPart}`)
             .setLabel("Previous")
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(safePage <= 0);
         const next = new ButtonBuilder()
-            .setCustomId(`comp-${mode}-page:${userId}::${safePage}:next`)
+            .setCustomId(`comp-${mode}-page:${userId}:${year ?? ""}:${safePage}:next${queryPart}`)
             .setLabel("Next")
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(safePage >= totalPages - 1);
@@ -890,12 +935,18 @@ __decorate([
 __decorate([
     Slash({ description: "List your completed games", name: "list" }),
     __param(0, SlashOption({
+        description: "Show a leaderboard of all members with completions.",
+        name: "all",
+        required: false,
+        type: ApplicationCommandOptionType.Boolean,
+    })),
+    __param(1, SlashOption({
         description: "Filter to a specific year (optional)",
         name: "year",
         required: false,
         type: ApplicationCommandOptionType.Integer,
     })),
-    __param(1, SlashOption({
+    __param(2, SlashOption({
         description: "If true, show in channel instead of ephemerally.",
         name: "showinchat",
         required: false,
@@ -903,7 +954,19 @@ __decorate([
     }))
 ], GameCompletionCommands.prototype, "completionList", null);
 __decorate([
-    Slash({ description: "Edit one of your completion records", name: "edit" })
+    Slash({ description: "Edit one of your completion records", name: "edit" }),
+    __param(0, SlashOption({
+        description: "Filter by title (optional)",
+        name: "query",
+        required: false,
+        type: ApplicationCommandOptionType.String,
+    })),
+    __param(1, SlashOption({
+        description: "Filter by year (optional)",
+        name: "year",
+        required: false,
+        type: ApplicationCommandOptionType.Integer,
+    }))
 ], GameCompletionCommands.prototype, "completionEdit", null);
 __decorate([
     Slash({ description: "Delete one of your completion records", name: "delete" })
@@ -924,8 +987,11 @@ __decorate([
     SelectMenuComponent({ id: /^comp-edit-type-select:[^:]+:\d+$/ })
 ], GameCompletionCommands.prototype, "handleCompletionTypeSelect", null);
 __decorate([
-    ButtonComponent({ id: /^comp-(list|edit|delete)-page:[^:]+:[^:]*:\d+:(prev|next)$/ })
+    ButtonComponent({ id: /^comp-(list|edit|delete)-page:[^:]+:[^:]*:\d+:(prev|next)(?::.*)?$/ })
 ], GameCompletionCommands.prototype, "handleCompletionPaging", null);
+__decorate([
+    SelectMenuComponent({ id: "comp-leaderboard-select" })
+], GameCompletionCommands.prototype, "handleCompletionLeaderboardSelect", null);
 GameCompletionCommands = __decorate([
     Discord(),
     SlashGroup({ description: "Manage game completions", name: "game-completion" }),

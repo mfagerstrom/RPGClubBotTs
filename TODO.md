@@ -1,5 +1,3 @@
-- Adding a completion for a new game that requires an import from IGDB shows failed interaction, but it actually works.
-- Editing completion data is completly broken
 - /admin newround-setup needs some work, see feedback in #admin
 - Normalize all embed styles / colors / etc
 - Finish developing now-playing commands, the embeds could use some work

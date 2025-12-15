@@ -236,6 +236,13 @@ export class GameCompletionCommands {
     })
     year: number | undefined,
     @SlashOption({
+      description: "Member to view; defaults to you.",
+      name: "member",
+      required: false,
+      type: ApplicationCommandOptionType.User,
+    })
+    member: User | undefined,
+    @SlashOption({
       description: "If true, show in channel instead of ephemerally.",
       name: "showinchat",
       required: false,
@@ -252,7 +259,8 @@ export class GameCompletionCommands {
       return;
     }
 
-    await this.renderCompletionPage(interaction, interaction.user.id, 0, year ?? null, ephemeral);
+    const targetUserId = member ? member.id : interaction.user.id;
+    await this.renderCompletionPage(interaction, targetUserId, 0, year ?? null, ephemeral);
   }
 
   @Slash({ description: "Edit one of your completion records", name: "edit" })
