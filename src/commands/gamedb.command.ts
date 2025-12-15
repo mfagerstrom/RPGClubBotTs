@@ -181,6 +181,9 @@ export class GameDb {
         interaction.user.id,
         opts,
         async (sel, igdbId) => {
+          if (!sel.deferred && !sel.replied) {
+            await sel.deferUpdate().catch(() => {});
+          }
           await this.addGameToDatabase(sel, igdbId, { selectionMessage: sel.message as any });
         },
       );
@@ -311,6 +314,9 @@ export class GameDb {
       interaction.user.id,
       opts,
       async (sel, igdbId) => {
+        if (!sel.deferred && !sel.replied) {
+          await sel.deferUpdate().catch(() => {});
+        }
         await this.addGameToDatabase(sel, igdbId, { selectionMessage: sel.message as any });
       },
     );

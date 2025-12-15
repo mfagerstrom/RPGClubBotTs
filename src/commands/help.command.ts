@@ -29,6 +29,7 @@ type HelpTopicId =
   | "rss"
   | "mp-info"
   | "profile"
+  | "game-completion"
   | "gamedb"
   | "publicreminder"
   | "thread"
@@ -82,6 +83,20 @@ type ProfileHelpTopicId =
 
 type ProfileHelpTopic = {
   id: ProfileHelpTopicId;
+  label: string;
+  summary: string;
+  syntax: string;
+  notes?: string;
+};
+
+type GameCompletionHelpTopicId =
+  | "add"
+  | "list"
+  | "edit"
+  | "delete";
+
+type GameCompletionHelpTopic = {
+  id: GameCompletionHelpTopicId;
   label: string;
   summary: string;
   syntax: string;
@@ -171,6 +186,12 @@ const HELP_TOPICS: HelpTopic[] = [
     syntax: "Use /now-playing help for subcommands: list, add, remove.",
   },
   {
+    id: "game-completion",
+    label: "/game-completion",
+    summary: "Log completed games (removes them from Now Playing if present).",
+    syntax: "Use /game-completion help for subcommands: add, list, edit, delete.",
+  },
+  {
     id: "remindme",
     label: "/remindme",
     summary: "Set personal reminders with snooze buttons (delivered by DM).",
@@ -252,7 +273,7 @@ const HELP_CATEGORIES: { id: string; name: string; topicIds: HelpTopicId[] }[] =
   {
     id: "gamedb",
     name: "GameDB",
-    topicIds: ["gamedb", "now-playing"],
+    topicIds: ["gamedb", "now-playing", "game-completion"],
   },
   {
     id: "utilities",
@@ -660,11 +681,7 @@ const PROFILE_HELP_TOPICS: ProfileHelpTopic[] = [
 type NowPlayingHelpTopicId =
   | "list"
   | "add"
-  | "remove"
-  | "completion-add"
-  | "completion-list"
-  | "completion-edit"
-  | "completion-delete";
+  | "remove";
 
 type NowPlayingHelpTopic = {
   id: NowPlayingHelpTopicId;
@@ -699,37 +716,83 @@ const NOW_PLAYING_HELP_TOPICS: NowPlayingHelpTopic[] = [
     notes:
       "Shows a dropdown of your current list to pick what to remove.",
   },
+];
+
+const GAME_COMPLETION_HELP_TOPICS: GameCompletionHelpTopic[] = [
   {
-    id: "completion-add",
-    label: "/now-playing completion add",
+    id: "add",
+    label: "/game-completion add",
     summary: "Log that you completed a game (removes it from Now Playing if present).",
     syntax:
-      "Syntax: /now-playing completion add [game_id:<int> | query:<string> | from_now_playing:<bool>] completion_type:<choice> [completion_date:<date>] [final_playtime_hours:<number>]",
+      "Syntax: /game-completion add [game_id:<int> | query:<string> | from_now_playing:<bool>] completion_type:<choice> [completion_date:<date>] [final_playtime_hours:<number>]",
     notes:
       "Completion type choices: Main Story, Main Story + Side Content, Completionist. Completion date defaults to today; playtime is optional (e.g., 42.5). Uses GameDB lookup/import if you provide a query.",
   },
   {
-    id: "completion-list",
-    label: "/now-playing completion list",
+    id: "list",
+    label: "/game-completion list",
     summary: "List your recent completions.",
-    syntax: "Syntax: /now-playing completion list [year:<int>] [showinchat:<bool>]",
+    syntax: "Syntax: /game-completion list [year:<int>] [showinchat:<bool>]",
     notes: "Shows your completions, paging through them.",
   },
   {
-    id: "completion-edit",
-    label: "/now-playing completion edit",
+    id: "edit",
+    label: "/game-completion edit",
     summary: "Edit one of your completion records.",
-    syntax: "Syntax: /now-playing completion edit",
+    syntax: "Syntax: /game-completion edit",
     notes: "Interactive menu to pick a completion and field to update.",
   },
   {
-    id: "completion-delete",
-    label: "/now-playing completion delete",
+    id: "delete",
+    label: "/game-completion delete",
     summary: "Delete one of your completion records.",
-    syntax: "Syntax: /now-playing completion delete",
+    syntax: "Syntax: /game-completion delete",
     notes: "Interactive menu to pick a completion to delete.",
   },
 ];
+
+function buildGameCompletionHelpButtons(
+  activeId?: GameCompletionHelpTopicId,
+): ActionRowBuilder<StringSelectMenuBuilder>[] {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("game-completion-help-select")
+    .setPlaceholder("/game-completion help")
+    .addOptions(
+      GAME_COMPLETION_HELP_TOPICS.map((topic) => ({
+        label: topic.label,
+        value: topic.id,
+        description: topic.summary.slice(0, 95),
+        default: topic.id === activeId,
+      })),
+    )
+    .addOptions({ label: "Back to Help Main Menu", value: "help-main" });
+
+  return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
+}
+
+function buildGameCompletionHelpEmbed(topic: GameCompletionHelpTopic): EmbedBuilder {
+  const embed = new EmbedBuilder()
+    .setTitle(`${topic.label} help`)
+    .setDescription(topic.summary)
+    .addFields({ name: "Syntax", value: topic.syntax });
+
+  if (topic.notes) {
+    embed.addFields({ name: "Notes", value: topic.notes });
+  }
+
+  return embed;
+}
+
+export function buildGameCompletionHelpResponse(
+  activeTopicId?: GameCompletionHelpTopicId,
+): { embeds: EmbedBuilder[]; components: ActionRowBuilder<StringSelectMenuBuilder>[] } {
+  const embed = new EmbedBuilder()
+    .setTitle("/game-completion commands")
+    .setDescription("Choose a subcommand from the dropdown to view details.");
+
+  const components = buildGameCompletionHelpButtons(activeTopicId);
+  return { embeds: [embed], components };
+}
 
 const GAMEDB_HELP_TOPICS: GameDbHelpTopic[] = [
   {
@@ -824,7 +887,8 @@ export function buildMainHelpResponse(): {
         `${formatCommandLine("mp-info", "Find who has shared multiplayer info.")}\n\n` +
         "**GameDB**\n" +
         `${formatCommandLine("gamedb", "Search/import games and view GameDB details.")}\n` +
-        `${formatCommandLine("now-playing", "Show Now Playing lists and thread links.")}\n\n` +
+        `${formatCommandLine("now-playing", "Show Now Playing lists and thread links.")}\n` +
+        `${formatCommandLine("game-completion", "Log and manage your completed games.")}\n\n` +
         "**Utilities**\n" +
         `${formatCommandLine("hltb", "Look up HowLongToBeat playtimes.")}\n` +
         `${formatCommandLine("coverart", "Grab cover art for a game.")}\n` +
@@ -1174,6 +1238,32 @@ export class BotHelp {
     });
   }
 
+  @SelectMenuComponent({ id: "game-completion-help-select" })
+  async handleGameCompletionHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
+    const topicId = interaction.values?.[0] as GameCompletionHelpTopicId | "help-main" | undefined;
+    if (topicId === "help-main") {
+      const response = buildMainHelpResponse();
+      await safeUpdate(interaction, response);
+      return;
+    }
+    const topic = GAME_COMPLETION_HELP_TOPICS.find((entry) => entry.id === topicId);
+
+    if (!topic) {
+      const response = buildGameCompletionHelpResponse();
+      await safeUpdate(interaction, {
+        ...response,
+        content: "Sorry, I don't recognize that game-completion help topic. Showing the help menu.",
+      });
+      return;
+    }
+
+    const embed = buildGameCompletionHelpEmbed(topic);
+    await safeUpdate(interaction, {
+      embeds: [embed],
+      components: buildGameCompletionHelpButtons(topic.id),
+    });
+  }
+
   @ButtonComponent({ id: "help-main" })
   async handleHelpMainButton(interaction: ButtonInteraction): Promise<void> {
     const response = buildMainHelpResponse();
@@ -1196,6 +1286,8 @@ function buildTopicHelpResponse(
       return buildRemindMeHelpResponse();
     case "profile":
       return buildProfileHelpResponse();
+    case "game-completion":
+      return buildGameCompletionHelpResponse();
     case "now-playing":
       return buildNowPlayingHelpResponse();
     case "gamedb":
