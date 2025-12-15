@@ -114,57 +114,11 @@ let GameCompletionCommands = class GameCompletionCommands {
     }
     async completionEdit(interaction) {
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-        const completions = await Member.getCompletions({ userId: interaction.user.id, limit: 10 });
-        if (!completions.length) {
-            await safeReply(interaction, {
-                content: "You have no completions to edit.",
-                flags: MessageFlags.Ephemeral,
-            });
-            return;
-        }
-        const emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
-        const lines = completions.map((c, idx) => `${emojis[idx]} ${c.title} — ${c.completionType} (${c.completedAt ? formatDiscordTimestamp(c.completedAt) : "No date"})`);
-        const buttons = completions.map((c, idx) => new ButtonBuilder()
-            .setCustomId(`comp-edit:${interaction.user.id}:${c.completionId}`)
-            .setLabel(emojis[idx])
-            .setStyle(ButtonStyle.Primary));
-        const rows = [];
-        for (let i = 0; i < buttons.length; i += 5) {
-            rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
-        }
-        await safeReply(interaction, {
-            content: "Select a completion to edit:",
-            embeds: [new EmbedBuilder().setTitle("Your Completions").setDescription(lines.join("\n"))],
-            components: rows,
-            flags: MessageFlags.Ephemeral,
-        });
+        await this.renderSelectionPage(interaction, interaction.user.id, 0, "edit");
     }
     async completionDelete(interaction) {
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-        const completions = await Member.getCompletions({ userId: interaction.user.id, limit: 10 });
-        if (!completions.length) {
-            await safeReply(interaction, {
-                content: "You have no completions to delete.",
-                flags: MessageFlags.Ephemeral,
-            });
-            return;
-        }
-        const emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
-        const lines = completions.map((c, idx) => `${emojis[idx]} ${c.title} — ${c.completionType} (${c.completedAt ? formatDiscordTimestamp(c.completedAt) : "No date"})`);
-        const buttons = completions.map((c, idx) => new ButtonBuilder()
-            .setCustomId(`comp-del:${interaction.user.id}:${c.completionId}`)
-            .setLabel(emojis[idx])
-            .setStyle(ButtonStyle.Danger));
-        const rows = [];
-        for (let i = 0; i < buttons.length; i += 5) {
-            rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
-        }
-        await safeReply(interaction, {
-            content: "Select a completion to delete:",
-            embeds: [new EmbedBuilder().setTitle("Your Completions").setDescription(lines.join("\n"))],
-            components: rows,
-            flags: MessageFlags.Ephemeral,
-        });
+        await this.renderSelectionPage(interaction, interaction.user.id, 0, "delete");
     }
     async handleCompletionAddSelect(interaction) {
         const [, sessionId] = interaction.customId.split(":");
@@ -211,8 +165,8 @@ let GameCompletionCommands = class GameCompletionCommands {
             }
         }
     }
-    async handleCompletionDeleteButton(interaction) {
-        const [, ownerId, completionIdRaw] = interaction.customId.split(":");
+    async handleCompletionDeleteMenu(interaction) {
+        const [, ownerId] = interaction.customId.split(":");
         if (interaction.user.id !== ownerId) {
             await interaction.reply({
                 content: "This delete prompt isn't for you.",
@@ -220,7 +174,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             });
             return;
         }
-        const completionId = Number(completionIdRaw);
+        const completionId = Number(interaction.values[0]);
         if (!Number.isInteger(completionId) || completionId <= 0) {
             await interaction.reply({
                 content: "Invalid selection.",
@@ -247,8 +201,8 @@ let GameCompletionCommands = class GameCompletionCommands {
             // ignore
         }
     }
-    async handleCompletionEditSelect(interaction) {
-        const [, ownerId, completionIdRaw] = interaction.customId.split(":");
+    async handleCompletionEditMenu(interaction) {
+        const [, ownerId] = interaction.customId.split(":");
         if (interaction.user.id !== ownerId) {
             await interaction.reply({
                 content: "This edit prompt isn't for you.",
@@ -256,7 +210,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             });
             return;
         }
-        const completionId = Number(completionIdRaw);
+        const completionId = Number(interaction.values[0]);
         if (!Number.isInteger(completionId) || completionId <= 0) {
             await interaction.reply({
                 content: "Invalid selection.",
@@ -384,8 +338,13 @@ let GameCompletionCommands = class GameCompletionCommands {
             }
         }
     }
-    async handleCompletionListPaging(interaction) {
-        const [, ownerId, yearRaw, pageRaw, dir] = interaction.customId.split(":");
+    async handleCompletionPaging(interaction) {
+        const parts = interaction.customId.split(":");
+        const mode = parts[0].split("-")[1];
+        const ownerId = parts[1];
+        const yearRaw = parts[2];
+        const pageRaw = parts[3];
+        const dir = parts[4];
         if (interaction.user.id !== ownerId) {
             await interaction.reply({
                 content: "This list isn't for you.",
@@ -405,35 +364,31 @@ let GameCompletionCommands = class GameCompletionCommands {
         catch {
             // ignore
         }
-        await this.renderCompletionPage(interaction, ownerId, nextPage, Number.isNaN(year ?? NaN) ? null : year, ephemeral);
+        if (mode === "list") {
+            await this.renderCompletionPage(interaction, ownerId, nextPage, Number.isNaN(year ?? NaN) ? null : year, ephemeral);
+        }
+        else {
+            await this.renderSelectionPage(interaction, ownerId, nextPage, mode);
+        }
     }
     createCompletionSession(ctx) {
         const sessionId = `comp-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
         completionAddSessions.set(sessionId, ctx);
         return sessionId;
     }
-    async renderCompletionPage(interaction, userId, page, year, ephemeral) {
+    async buildCompletionEmbed(userId, page, year, interactionUser) {
         const total = await Member.countCompletions(userId, year);
-        if (total === 0) {
-            await safeReply(interaction, {
-                content: year
-                    ? `You have no recorded completions for ${year}.`
-                    : "You have no recorded completions yet.",
-                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
-            });
-            return;
-        }
+        if (total === 0)
+            return null;
         const totalPages = Math.max(1, Math.ceil(total / COMPLETION_PAGE_SIZE));
         const safePage = Math.min(Math.max(page, 0), totalPages - 1);
         const offset = safePage * COMPLETION_PAGE_SIZE;
-        // Fetch all (up to 1000) to calculate year-based numbering correctly across pages
         const allCompletions = await Member.getCompletions({
             userId,
             limit: 1000,
             offset: 0,
             year,
         });
-        // Sort: Years Descending, then Date Ascending within year
         allCompletions.sort((a, b) => {
             const dateA = a.completedAt ? a.completedAt.getTime() : 0;
             const dateB = b.completedAt ? b.completedAt.getTime() : 0;
@@ -444,31 +399,19 @@ let GameCompletionCommands = class GameCompletionCommands {
             }
             return dateA - dateB;
         });
-        if (!allCompletions.length) {
-            if (safePage > 0) {
-                await this.renderCompletionPage(interaction, userId, 0, year, ephemeral);
-                return;
-            }
-            await safeReply(interaction, {
-                content: "You have no recorded completions yet.",
-                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
-            });
-            return;
-        }
-        // Calculate year-based index for every completion
+        if (!allCompletions.length)
+            return null;
         const yearCounts = {};
-        const yearIndices = new Map(); // completionId -> sequential index
+        const yearIndices = new Map();
         for (const c of allCompletions) {
             const yr = c.completedAt ? String(c.completedAt.getFullYear()) : "Unknown";
             yearCounts[yr] = (yearCounts[yr] ?? 0) + 1;
             yearIndices.set(c.completionId, yearCounts[yr]);
         }
-        // Slice for the requested page
         const pageCompletions = allCompletions.slice(offset, offset + COMPLETION_PAGE_SIZE);
-        const dateWidth = 10; // MM/DD/YYYY
-        // Determine max index width for padding
+        const dateWidth = 10;
         const maxIndexLabelLength = String(Math.max(...pageCompletions.map((c) => yearIndices.get(c.completionId) ?? 0)))
-            .length + 1; // +1 for dot
+            .length + 1;
         const grouped = pageCompletions.reduce((acc, c) => {
             const yr = c.completedAt ? String(c.completedAt.getFullYear()) : "Unknown";
             acc[yr] = acc[yr] || [];
@@ -488,8 +431,8 @@ let GameCompletionCommands = class GameCompletionCommands {
             acc[yr].push(line);
             return acc;
         }, {});
-        const authorName = interaction.user?.displayName ?? interaction.user?.username ?? "User";
-        const authorIcon = interaction.user?.displayAvatarURL?.({
+        const authorName = interactionUser.displayName ?? interactionUser.username ?? "User";
+        const authorIcon = interactionUser.displayAvatarURL?.({
             size: 64,
             forceStatic: false,
         });
@@ -537,6 +480,35 @@ let GameCompletionCommands = class GameCompletionCommands {
             }
             flush();
         }
+        const footerLines = ["M = Main Story • M+S = Main Story + Side Content • C = Completionist"];
+        if (totalPages > 1) {
+            footerLines.push(`${total} results. Page ${safePage + 1} of ${totalPages}.`);
+        }
+        embed.setFooter({ text: footerLines.join("\n") });
+        return {
+            embed,
+            attachment: buildGameDbThumbAttachment(),
+            total,
+            totalPages,
+            safePage,
+            pageCompletions,
+        };
+    }
+    async renderCompletionPage(interaction, userId, page, year, ephemeral) {
+        const user = interaction.user.id === userId
+            ? interaction.user
+            : await interaction.client.users.fetch(userId).catch(() => interaction.user);
+        const result = await this.buildCompletionEmbed(userId, page, year, user);
+        if (!result) {
+            await safeReply(interaction, {
+                content: year
+                    ? `You have no recorded completions for ${year}.`
+                    : "You have no recorded completions yet.",
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+            });
+            return;
+        }
+        const { embed, attachment, totalPages, safePage } = result;
         const yearPart = year ? String(year) : "";
         const prev = new ButtonBuilder()
             .setCustomId(`comp-list-page:${userId}:${yearPart}:${safePage}:prev`)
@@ -549,17 +521,71 @@ let GameCompletionCommands = class GameCompletionCommands {
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(safePage >= totalPages - 1);
         const components = totalPages > 1 ? [new ActionRowBuilder().addComponents(prev, next)] : [];
-        const footerLines = ["M = Main Story • M+S = Main Story + Side Content • C = Completionist"];
-        if (totalPages > 1) {
-            footerLines.push(`${total} results. Page ${safePage + 1} of ${totalPages}.`);
-        }
-        embed.setFooter({ text: footerLines.join("\n") });
         await safeReply(interaction, {
             embeds: [embed],
-            files: [buildGameDbThumbAttachment()],
+            files: [attachment],
             components,
             flags: ephemeral ? MessageFlags.Ephemeral : undefined,
         });
+    }
+    async renderSelectionPage(interaction, userId, page, mode) {
+        const user = interaction.user.id === userId
+            ? interaction.user
+            : await interaction.client.users.fetch(userId).catch(() => interaction.user);
+        const result = await this.buildCompletionEmbed(userId, page, null, user);
+        if (!result) {
+            const msg = mode === "edit" ? "You have no completions to edit." : "You have no completions to delete.";
+            if (interaction.isMessageComponent() && !interaction.deferred && !interaction.replied) {
+                await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
+            }
+            else {
+                await safeReply(interaction, { content: msg, flags: MessageFlags.Ephemeral });
+            }
+            return;
+        }
+        const { embed, attachment, totalPages, safePage, pageCompletions } = result;
+        const selectOptions = pageCompletions.map((c) => ({
+            label: c.title.slice(0, 100),
+            value: String(c.completionId),
+            description: `${c.completionType} (${c.completedAt ? formatDiscordTimestamp(c.completedAt) : "No date"})`.slice(0, 100),
+        }));
+        const selectId = mode === "edit" ? "comp-edit-menu" : "comp-del-menu";
+        const select = new StringSelectMenuBuilder()
+            .setCustomId(`${selectId}:${userId}`)
+            .setPlaceholder(`Select a completion to ${mode}`)
+            .addOptions(selectOptions);
+        const selectRow = new ActionRowBuilder().addComponents(select);
+        const prev = new ButtonBuilder()
+            .setCustomId(`comp-${mode}-page:${userId}:${safePage}:prev`)
+            .setLabel("Previous")
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(safePage <= 0);
+        const next = new ButtonBuilder()
+            .setCustomId(`comp-${mode}-page:${userId}:${safePage}:next`)
+            .setLabel("Next")
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(safePage >= totalPages - 1);
+        const navRow = new ActionRowBuilder().addComponents(prev, next);
+        const components = [selectRow];
+        if (totalPages > 1) {
+            components.push(navRow);
+        }
+        if (interaction.isMessageComponent()) {
+            if (interaction.deferred || interaction.replied) {
+                await interaction.editReply({ embeds: [embed], files: [attachment], components });
+            }
+            else {
+                await interaction.update({ embeds: [embed], files: [attachment], components });
+            }
+        }
+        else {
+            await safeReply(interaction, {
+                embeds: [embed],
+                files: [attachment],
+                components,
+                flags: MessageFlags.Ephemeral,
+            });
+        }
     }
     async promptCompletionSelection(interaction, searchTerm, ctx) {
         const localResults = await Game.searchGames(searchTerm);
@@ -849,17 +875,17 @@ __decorate([
     SelectMenuComponent({ id: /^completion-add-select:.+/ })
 ], GameCompletionCommands.prototype, "handleCompletionAddSelect", null);
 __decorate([
-    ButtonComponent({ id: /^comp-del:[^:]+:\d+$/ })
-], GameCompletionCommands.prototype, "handleCompletionDeleteButton", null);
+    SelectMenuComponent({ id: /^comp-del-menu:.+$/ })
+], GameCompletionCommands.prototype, "handleCompletionDeleteMenu", null);
 __decorate([
-    ButtonComponent({ id: /^comp-edit:[^:]+:\d+$/ })
-], GameCompletionCommands.prototype, "handleCompletionEditSelect", null);
+    SelectMenuComponent({ id: /^comp-edit-menu:.+$/ })
+], GameCompletionCommands.prototype, "handleCompletionEditMenu", null);
 __decorate([
     ButtonComponent({ id: /^comp-edit-field:[^:]+:\d+:(type|date|playtime)$/ })
 ], GameCompletionCommands.prototype, "handleCompletionFieldEdit", null);
 __decorate([
-    ButtonComponent({ id: /^comp-list-page:[^:]+:[^:]*:\d+:(prev|next)$/ })
-], GameCompletionCommands.prototype, "handleCompletionListPaging", null);
+    ButtonComponent({ id: /^comp-(list|edit|delete)-page:[^:]+:[^:]*:\d+:(prev|next)$/ })
+], GameCompletionCommands.prototype, "handleCompletionPaging", null);
 GameCompletionCommands = __decorate([
     Discord(),
     SlashGroup({ description: "Manage game completions", name: "game-completion" }),

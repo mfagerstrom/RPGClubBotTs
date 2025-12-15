@@ -782,12 +782,12 @@ export class GameCompletionCommands {
     const selectRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
 
     const prev = new ButtonBuilder()
-      .setCustomId(`comp-${mode}-page:${userId}:${safePage}:prev`)
+      .setCustomId(`comp-${mode}-page:${userId}::${safePage}:prev`)
       .setLabel("Previous")
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(safePage <= 0);
     const next = new ButtonBuilder()
-      .setCustomId(`comp-${mode}-page:${userId}:${safePage}:next`)
+      .setCustomId(`comp-${mode}-page:${userId}::${safePage}:next`)
       .setLabel("Next")
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(safePage >= totalPages - 1);
