@@ -1,4 +1,3 @@
-- /admin newround-setup needs some work, see feedback in #admin
 - Normalize all embed styles / colors / etc
 - Finish developing now-playing commands, the embeds could use some work
 - Add parameters to /gamedb add to narrow down to certain categories
