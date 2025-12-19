@@ -1,4 +1,4 @@
-import { ActivityType, Client, type Activity } from "discord.js";
+import { ActivityType, Client } from "discord.js";
 import type { AnyRepliable } from "./InteractionUtils.js";
 import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
@@ -171,23 +171,4 @@ export async function updateBotPresence(bot: Client): Promise<void> {
   } else {
     console.log("No presence data found in database.");
   }
-}
-
-export async function restorePresenceIfMissing(bot: Client): Promise<void> {
-  const activities: readonly Activity[] = bot.user?.presence?.activities ?? [];
-  const hasPresence: boolean = activities.some(
-    (activity) => (activity.name ?? "").trim().length > 0,
-  );
-  if (hasPresence) {
-    return;
-  }
-
-  const activityName: string | null = await readLatestPresenceFromDatabase();
-  if (!activityName) {
-    console.log("No presence data found in database to restore.");
-    return;
-  }
-
-  await internalSetPresence(bot, activityName);
-  console.log("Bot presence restored after detecting missing activity.");
 }
