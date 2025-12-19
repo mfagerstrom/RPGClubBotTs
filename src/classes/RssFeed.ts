@@ -18,19 +18,17 @@ export interface IRssFeedItem {
   publishedAt: Date | null;
 }
 
-export function normalizeKeywords(values: (string | null | undefined)[]): string[] {
+export function normalizeKeywords(input: string | (string | null | undefined)[] | null | undefined): string[] {
+  if (!input) return [];
+  const values = typeof input === "string" ? input.split(",") : input;
   return values
     .map((k) => (k ?? "").trim().toLowerCase())
     .filter((k) => k.length > 0);
 }
 
-function splitKeywords(raw: string | null | undefined): string[] {
-  if (!raw) return [];
-  return normalizeKeywords(raw.split(","));
-}
-
-export async function listFeeds(): Promise<IRssFeed[]> {
-  const connection = await getOraclePool().getConnection();
+export async function listFeeds(existingConnection?: oracledb.Connection): Promise<IRssFeed[]> {
+  const connection = existingConnection ?? await getOraclePool().getConnection();
+  const shouldClose = !existingConnection;
   try {
     const result = await connection.execute<{
       FEED_ID: number;
@@ -57,11 +55,13 @@ export async function listFeeds(): Promise<IRssFeed[]> {
       feedName: row.FEED_NAME ?? null,
       feedUrl: row.FEED_URL,
       channelId: row.CHANNEL_ID,
-      includeKeywords: splitKeywords(row.INCLUDE_KEYWORDS),
-      excludeKeywords: splitKeywords(row.EXCLUDE_KEYWORDS),
+      includeKeywords: normalizeKeywords(row.INCLUDE_KEYWORDS),
+      excludeKeywords: normalizeKeywords(row.EXCLUDE_KEYWORDS),
     }));
   } finally {
-    await connection.close();
+    if (shouldClose) {
+      await connection.close();
+    }
   }
 }
 
@@ -174,9 +174,10 @@ export async function updateFeed(
   }
 }
 
-export async function markItemsSeen(items: IRssFeedItem[]): Promise<void> {
+export async function markItemsSeen(items: IRssFeedItem[], existingConnection?: oracledb.Connection): Promise<void> {
   if (!items.length) return;
-  const connection = await getOraclePool().getConnection();
+  const connection = existingConnection ?? await getOraclePool().getConnection();
+  const shouldClose = !existingConnection;
   try {
     const normalized = items.map((item) => ({
       ...item,
@@ -210,12 +211,15 @@ export async function markItemsSeen(items: IRssFeedItem[]): Promise<void> {
       },
     );
   } finally {
-    await connection.close();
+    if (shouldClose) {
+      await connection.close();
+    }
   }
 }
 
-export async function isItemSeen(feedId: number, itemIdHash: string): Promise<boolean> {
-  const connection = await getOraclePool().getConnection();
+export async function isItemSeen(feedId: number, itemIdHash: string, existingConnection?: oracledb.Connection): Promise<boolean> {
+  const connection = existingConnection ?? await getOraclePool().getConnection();
+  const shouldClose = !existingConnection;
   try {
     const result = await connection.execute(
       `SELECT 1 FROM RPG_CLUB_RSS_FEED_ITEMS WHERE FEED_ID = :feedId AND ITEM_ID_HASH = :hash`,
@@ -223,14 +227,17 @@ export async function isItemSeen(feedId: number, itemIdHash: string): Promise<bo
     );
     return (result.rows ?? []).length > 0;
   } finally {
-    await connection.close();
+    if (shouldClose) {
+      await connection.close();
+    }
   }
 }
 
-export async function getSeenItemHashes(feedId: number, itemIdHashes: string[]): Promise<Set<string>> {
+export async function getSeenItemHashes(feedId: number, itemIdHashes: string[], existingConnection?: oracledb.Connection): Promise<Set<string>> {
   if (!itemIdHashes.length) return new Set();
 
-  const connection = await getOraclePool().getConnection();
+  const connection = existingConnection ?? await getOraclePool().getConnection();
+  const shouldClose = !existingConnection;
   try {
     const result = await connection.execute<{ ITEM_ID_HASH: string }>(
       `SELECT ITEM_ID_HASH
@@ -245,6 +252,8 @@ export async function getSeenItemHashes(feedId: number, itemIdHashes: string[]):
 
     return new Set((result.rows ?? []).map((row) => row.ITEM_ID_HASH));
   } finally {
-    await connection.close();
+    if (shouldClose) {
+      await connection.close();
+    }
   }
 }

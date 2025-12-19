@@ -1,11 +1,12 @@
 import Parser from "rss-parser";
 import crypto from "node:crypto";
 import type { Client } from "discordx";
+import oracledb from "oracledb";
+import { getOraclePool } from "../db/oracleClient.js";
 import {
   listFeeds,
   markItemsSeen,
   getSeenItemHashes,
-  normalizeKeywords,
   type IRssFeedItem,
   type IRssFeed,
 } from "../classes/RssFeed.js";
@@ -20,10 +21,8 @@ function hashId(parts: (string | null | undefined)[]): string {
   return crypto.createHash("sha256").update(joined).digest("hex");
 }
 
-function matchesKeywords(feed: IRssFeed, title: string, content: string): boolean {
+function matchesKeywords(include: string[], exclude: string[], title: string, content: string): boolean {
   const haystack = `${title} ${content}`.toLowerCase();
-  const include = normalizeKeywords(feed.includeKeywords);
-  const exclude = normalizeKeywords(feed.excludeKeywords);
 
   if (exclude.length && exclude.some((kw) => haystack.includes(kw))) {
     return false;
@@ -34,7 +33,11 @@ function matchesKeywords(feed: IRssFeed, title: string, content: string): boolea
   return true;
 }
 
-async function processFeed(client: Client, feed: IRssFeed): Promise<void> {
+async function processFeed(
+  client: Client,
+  feed: IRssFeed,
+  connection: oracledb.Connection,
+): Promise<void> {
   let parsed;
   try {
     parsed = await parser.parseURL(feed.feedUrl);
@@ -46,6 +49,10 @@ async function processFeed(client: Client, feed: IRssFeed): Promise<void> {
   const newItems: IRssFeedItem[] = [];
   const candidates: { item: IRssFeedItem; link: string; title: string }[] = [];
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  
+  // Feed keywords are already normalized by listFeeds
+  const include = feed.includeKeywords;
+  const exclude = feed.excludeKeywords;
 
   for (const item of parsed.items ?? []) {
     const title = item.title ?? "(no title)";
@@ -55,7 +62,7 @@ async function processFeed(client: Client, feed: IRssFeed): Promise<void> {
     const hash = hashId([guid, link, title]);
     const publishedAt = item.pubDate ? new Date(item.pubDate) : null;
     if (publishedAt && publishedAt.getTime() < cutoff) continue;
-    if (!matchesKeywords(feed, title, content)) continue;
+    if (!matchesKeywords(include, exclude, title, content)) continue;
 
     const itemRecord: IRssFeedItem = {
       feedId: feed.feedId,
@@ -70,7 +77,7 @@ async function processFeed(client: Client, feed: IRssFeed): Promise<void> {
   if (!candidates.length) return;
 
   const candidateHashes = candidates.map((c) => c.item.itemIdHash);
-  const seen = await getSeenItemHashes(feed.feedId, candidateHashes);
+  const seen = await getSeenItemHashes(feed.feedId, candidateHashes, connection);
 
   const toSend: { link: string; title: string }[] = [];
   for (const candidate of candidates) {
@@ -81,7 +88,7 @@ async function processFeed(client: Client, feed: IRssFeed): Promise<void> {
 
   if (!newItems.length) return;
 
-  await markItemsSeen(newItems);
+  await markItemsSeen(newItems, connection);
 
   try {
     const channel = await client.channels.fetch(feed.channelId).catch(() => null);
@@ -113,13 +120,23 @@ async function processFeed(client: Client, feed: IRssFeed): Promise<void> {
 
 export function startRssFeedService(client: Client): void {
   const tick = async () => {
+    let connection: oracledb.Connection | null = null;
     try {
-      const feeds = await listFeeds();
+      connection = await getOraclePool().getConnection();
+      const feeds = await listFeeds(connection);
       for (const feed of feeds) {
-        await processFeed(client, feed);
+        await processFeed(client, feed, connection);
       }
     } catch (err) {
       console.error("[RSS] Polling error:", err);
+    } finally {
+      if (connection) {
+        try {
+          await connection.close();
+        } catch (closeErr) {
+          console.error("[RSS] Error closing connection:", closeErr);
+        }
+      }
     }
   };
 
