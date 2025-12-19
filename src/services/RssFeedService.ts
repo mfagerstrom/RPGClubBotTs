@@ -4,7 +4,8 @@ import type { Client } from "discordx";
 import {
   listFeeds,
   markItemsSeen,
-  isItemSeen,
+  getSeenItemHashes,
+  normalizeKeywords,
   type IRssFeedItem,
   type IRssFeed,
 } from "../classes/RssFeed.js";
@@ -17,10 +18,6 @@ const parser = new Parser({
 function hashId(parts: (string | null | undefined)[]): string {
   const joined = parts.filter(Boolean).join("|");
   return crypto.createHash("sha256").update(joined).digest("hex");
-}
-
-function normalizeKeywords(values: string[]): string[] {
-  return values.map((v) => v.toLowerCase().trim()).filter((v) => v.length > 0);
 }
 
 function matchesKeywords(feed: IRssFeed, title: string, content: string): boolean {
@@ -47,7 +44,7 @@ async function processFeed(client: Client, feed: IRssFeed): Promise<void> {
   }
 
   const newItems: IRssFeedItem[] = [];
-  const toSend: { link: string; title: string }[] = [];
+  const candidates: { item: IRssFeedItem; link: string; title: string }[] = [];
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
 
   for (const item of parsed.items ?? []) {
@@ -58,17 +55,28 @@ async function processFeed(client: Client, feed: IRssFeed): Promise<void> {
     const hash = hashId([guid, link, title]);
     const publishedAt = item.pubDate ? new Date(item.pubDate) : null;
     if (publishedAt && publishedAt.getTime() < cutoff) continue;
-    if (await isItemSeen(feed.feedId, hash)) continue;
     if (!matchesKeywords(feed, title, content)) continue;
 
-    newItems.push({
+    const itemRecord: IRssFeedItem = {
       feedId: feed.feedId,
       itemIdHash: hash,
       itemGuid: item.guid ?? null,
       itemLink: item.link ?? null,
       publishedAt,
-    });
-    toSend.push({ link: link || "No link provided", title });
+    };
+    candidates.push({ item: itemRecord, link: link || "No link provided", title });
+  }
+
+  if (!candidates.length) return;
+
+  const candidateHashes = candidates.map((c) => c.item.itemIdHash);
+  const seen = await getSeenItemHashes(feed.feedId, candidateHashes);
+
+  const toSend: { link: string; title: string }[] = [];
+  for (const candidate of candidates) {
+    if (seen.has(candidate.item.itemIdHash)) continue;
+    newItems.push(candidate.item);
+    toSend.push({ link: candidate.link, title: candidate.title });
   }
 
   if (!newItems.length) return;

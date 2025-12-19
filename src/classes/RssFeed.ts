@@ -18,12 +18,15 @@ export interface IRssFeedItem {
   publishedAt: Date | null;
 }
 
+export function normalizeKeywords(values: (string | null | undefined)[]): string[] {
+  return values
+    .map((k) => (k ?? "").trim().toLowerCase())
+    .filter((k) => k.length > 0);
+}
+
 function splitKeywords(raw: string | null | undefined): string[] {
   if (!raw) return [];
-  return raw
-    .split(",")
-    .map((k) => k.trim().toLowerCase())
-    .filter((k) => k.length > 0);
+  return normalizeKeywords(raw.split(","));
 }
 
 export async function listFeeds(): Promise<IRssFeed[]> {
@@ -71,6 +74,8 @@ export async function addFeed(
 ): Promise<number> {
   const connection = await getOraclePool().getConnection();
   try {
+    const normalizedInclude = normalizeKeywords(includeKeywords);
+    const normalizedExclude = normalizeKeywords(excludeKeywords);
     const result = await connection.execute(
       `INSERT INTO RPG_CLUB_RSS_FEEDS (
          FEED_NAME,
@@ -85,13 +90,13 @@ export async function addFeed(
          :includes,
          :excludes
        )
-        RETURNING FEED_ID INTO :id`,
+       RETURNING FEED_ID INTO :id`,
       {
         feedName,
         feedUrl,
         channelId,
-        includes: includeKeywords.join(", "),
-        excludes: excludeKeywords.join(", "),
+        includes: normalizedInclude.join(", "),
+        excludes: normalizedExclude.join(", "),
         id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
       },
       { autoCommit: true },
@@ -140,12 +145,14 @@ export async function updateFeed(
     params.channelId = updates.channelId;
   }
   if (updates.includeKeywords !== undefined) {
+    const normalized = normalizeKeywords(updates.includeKeywords);
     sets.push("INCLUDE_KEYWORDS = :includes");
-    params.includes = updates.includeKeywords.join(", ");
+    params.includes = normalized.join(", ");
   }
   if (updates.excludeKeywords !== undefined) {
+    const normalized = normalizeKeywords(updates.excludeKeywords);
     sets.push("EXCLUDE_KEYWORDS = :excludes");
-    params.excludes = updates.excludeKeywords.join(", ");
+    params.excludes = normalized.join(", ");
   }
 
   if (!sets.length) {
@@ -215,6 +222,28 @@ export async function isItemSeen(feedId: number, itemIdHash: string): Promise<bo
       { feedId, hash: itemIdHash },
     );
     return (result.rows ?? []).length > 0;
+  } finally {
+    await connection.close();
+  }
+}
+
+export async function getSeenItemHashes(feedId: number, itemIdHashes: string[]): Promise<Set<string>> {
+  if (!itemIdHashes.length) return new Set();
+
+  const connection = await getOraclePool().getConnection();
+  try {
+    const result = await connection.execute<{ ITEM_ID_HASH: string }>(
+      `SELECT ITEM_ID_HASH
+         FROM RPG_CLUB_RSS_FEED_ITEMS
+        WHERE FEED_ID = :feedId
+          AND ITEM_ID_HASH IN (SELECT COLUMN_VALUE FROM TABLE(:hashes))`,
+      {
+        feedId,
+        hashes: { type: oracledb.STRING, dir: oracledb.BIND_IN, val: itemIdHashes, maxSize: 128 },
+      },
+    );
+
+    return new Set((result.rows ?? []).map((row) => row.ITEM_ID_HASH));
   } finally {
     await connection.close();
   }

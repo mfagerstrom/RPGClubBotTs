@@ -1,4 +1,4 @@
-import { ActivityType, Client, type CommandInteraction, type Activity } from "discord.js";
+import { ActivityType, Client, type Activity } from "discord.js";
 import type { AnyRepliable } from "./InteractionUtils.js";
 import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
@@ -6,8 +6,9 @@ import { getOraclePool } from "../db/oracleClient.js";
 const PRESENCE_TABLE: string = "BOT_PRESENCE_HISTORY";
 
 async function savePresenceToDatabase(
-  interaction: AnyRepliable,
   activityName: string,
+  userId: string | null,
+  username: string | null,
 ): Promise<void> {
   try {
     const pool: oracledb.Pool = getOraclePool();
@@ -19,8 +20,8 @@ async function savePresenceToDatabase(
          VALUES (:activityName, SYSTIMESTAMP, :userId, :username)`,
         {
           activityName,
-          userId: interaction.user?.id ?? null,
-          username: interaction.user?.tag ?? null,
+          userId,
+          username,
         },
         { autoCommit: true },
       );
@@ -30,6 +31,28 @@ async function savePresenceToDatabase(
     }
   } catch (error) {
     console.error("Error saving presence to database:", error);
+  }
+}
+
+async function internalSetPresence(
+  client: Client,
+  activityName: string,
+  userId: string | null = null,
+  username: string | null = null,
+  saveToDb: boolean = false,
+): Promise<void> {
+  client.user!.setPresence({
+    activities: [
+      {
+        name: activityName,
+        type: ActivityType.Playing,
+      },
+    ],
+    status: "online",
+  });
+
+  if (saveToDb) {
+    await savePresenceToDatabase(activityName, userId, username);
   }
 }
 
@@ -129,51 +152,22 @@ export async function getPresenceHistory(limit: number): Promise<IPresenceHistor
 }
 
 export async function setPresence(
-  interaction: CommandInteraction,
-  activityName: string,
-): Promise<void> {
-  interaction.client.user!.setPresence({
-    activities: [
-      {
-        name: activityName,
-        type: ActivityType.Playing,
-      },
-    ],
-    status: "online",
-  });
-
-  await savePresenceToDatabase(interaction, activityName);
-}
-
-export async function setPresenceFromInteraction(
   interaction: AnyRepliable,
   activityName: string,
 ): Promise<void> {
-  interaction.client.user!.setPresence({
-    activities: [
-      {
-        name: activityName,
-        type: ActivityType.Playing,
-      },
-    ],
-    status: "online",
-  });
-
-  await savePresenceToDatabase(interaction, activityName);
+  await internalSetPresence(
+    interaction.client,
+    activityName,
+    interaction.user?.id ?? null,
+    interaction.user?.tag ?? null,
+    true,
+  );
 }
 
 export async function updateBotPresence(bot: Client): Promise<void> {
   const activityName: string | null = await readLatestPresenceFromDatabase();
   if (activityName) {
-    bot.user!.setPresence({
-      activities: [
-        {
-          name: activityName,
-          type: ActivityType.Playing,
-        },
-      ],
-      status: "online",
-    });
+    await internalSetPresence(bot, activityName);
   } else {
     console.log("No presence data found in database.");
   }
@@ -194,14 +188,6 @@ export async function restorePresenceIfMissing(bot: Client): Promise<void> {
     return;
   }
 
-  bot.user!.setPresence({
-    activities: [
-      {
-        name: activityName,
-        type: ActivityType.Playing,
-      },
-    ],
-    status: "online",
-  });
+  await internalSetPresence(bot, activityName);
   console.log("Bot presence restored after detecting missing activity.");
 }

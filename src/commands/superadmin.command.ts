@@ -21,7 +21,6 @@ import {
 import {
   getPresenceHistory,
   setPresence,
-  setPresenceFromInteraction,
   type IPresenceHistoryEntry,
 } from "../functions/SetPresence.js";
 import { AnyRepliable, safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
@@ -233,7 +232,7 @@ export class SuperAdmin {
     const presenceText = entries[idx];
 
     try {
-      await setPresenceFromInteraction(interaction, presenceText);
+      await setPresence(interaction, presenceText);
       await safeUpdate(interaction, {
         content: `Restored presence to: ${presenceText}`,
         components: [],
