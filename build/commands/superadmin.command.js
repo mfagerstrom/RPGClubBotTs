@@ -10,7 +10,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 import { ActionRowBuilder, ApplicationCommandOptionType, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, StringSelectMenuBuilder, } from "discord.js";
 import axios from "axios";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption, SelectMenuComponent, } from "discordx";
-import { getPresenceHistory, setPresence, setPresenceFromInteraction, } from "../functions/SetPresence.js";
+import { getPresenceHistory, setPresence, } from "../functions/SetPresence.js";
 import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 import Gotm, { updateGotmGameFieldInDatabase, } from "../classes/Gotm.js";
 import NrGotm, { updateNrGotmGameFieldInDatabase, } from "../classes/NrGotm.js";
@@ -146,7 +146,7 @@ let SuperAdmin = class SuperAdmin {
         }
         const presenceText = entries[idx];
         try {
-            await setPresenceFromInteraction(interaction, presenceText);
+            await setPresence(interaction, presenceText);
             await safeUpdate(interaction, {
                 content: `Restored presence to: ${presenceText}`,
                 components: [],

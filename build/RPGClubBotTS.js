@@ -2,7 +2,7 @@ import "dotenv/config";
 import { dirname, importx } from "@discordx/importer";
 import { IntentsBitField } from "discord.js";
 import { Client } from "discordx";
-import { restorePresenceIfMissing, updateBotPresence } from "./functions/SetPresence.js";
+import { updateBotPresence } from "./functions/SetPresence.js";
 import { initOraclePool } from "./db/oracleClient.js";
 import { loadGotmFromDb } from "./classes/Gotm.js";
 import { loadNrGotmFromDb } from "./classes/NrGotm.js";
@@ -58,10 +58,6 @@ bot.once("clientReady", async () => {
     // Periodically refresh presence from the database to stay in sync
     setInterval(() => {
         void updateBotPresence(bot);
-    }, PRESENCE_CHECK_INTERVAL_MS);
-    // Periodically ensure presence is restored if Discord drops it
-    setInterval(() => {
-        void restorePresenceIfMissing(bot);
     }, PRESENCE_CHECK_INTERVAL_MS);
     // Synchronize applications commands with Discord
     await bot.initApplicationCommands();

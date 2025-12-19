@@ -1,15 +1,16 @@
 import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
-function splitKeywords(raw) {
-    if (!raw)
+export function normalizeKeywords(input) {
+    if (!input)
         return [];
-    return raw
-        .split(",")
-        .map((k) => k.trim().toLowerCase())
+    const values = typeof input === "string" ? input.split(",") : input;
+    return values
+        .map((k) => (k ?? "").trim().toLowerCase())
         .filter((k) => k.length > 0);
 }
-export async function listFeeds() {
-    const connection = await getOraclePool().getConnection();
+export async function listFeeds(existingConnection) {
+    const connection = existingConnection ?? await getOraclePool().getConnection();
+    const shouldClose = !existingConnection;
     try {
         const result = await connection.execute(`SELECT FEED_ID,
               FEED_NAME,
@@ -24,17 +25,21 @@ export async function listFeeds() {
             feedName: row.FEED_NAME ?? null,
             feedUrl: row.FEED_URL,
             channelId: row.CHANNEL_ID,
-            includeKeywords: splitKeywords(row.INCLUDE_KEYWORDS),
-            excludeKeywords: splitKeywords(row.EXCLUDE_KEYWORDS),
+            includeKeywords: normalizeKeywords(row.INCLUDE_KEYWORDS),
+            excludeKeywords: normalizeKeywords(row.EXCLUDE_KEYWORDS),
         }));
     }
     finally {
-        await connection.close();
+        if (shouldClose) {
+            await connection.close();
+        }
     }
 }
 export async function addFeed(feedName, feedUrl, channelId, includeKeywords, excludeKeywords) {
     const connection = await getOraclePool().getConnection();
     try {
+        const normalizedInclude = normalizeKeywords(includeKeywords);
+        const normalizedExclude = normalizeKeywords(excludeKeywords);
         const result = await connection.execute(`INSERT INTO RPG_CLUB_RSS_FEEDS (
          FEED_NAME,
          FEED_URL,
@@ -48,12 +53,12 @@ export async function addFeed(feedName, feedUrl, channelId, includeKeywords, exc
          :includes,
          :excludes
        )
-        RETURNING FEED_ID INTO :id`, {
+       RETURNING FEED_ID INTO :id`, {
             feedName,
             feedUrl,
             channelId,
-            includes: includeKeywords.join(", "),
-            excludes: excludeKeywords.join(", "),
+            includes: normalizedInclude.join(", "),
+            excludes: normalizedExclude.join(", "),
             id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
         }, { autoCommit: true });
         const id = result.outBinds?.id?.[0];
@@ -90,12 +95,14 @@ export async function updateFeed(feedId, updates) {
         params.channelId = updates.channelId;
     }
     if (updates.includeKeywords !== undefined) {
+        const normalized = normalizeKeywords(updates.includeKeywords);
         sets.push("INCLUDE_KEYWORDS = :includes");
-        params.includes = updates.includeKeywords.join(", ");
+        params.includes = normalized.join(", ");
     }
     if (updates.excludeKeywords !== undefined) {
+        const normalized = normalizeKeywords(updates.excludeKeywords);
         sets.push("EXCLUDE_KEYWORDS = :excludes");
-        params.excludes = updates.excludeKeywords.join(", ");
+        params.excludes = normalized.join(", ");
     }
     if (!sets.length) {
         await connection.close();
@@ -111,10 +118,11 @@ export async function updateFeed(feedId, updates) {
         await connection.close();
     }
 }
-export async function markItemsSeen(items) {
+export async function markItemsSeen(items, existingConnection) {
     if (!items.length)
         return;
-    const connection = await getOraclePool().getConnection();
+    const connection = existingConnection ?? await getOraclePool().getConnection();
+    const shouldClose = !existingConnection;
     try {
         const normalized = items.map((item) => ({
             ...item,
@@ -145,16 +153,42 @@ export async function markItemsSeen(items) {
         });
     }
     finally {
-        await connection.close();
+        if (shouldClose) {
+            await connection.close();
+        }
     }
 }
-export async function isItemSeen(feedId, itemIdHash) {
-    const connection = await getOraclePool().getConnection();
+export async function isItemSeen(feedId, itemIdHash, existingConnection) {
+    const connection = existingConnection ?? await getOraclePool().getConnection();
+    const shouldClose = !existingConnection;
     try {
         const result = await connection.execute(`SELECT 1 FROM RPG_CLUB_RSS_FEED_ITEMS WHERE FEED_ID = :feedId AND ITEM_ID_HASH = :hash`, { feedId, hash: itemIdHash });
         return (result.rows ?? []).length > 0;
     }
     finally {
-        await connection.close();
+        if (shouldClose) {
+            await connection.close();
+        }
+    }
+}
+export async function getSeenItemHashes(feedId, itemIdHashes, existingConnection) {
+    if (!itemIdHashes.length)
+        return new Set();
+    const connection = existingConnection ?? await getOraclePool().getConnection();
+    const shouldClose = !existingConnection;
+    try {
+        const result = await connection.execute(`SELECT ITEM_ID_HASH
+         FROM RPG_CLUB_RSS_FEED_ITEMS
+        WHERE FEED_ID = :feedId
+          AND ITEM_ID_HASH IN (SELECT COLUMN_VALUE FROM TABLE(:hashes))`, {
+            feedId,
+            hashes: { type: oracledb.STRING, dir: oracledb.BIND_IN, val: itemIdHashes, maxSize: 128 },
+        });
+        return new Set((result.rows ?? []).map((row) => row.ITEM_ID_HASH));
+    }
+    finally {
+        if (shouldClose) {
+            await connection.close();
+        }
     }
 }
