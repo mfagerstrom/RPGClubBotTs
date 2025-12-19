@@ -12,7 +12,7 @@ import {
 
 const POLL_INTERVAL_MS: number = 5 * 60 * 1000;
 const parser = new Parser({
-  timeout: 30_000,
+  timeout: 60_000,
 });
 
 function hashId(parts: (string | null | undefined)[]): string {
