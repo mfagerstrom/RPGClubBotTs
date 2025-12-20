@@ -16,4 +16,3 @@
 - User bug reports
 - Now playing / Game Collection / Completion data export to .csv / excel
 - Game Collection Imports - Steam, PSN, ???
-- Build scripts are fragile/cross-platform unfriendly: "rm -rf ./build | tsc" (and similar in buildDev/buildProd) relies on a Unix rm and uses a pipe, which can fail on Windows and doesn’t guarantee ordering (package.json:scripts). Swap to rimraf and && sequencing to make builds reliable on all environments.

@@ -6,10 +6,10 @@
   "type": "module",
   "main": "build/RPGClubBotTS.js",
   "scripts": {
-    "build": "rm -rf ./build | tsc",
-    "buildDev": "rm -rf ./build | tsc | node --no-warnings=ExperimentalWarning --loader ts-node/esm/transpile-only src/RPGClubBotTS.ts",
-    "buildProd": "pm2 kill && rm -rf ./build && tsc && pm2 start build/RPGClubBotTS.js",
-    "bs": "tsc | node build/RPGClubBotTS.js",
+    "build": "rimraf ./build && tsc",
+    "buildDev": "rimraf ./build && tsc && node --no-warnings=ExperimentalWarning --loader ts-node/esm/transpile-only src/RPGClubBotTS.ts",
+    "buildProd": "pm2 kill && rimraf ./build && tsc && pm2 start build/RPGClubBotTS.js",
+    "bs": "tsc && node build/RPGClubBotTS.js",
     "dev": "node --no-warnings=ExperimentalWarning --loader ts-node/esm/transpile-only src/RPGClubBotTS.ts",
     "start": "node build/RPGClubBotTS.js",
     "start:prod": "pm2 start build/RPGClubBotTS.js",
@@ -51,6 +51,7 @@
     "mongodb": "^6.9.0",
     "nodemon": "^3.1.3",
     "prettier": "^3.3.2",
+    "rimraf": "^6.1.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
   },

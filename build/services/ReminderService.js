@@ -52,6 +52,12 @@ async function deliverReminder(client, reminder) {
         }
     }
     catch (err) {
-        console.error(`Failed to deliver reminder ${reminder.reminderId}:`, err);
+        console.error(`Failed to deliver reminder ${reminder.reminderId} (attempt ${reminder.failureCount + 1}):`, err);
+        await Reminder.recordFailure(reminder.reminderId);
+        // If we've failed 5 times, mark it as sent so it stops retrying forever.
+        if (reminder.failureCount + 1 >= 5) {
+            console.warn(`Reminder ${reminder.reminderId} reached max failures. Disabling.`);
+            await Reminder.markFailedPermanently(reminder.reminderId);
+        }
     }
 }
