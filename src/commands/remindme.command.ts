@@ -329,7 +329,7 @@ function parseUserDate(input: string): Date | null {
 function formatReminderLine(reminder: IReminderRecord): string {
   const status = reminder.sentAt ? "sent" : "pending";
   const noisy = reminder.isNoisy ? " (noisy)" : "";
-  return `• #${reminder.reminderId} — ${reminder.content} — ${formatReminderTime(
+  return `* #${reminder.reminderId} - ${reminder.content} - ${formatReminderTime(
     reminder.remindAt,
   )}${noisy} (${status})`;
 }
@@ -337,9 +337,9 @@ function formatReminderLine(reminder: IReminderRecord): string {
 function buildHelpText(): string {
   return (
     "**Managing reminders**\n" +
-    "• Add: /remindme create when:<time> note:<text> [noisy:true]\n" +
-    "• Snooze: /remindme snooze id:<id> until:<time>\n" +
-    "• Delete: /remindme delete id:<id>\n" +
+    "* Add: /remindme create when:<time> note:<text> [noisy:true]\n" +
+    "* Snooze: /remindme snooze id:<id> until:<time>\n" +
+    "* Delete: /remindme delete id:<id>\n" +
     "Reminders arrive in DMs with quick snooze buttons."
   );
 }

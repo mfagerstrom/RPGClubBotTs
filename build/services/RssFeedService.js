@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import { getOraclePool } from "../db/oracleClient.js";
 import { listFeeds, markItemsSeen, getSeenItemHashes, } from "../classes/RssFeed.js";
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
+const ERROR_LOG_COOLDOWN = 60 * 60 * 1000; // 1 hour
+const lastErrorLog = new Map();
 const parser = new Parser({
     timeout: 60_000,
 });
@@ -26,6 +28,15 @@ async function processFeed(client, feed, connection) {
         parsed = await parser.parseURL(feed.feedUrl);
     }
     catch (err) {
+        const msg = String(err);
+        if (msg.includes("Status code 500")) {
+            const last = lastErrorLog.get(feed.feedUrl) || 0;
+            if (Date.now() - last > ERROR_LOG_COOLDOWN) {
+                console.error(`[RSS] 500 Error for ${feed.feedUrl} (logged once/hr).`);
+                lastErrorLog.set(feed.feedUrl, Date.now());
+            }
+            return;
+        }
         console.error(`[RSS] Failed to parse feed ${feed.feedUrl}:`, err);
         return;
     }
