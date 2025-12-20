@@ -131,7 +131,15 @@ async function processFeed(
 }
 
 export function startRssFeedService(client: Client): void {
+  let isPolling = false;
+
   const tick = async () => {
+    if (isPolling) {
+      console.warn("[RSS] Previous poll still running, skipping this cycle.");
+      return;
+    }
+    isPolling = true;
+
     let connection: oracledb.Connection | null = null;
     try {
       connection = await getOraclePool().getConnection();
@@ -149,6 +157,7 @@ export function startRssFeedService(client: Client): void {
           console.error("[RSS] Error closing connection:", closeErr);
         }
       }
+      isPolling = false;
     }
   };
 

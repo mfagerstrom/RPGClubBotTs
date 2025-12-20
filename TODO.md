@@ -16,7 +16,5 @@
 - User bug reports
 - Now playing / Game Collection / Completion data export to .csv / excel
 - Game Collection Imports - Steam, PSN, ???
-- RSS polling can hammer Oracle and still double-post items. processFeed opens a new connection per item via isItemSeen and does a query for every RSS entry (src/services/RssFeedService.ts (lines 40-80)). There’s also no guard against overlapping ticks, so a slow poll can overlap with the next 5‑minute interval and race the isItemSeen/markItemsSeen split, resulting in duplicate sends. Consider a single connection per poll, bulk lookups/merges, and a reentrancy flag.
 - Reminder DM failures loop forever. In deliverReminder, if a DM send fails (DMs closed, rate limits), the reminder stays due and is retried every minute with no backoff or failure marking (src/services/ReminderService.ts (lines 45-76)). Add a retry cap/backoff and mark as failed or disable after repeated errors to avoid log spam and wasted work.
-- User-facing text in /remindme responses is corrupted: the help and list formatting use mojibake characters instead of bullets (src/commands/remindme.command.ts (lines 334-347)). Fix the strings to readable ASCII so users can actually parse the menu.
 - Build scripts are fragile/cross-platform unfriendly: "rm -rf ./build | tsc" (and similar in buildDev/buildProd) relies on a Unix rm and uses a pipe, which can fail on Windows and doesn’t guarantee ordering (package.json:scripts). Swap to rimraf and && sequencing to make builds reliable on all environments.
