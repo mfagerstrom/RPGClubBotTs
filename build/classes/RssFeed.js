@@ -177,14 +177,24 @@ export async function getSeenItemHashes(feedId, itemIdHashes, existingConnection
     const connection = existingConnection ?? await getOraclePool().getConnection();
     const shouldClose = !existingConnection;
     try {
-        const result = await connection.execute(`SELECT ITEM_ID_HASH
-         FROM RPG_CLUB_RSS_FEED_ITEMS
-        WHERE FEED_ID = :feedId
-          AND ITEM_ID_HASH IN (SELECT COLUMN_VALUE FROM TABLE(:hashes))`, {
-            feedId,
-            hashes: { type: oracledb.STRING, dir: oracledb.BIND_IN, val: itemIdHashes, maxSize: 128 },
-        });
-        return new Set((result.rows ?? []).map((row) => row.ITEM_ID_HASH));
+        const foundHashes = new Set();
+        const CHUNK_SIZE = 900;
+        for (let i = 0; i < itemIdHashes.length; i += CHUNK_SIZE) {
+            const chunk = itemIdHashes.slice(i, i + CHUNK_SIZE);
+            const bindVars = { feedId };
+            const bindPlaceholders = [];
+            chunk.forEach((hash, idx) => {
+                const key = `h${idx}`;
+                bindVars[key] = hash;
+                bindPlaceholders.push(`:${key}`);
+            });
+            const result = await connection.execute(`SELECT ITEM_ID_HASH
+           FROM RPG_CLUB_RSS_FEED_ITEMS
+          WHERE FEED_ID = :feedId
+            AND ITEM_ID_HASH IN (${bindPlaceholders.join(", ")})`, bindVars, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+            (result.rows ?? []).forEach((row) => foundHashes.add(row.ITEM_ID_HASH));
+        }
+        return foundHashes;
     }
     finally {
         if (shouldClose) {

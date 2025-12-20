@@ -14,7 +14,15 @@ import {
   type MessageActionRowComponent,
   type Message,
 } from "discord.js";
-import { Discord, Slash, SlashOption, SlashGroup, SelectMenuComponent, ButtonComponent } from "discordx";
+import {
+  Discord,
+  Slash,
+  SlashOption,
+  SlashGroup,
+  SlashChoice,
+  SelectMenuComponent,
+  ButtonComponent,
+} from "discordx";
 import Member, { type IMemberNowPlayingEntry } from "../classes/Member.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import Game from "../classes/Game.js";
@@ -23,12 +31,28 @@ import {
   createIgdbSession,
   type IgdbSelectOption,
 } from "../services/IgdbSelectService.js";
+import { saveCompletion } from "../functions/CompletionHelpers.js";
+import {
+  COMPLETION_TYPES,
+  type CompletionType,
+  parseCompletionDateInput,
+} from "../commands/profile.command.js";
 
 const MAX_NOW_PLAYING = 10;
 const nowPlayingAddSessions = new Map<
   string,
   { userId: string; query: string }
 >();
+
+type NowPlayingCompleteContext = {
+  userId: string;
+  completionType: CompletionType;
+  completedAt: Date | null;
+  finalPlaytimeHours: number | null;
+  announce?: boolean;
+};
+
+const nowPlayingCompleteSessions = new Map<string, NowPlayingCompleteContext>();
 
 function formatEntry(
   entry: IMemberNowPlayingEntry,
@@ -269,6 +293,168 @@ export class NowPlayingCommand {
         content: `Could not remove from Now Playing: ${msg}`,
         flags: MessageFlags.Ephemeral,
       });
+    }
+  }
+
+  @Slash({ description: "Log completion for a game in your Now Playing list", name: "complete-game" })
+  async completeGame(
+    @SlashChoice(
+      ...COMPLETION_TYPES.map((t) => ({
+        name: t,
+        value: t,
+      })),
+    )
+    @SlashOption({
+      description: "Type of completion",
+      name: "completion_type",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    completionType: CompletionType,
+    @SlashOption({
+      description: "Completion date (defaults to today)",
+      name: "completion_date",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    completionDate: string | undefined,
+    @SlashOption({
+      description: "Final playtime in hours (e.g., 12.5)",
+      name: "final_playtime_hours",
+      required: false,
+      type: ApplicationCommandOptionType.Number,
+    })
+    finalPlaytimeHours: number | undefined,
+    @SlashOption({
+      description: "Announce this completion in the completions channel?",
+      name: "announce",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    announce: boolean | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    if (!COMPLETION_TYPES.includes(completionType)) {
+      await safeReply(interaction, {
+        content: "Invalid completion type.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    let completedAt: Date | null;
+    try {
+      completedAt = parseCompletionDateInput(completionDate);
+    } catch (err: any) {
+      await safeReply(interaction, {
+        content: err?.message ?? "Invalid completion date.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (
+      finalPlaytimeHours !== undefined &&
+      (Number.isNaN(finalPlaytimeHours) || finalPlaytimeHours < 0)
+    ) {
+      await safeReply(interaction, {
+        content: "Final playtime must be a non-negative number of hours.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const userId = interaction.user.id;
+    const list = await Member.getNowPlayingEntries(userId);
+
+    if (!list.length) {
+      await safeReply(interaction, {
+        content: "Your Now Playing list is empty. Add a game first.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const sessionId = `np-comp-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    nowPlayingCompleteSessions.set(sessionId, {
+      userId,
+      completionType,
+      completedAt,
+      finalPlaytimeHours: finalPlaytimeHours ?? null,
+      announce,
+    });
+
+    const select = new StringSelectMenuBuilder()
+      .setCustomId(`np-complete-select:${sessionId}`)
+      .setPlaceholder("Select the game you completed")
+      .addOptions(
+        list.slice(0, 25).map((entry) => ({
+          label: entry.title.slice(0, 100),
+          value: String(entry.gameId),
+          description: `GameDB #${entry.gameId}`,
+        })),
+      );
+
+    await safeReply(interaction, {
+      content: "Choose the game from your Now Playing list to mark as completed:",
+      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  @SelectMenuComponent({ id: /^np-complete-select:.+$/ })
+  async handleCompleteGameSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const [, sessionId] = interaction.customId.split(":");
+    const ctx = nowPlayingCompleteSessions.get(sessionId);
+
+    if (!ctx) {
+      await interaction.reply({
+        content: "This completion prompt has expired.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (interaction.user.id !== ctx.userId) {
+      await interaction.reply({
+        content: "This prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const value = interaction.values?.[0];
+    const gameId = Number(value);
+    if (!Number.isInteger(gameId) || gameId <= 0) {
+      await interaction.reply({
+        content: "Invalid selection.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    try {
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferUpdate();
+      }
+      
+      const game = await Game.getGameById(gameId);
+      await saveCompletion(
+        interaction,
+        ctx.userId,
+        gameId,
+        ctx.completionType,
+        ctx.completedAt,
+        ctx.finalPlaytimeHours,
+        game?.title,
+        ctx.announce,
+      );
+
+      await interaction.editReply({ components: [] });
+    } finally {
+      nowPlayingCompleteSessions.delete(sessionId);
     }
   }
 
