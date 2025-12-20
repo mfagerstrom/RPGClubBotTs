@@ -284,13 +284,13 @@ function parseUserDate(input) {
 function formatReminderLine(reminder) {
     const status = reminder.sentAt ? "sent" : "pending";
     const noisy = reminder.isNoisy ? " (noisy)" : "";
-    return `• #${reminder.reminderId} — ${reminder.content} — ${formatReminderTime(reminder.remindAt)}${noisy} (${status})`;
+    return `* #${reminder.reminderId} - ${reminder.content} - ${formatReminderTime(reminder.remindAt)}${noisy} (${status})`;
 }
 function buildHelpText() {
     return ("**Managing reminders**\n" +
-        "• Add: /remindme create when:<time> note:<text> [noisy:true]\n" +
-        "• Snooze: /remindme snooze id:<id> until:<time>\n" +
-        "• Delete: /remindme delete id:<id>\n" +
+        "* Add: /remindme create when:<time> note:<text> [noisy:true]\n" +
+        "* Snooze: /remindme snooze id:<id> until:<time>\n" +
+        "* Delete: /remindme delete id:<id>\n" +
         "Reminders arrive in DMs with quick snooze buttons.");
 }
 function formatDateHelpText(prefix) {

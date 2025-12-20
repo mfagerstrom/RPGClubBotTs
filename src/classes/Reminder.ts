@@ -8,6 +8,8 @@ export interface IReminderRecord {
   content: string;
   isNoisy: boolean;
   sentAt: Date | null;
+  failureCount: number;
+  failedAt: Date | null;
   createdAt: Date | null;
   updatedAt: Date | null;
 }
@@ -15,7 +17,7 @@ export interface IReminderRecord {
 type Connection = oracledb.Connection;
 
 const REMINDER_COLUMNS =
-  "REMINDER_ID, USER_ID, REMIND_AT, CONTENT, IS_NOISY, SENT_AT, CREATED_AT, UPDATED_AT";
+  "REMINDER_ID, USER_ID, REMIND_AT, CONTENT, IS_NOISY, SENT_AT, FAILURE_COUNT, FAILED_AT, CREATED_AT, UPDATED_AT";
 
 function normalizeReminderId(value: number): number {
   const id = Number(value);
@@ -58,6 +60,8 @@ function mapRowToReminder(row: {
   CONTENT: string;
   IS_NOISY: number;
   SENT_AT: Date | string | null;
+  FAILURE_COUNT: number;
+  FAILED_AT: Date | string | null;
   CREATED_AT: Date | string | null;
   UPDATED_AT: Date | string | null;
 }): IReminderRecord {
@@ -70,6 +74,10 @@ function mapRowToReminder(row: {
     row.SENT_AT === null || row.SENT_AT === undefined
       ? null
       : normalizeDate(row.SENT_AT);
+  const failedAt =
+    row.FAILED_AT === null || row.FAILED_AT === undefined
+      ? null
+      : normalizeDate(row.FAILED_AT);
   const createdAt =
     row.CREATED_AT === null || row.CREATED_AT === undefined
       ? null
@@ -86,6 +94,8 @@ function mapRowToReminder(row: {
     content,
     isNoisy,
     sentAt,
+    failureCount: row.FAILURE_COUNT ?? 0,
+    failedAt,
     createdAt,
     updatedAt,
   };
@@ -108,9 +118,9 @@ export default class Reminder {
     try {
       const result = await connection.execute(
         `INSERT INTO USER_REMINDERS (
-           USER_ID, REMIND_AT, CONTENT, IS_NOISY, SENT_AT, CREATED_AT, UPDATED_AT
+           USER_ID, REMIND_AT, CONTENT, IS_NOISY, SENT_AT, FAILURE_COUNT, FAILED_AT, CREATED_AT, UPDATED_AT
          ) VALUES (
-           :userId, :remindAt, :content, :noisyVal, NULL, SYSTIMESTAMP, SYSTIMESTAMP
+           :userId, :remindAt, :content, :noisyVal, NULL, 0, NULL, SYSTIMESTAMP, SYSTIMESTAMP
          )
          RETURNING REMINDER_ID INTO :reminderId`,
         {
@@ -163,6 +173,8 @@ export default class Reminder {
             CONTENT: string;
             IS_NOISY: number;
             SENT_AT: Date | string | null;
+            FAILURE_COUNT: number;
+            FAILED_AT: Date | string | null;
             CREATED_AT: Date | string | null;
             UPDATED_AT: Date | string | null;
           },
@@ -202,6 +214,8 @@ export default class Reminder {
         CONTENT: string;
         IS_NOISY: number;
         SENT_AT: Date | string | null;
+        FAILURE_COUNT: number;
+        FAILED_AT: Date | string | null;
         CREATED_AT: Date | string | null;
         UPDATED_AT: Date | string | null;
       };
@@ -250,6 +264,8 @@ export default class Reminder {
         `UPDATE USER_REMINDERS
             SET REMIND_AT = :remindAt,
                 SENT_AT = NULL,
+                FAILURE_COUNT = 0,
+                FAILED_AT = NULL,
                 UPDATED_AT = SYSTIMESTAMP
           WHERE REMINDER_ID = :reminderId
             AND USER_ID = :userId`,
@@ -276,6 +292,8 @@ export default class Reminder {
       const result = await connection.execute(
         `UPDATE USER_REMINDERS
             SET SENT_AT = SYSTIMESTAMP,
+                FAILURE_COUNT = 0,
+                FAILED_AT = NULL,
                 UPDATED_AT = SYSTIMESTAMP
           WHERE REMINDER_ID = :reminderId`,
         { reminderId: id },
@@ -285,6 +303,45 @@ export default class Reminder {
       if ((result.rowsAffected ?? 0) === 0) {
         throw new Error(`No reminder found for id ${id} when marking as sent.`);
       }
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async recordFailure(reminderId: number): Promise<void> {
+    const id = normalizeReminderId(reminderId);
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.execute(
+        `UPDATE USER_REMINDERS
+            SET FAILURE_COUNT = FAILURE_COUNT + 1,
+                FAILED_AT = SYSTIMESTAMP,
+                UPDATED_AT = SYSTIMESTAMP
+          WHERE REMINDER_ID = :reminderId`,
+        { reminderId: id },
+        { autoCommit: true },
+      );
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async markFailedPermanently(reminderId: number): Promise<void> {
+    const id = normalizeReminderId(reminderId);
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.execute(
+        `UPDATE USER_REMINDERS
+            SET SENT_AT = SYSTIMESTAMP,
+                UPDATED_AT = SYSTIMESTAMP
+          WHERE REMINDER_ID = :reminderId`,
+        { reminderId: id },
+        { autoCommit: true },
+      );
     } finally {
       await connection.close();
     }
@@ -308,6 +365,7 @@ export default class Reminder {
                FROM USER_REMINDERS
               WHERE REMIND_AT <= :cutoff
                 AND SENT_AT IS NULL
+                AND FAILURE_COUNT < 5
               ORDER BY REMIND_AT
            )
           WHERE ROWNUM <= :limit`,
@@ -325,6 +383,8 @@ export default class Reminder {
             CONTENT: string;
             IS_NOISY: number;
             SENT_AT: Date | string | null;
+            FAILURE_COUNT: number;
+            FAILED_AT: Date | string | null;
             CREATED_AT: Date | string | null;
             UPDATED_AT: Date | string | null;
           },

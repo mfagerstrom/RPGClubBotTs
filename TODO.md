@@ -16,5 +16,4 @@
 - User bug reports
 - Now playing / Game Collection / Completion data export to .csv / excel
 - Game Collection Imports - Steam, PSN, ???
-- Reminder DM failures loop forever. In deliverReminder, if a DM send fails (DMs closed, rate limits), the reminder stays due and is retried every minute with no backoff or failure marking (src/services/ReminderService.ts (lines 45-76)). Add a retry cap/backoff and mark as failed or disable after repeated errors to avoid log spam and wasted work.
 - Build scripts are fragile/cross-platform unfriendly: "rm -rf ./build | tsc" (and similar in buildDev/buildProd) relies on a Unix rm and uses a pipe, which can fail on Windows and doesn’t guarantee ordering (package.json:scripts). Swap to rimraf and && sequencing to make builds reliable on all environments.
