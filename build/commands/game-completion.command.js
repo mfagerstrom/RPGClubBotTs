@@ -15,10 +15,10 @@ import Game from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
 import { createIgdbSession, } from "../services/IgdbSelectService.js";
 import { COMPLETION_TYPES, COMPLETION_PAGE_SIZE, formatDiscordTimestamp, formatPlaytimeHours, parseCompletionDateInput, formatTableDate, buildGameDbThumbAttachment, applyGameDbThumbnail, } from "./profile.command.js";
-const ANNOUNCEMENT_CHANNEL_ID = "360819470836695042";
+import { saveCompletion } from "../functions/CompletionHelpers.js";
 const completionAddSessions = new Map();
 let GameCompletionCommands = class GameCompletionCommands {
-    async completionAdd(completionType, gameId, query, completionDate, finalPlaytimeHours, fromNowPlaying, announce, interaction) {
+    async completionAdd(completionType, gameId, query, completionDate, finalPlaytimeHours, announce, interaction) {
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         if (!COMPLETION_TYPES.includes(completionType)) {
             await safeReply(interaction, {
@@ -48,38 +48,6 @@ let GameCompletionCommands = class GameCompletionCommands {
         }
         const playtime = finalPlaytimeHours === undefined ? null : finalPlaytimeHours;
         const userId = interaction.user.id;
-        if (fromNowPlaying) {
-            const list = await Member.getNowPlayingEntries(userId);
-            if (!list.length) {
-                await safeReply(interaction, {
-                    content: "Your Now Playing list is empty. Add a game first or use query/game_id.",
-                    flags: MessageFlags.Ephemeral,
-                });
-                return;
-            }
-            const sessionId = this.createCompletionSession({
-                userId,
-                completionType,
-                completedAt,
-                finalPlaytimeHours: playtime,
-                source: "existing",
-                announce,
-            });
-            const select = new StringSelectMenuBuilder()
-                .setCustomId(`completion-add-select:${sessionId}`)
-                .setPlaceholder("Select a game from Now Playing")
-                .addOptions(list.slice(0, 25).map((entry) => ({
-                label: entry.title.slice(0, 100),
-                value: String(entry.gameId),
-                description: `GameDB #${entry.gameId}`,
-            })));
-            await safeReply(interaction, {
-                content: "Choose the game you just completed:",
-                components: [new ActionRowBuilder().addComponents(select)],
-                flags: MessageFlags.Ephemeral,
-            });
-            return;
-        }
         if (gameId) {
             const game = await Game.getGameById(Number(gameId));
             if (!game) {
@@ -89,13 +57,13 @@ let GameCompletionCommands = class GameCompletionCommands {
                 });
                 return;
             }
-            await this.saveCompletion(interaction, userId, game.id, completionType, completedAt, playtime, game.title, announce);
+            await saveCompletion(interaction, userId, game.id, completionType, completedAt, playtime, game.title, announce);
             return;
         }
         const searchTerm = (query ?? "").trim();
         if (!searchTerm) {
             await safeReply(interaction, {
-                content: "Provide a game_id, set from_now_playing:true, or include a search query.",
+                content: "Provide a game_id or include a search query.",
                 flags: MessageFlags.Ephemeral,
             });
             return;
@@ -821,7 +789,7 @@ let GameCompletionCommands = class GameCompletionCommands {
                 components: [],
             }).catch(() => { });
             const imported = await this.importGameFromIgdb(gameId);
-            await this.saveCompletion(sel, ctx.userId, imported.gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, imported.title, ctx.announce);
+            await saveCompletion(sel, ctx.userId, imported.gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, imported.title, ctx.announce);
         });
         const content = `No GameDB match; select an IGDB result to import for "${searchTerm}".`;
         if (interaction.isMessageComponent()) {
@@ -902,7 +870,7 @@ let GameCompletionCommands = class GameCompletionCommands {
                 });
                 return false;
             }
-            await this.saveCompletion(interaction, ctx.userId, gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, gameTitle ?? undefined, ctx.announce);
+            await saveCompletion(interaction, ctx.userId, gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, gameTitle ?? undefined, ctx.announce);
             return false;
         }
         catch (err) {
@@ -926,83 +894,6 @@ let GameCompletionCommands = class GameCompletionCommands {
         const newGame = await Game.createGame(details.name, details.summary ?? "", null, details.id, details.slug ?? null, details.total_rating ?? null, details.url ?? null);
         await Game.saveFullGameMetadata(newGame.id, details);
         return { gameId: newGame.id, title: details.name };
-    }
-    async saveCompletion(interaction, userId, gameId, completionType, completedAt, finalPlaytimeHours, gameTitle, announce) {
-        if (interaction.user.id !== userId) {
-            await interaction.followUp({
-                content: "You can only log completions for yourself.",
-                flags: MessageFlags.Ephemeral,
-            });
-            return;
-        }
-        const game = await Game.getGameById(gameId);
-        if (!game) {
-            await interaction.followUp({
-                content: `GameDB #${gameId} was not found.`,
-                flags: MessageFlags.Ephemeral,
-            });
-            return;
-        }
-        try {
-            await Member.addCompletion({
-                userId,
-                gameId,
-                completionType,
-                completedAt,
-                finalPlaytimeHours,
-            });
-        }
-        catch (err) {
-            const msg = err?.message ?? "Failed to save completion.";
-            await interaction.followUp({
-                content: `Could not save completion: ${msg}`,
-                flags: MessageFlags.Ephemeral,
-            });
-            return;
-        }
-        try {
-            await Member.removeNowPlaying(userId, gameId);
-        }
-        catch {
-            // Ignore cleanup errors
-        }
-        const playtimeText = formatPlaytimeHours(finalPlaytimeHours);
-        const details = [completionType, playtimeText].filter(Boolean).join(" — ");
-        await interaction.followUp({
-            content: `Logged completion for **${gameTitle ?? game.title}** (${details}).`,
-            flags: MessageFlags.Ephemeral,
-        });
-        if (announce) {
-            try {
-                const channel = await interaction.client.channels.fetch(ANNOUNCEMENT_CHANNEL_ID);
-                if (channel && "send" in channel) {
-                    const user = interaction.user;
-                    const completions = await Game.getGameCompletions(gameId);
-                    const isFirst = completions.length === 1;
-                    const dateStr = completedAt ? formatTableDate(completedAt) : "No date";
-                    const hoursStr = playtimeText ? ` - ${playtimeText}` : "";
-                    const desc = `<@${user.id}> has added a game completion: **${game.title}** - ${completionType} - ${dateStr}${hoursStr}`;
-                    const embed = new EmbedBuilder()
-                        .setAuthor({
-                        name: user.displayName ?? user.username,
-                        iconURL: user.displayAvatarURL(),
-                    })
-                        .setDescription(desc)
-                        .setColor(0x00ff00);
-                    applyGameDbThumbnail(embed);
-                    if (isFirst) {
-                        embed.addFields({
-                            name: "First Completion!",
-                            value: "This is the first recorded completion for this game in the club!",
-                        });
-                    }
-                    await channel.send({ embeds: [embed], files: [buildGameDbThumbAttachment()] });
-                }
-            }
-            catch (err) {
-                console.error("Failed to announce completion:", err);
-            }
-        }
     }
 };
 __decorate([
@@ -1042,12 +933,6 @@ __decorate([
         type: ApplicationCommandOptionType.Number,
     })),
     __param(5, SlashOption({
-        description: "Pick a game from your Now Playing list",
-        name: "from_now_playing",
-        required: false,
-        type: ApplicationCommandOptionType.Boolean,
-    })),
-    __param(6, SlashOption({
         description: "Announce this completion in the completions channel?",
         name: "announce",
         required: false,
