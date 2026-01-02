@@ -183,12 +183,17 @@ function buildProfileFields(record, nickHistory, nowPlaying, completions, guildI
         fields.push({ label: "Switch", value: record.nswFriendCode, inline: true });
     }
     if (nowPlaying.length) {
-        const lines = nowPlaying.map((entry) => {
-            const noteSuffix = entry.note ? ` - ${entry.note}` : "";
+        const lines = [];
+        nowPlaying.forEach((entry) => {
             if (entry.threadId && guildId) {
-                return `[${entry.title}](https://discord.com/channels/${guildId}/${entry.threadId})${noteSuffix}`;
+                lines.push(`[${entry.title}](https://discord.com/channels/${guildId}/${entry.threadId})`);
             }
-            return `${entry.title}${noteSuffix}`;
+            else {
+                lines.push(entry.title);
+            }
+            if (entry.note) {
+                lines.push(`> ${entry.note}`);
+            }
         });
         fields.push({
             label: "Now Playing",
