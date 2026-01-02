@@ -25,6 +25,7 @@ import {
 } from "discordx";
 import Member from "../classes/Member.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import Game from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
 import {
@@ -965,18 +966,23 @@ export class GameCompletionCommands {
 
       components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select));
 
+      const prevDisabled = safePage <= 0;
+      const nextDisabled = safePage >= totalPages - 1;
+
       const prev = new ButtonBuilder()
         .setCustomId(`comp-list-page:${userId}:${yearPart}:${safePage}:prev${queryPart}`)
         .setLabel("Previous")
         .setStyle(ButtonStyle.Secondary)
-        .setDisabled(safePage <= 0);
+        .setDisabled(prevDisabled);
       const next = new ButtonBuilder()
         .setCustomId(`comp-list-page:${userId}:${yearPart}:${safePage}:next${queryPart}`)
         .setLabel("Next")
         .setStyle(ButtonStyle.Secondary)
-        .setDisabled(safePage >= totalPages - 1);
+        .setDisabled(nextDisabled);
 
-      components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(prev, next));
+      if (shouldRenderPrevNextButtons(prevDisabled, nextDisabled)) {
+        components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(prev, next));
+      }
     }
 
     await safeReply(interaction as any, {
@@ -1065,18 +1071,23 @@ export class GameCompletionCommands {
 
       components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(pageSelect));
 
+      const prevDisabled = safePage <= 0;
+      const nextDisabled = safePage >= totalPages - 1;
+
       const prev = new ButtonBuilder()
         .setCustomId(`comp-${mode}-page:${userId}:${year ?? ""}:${safePage}:prev${queryPart}`)
         .setLabel("Previous")
         .setStyle(ButtonStyle.Secondary)
-        .setDisabled(safePage <= 0);
+        .setDisabled(prevDisabled);
       const next = new ButtonBuilder()
         .setCustomId(`comp-${mode}-page:${userId}:${year ?? ""}:${safePage}:next${queryPart}`)
         .setLabel("Next")
         .setStyle(ButtonStyle.Secondary)
-        .setDisabled(safePage >= totalPages - 1);
+        .setDisabled(nextDisabled);
 
-      components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(prev, next));
+      if (shouldRenderPrevNextButtons(prevDisabled, nextDisabled)) {
+        components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(prev, next));
+      }
     }
 
     if (interaction.isMessageComponent()) {

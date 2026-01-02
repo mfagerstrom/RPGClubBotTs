@@ -95,8 +95,9 @@ const HELP_TOPICS = [
         id: "gamedb",
         label: "/gamedb",
         summary: "Search, import, and view games from GameDB with IGDB-powered lookups.",
-        syntax: "Use /gamedb help for subcommands: add, search, view, help.",
-        notes: "Imports pull titles/covers from IGDB. View shows GOTM/NR-GOTM wins, nominations, and related threads for the GameDB id.",
+        syntax: "Use /gamedb help for subcommands: add, search, view, audit, help.",
+        notes: "Imports pull titles/covers from IGDB. View shows GOTM/NR-GOTM wins, " +
+            "nominations, and related threads for the GameDB id. Audit is admin only.",
     },
     {
         id: "publicreminder",
@@ -136,6 +137,16 @@ const HELP_TOPICS = [
         summary: "Server owner tools for GOTM/NR-GOTM and presence management.",
         syntax: "Use /superadmin help to see the subcommands and details.",
     },
+    {
+        id: "todo",
+        label: "/todo",
+        summary: "Manage bot development TODO items (list is public; edits are owner only).",
+        syntax: "Syntax: /todo add title:<string> [details:<string>] [showinchat:<boolean>] | " +
+            "/todo edit id:<int> [title:<string>] [details:<string>] [showinchat:<boolean>] | " +
+            "/todo delete id:<int> [showinchat:<boolean>] | /todo complete id:<int> " +
+            "[showinchat:<boolean>] | /todo list [include_completed:<boolean>] " +
+            "[showinchat:<boolean>]",
+    },
 ];
 const HELP_CATEGORIES = [
     {
@@ -161,7 +172,7 @@ const HELP_CATEGORIES = [
     {
         id: "server-admin",
         name: "Server Administration",
-        topicIds: ["mod", "admin", "superadmin", "publicreminder", "thread", "rss"],
+        topicIds: ["mod", "admin", "superadmin", "todo", "publicreminder", "thread", "rss"],
     },
 ];
 function getCategoryById(id) {
@@ -586,6 +597,15 @@ const GAMEDB_HELP_TOPICS = [
             "associations: winning rounds (with thread/Reddit links) and nomination rounds with " +
             "nominator mentions.",
     },
+    {
+        id: "audit",
+        label: "/gamedb audit",
+        summary: "Audit GameDB for missing images or thread links (admin only).",
+        syntax: "Syntax: /gamedb audit [missing_images:<boolean>] [missing_threads:<boolean>] " +
+            "[auto_accept_images:<boolean>] [showinchat:<boolean>]",
+        notes: "Defaults to checking both images and threads if no filters are set. " +
+            "Auto-accept pulls IGDB images for all missing ones.",
+    },
 ];
 function buildRssHelpButtons(activeId) {
     const select = new StringSelectMenuBuilder()
@@ -627,7 +647,7 @@ export function buildMainHelpResponse() {
         `${formatCommandLine("profile", "View and edit member profiles and Now Playing.")}\n` +
         `${formatCommandLine("mp-info", "Find who has shared multiplayer info.")}\n\n` +
         "**GameDB**\n" +
-        `${formatCommandLine("gamedb", "Search/import games and view GameDB details.")}\n` +
+        `${formatCommandLine("gamedb", "Search/import games, view details, and audit.")}\n` +
         `${formatCommandLine("now-playing", "Show Now Playing lists and thread links.")}\n` +
         `${formatCommandLine("game-completion", "Log and manage your completed games.")}\n\n` +
         "**Utilities**\n" +
@@ -638,6 +658,7 @@ export function buildMainHelpResponse() {
         `${formatCommandLine("mod", "Moderator tools.")}\n` +
         `${formatCommandLine("admin", "Admin tools.")}\n` +
         `${formatCommandLine("superadmin", "Server Owner tools.")}\n` +
+        `${formatCommandLine("todo", "Manage bot development TODO items.")}\n` +
         `${formatCommandLine("publicreminder", "Schedule public reminders.")}\n` +
         `${formatCommandLine("thread", "Link threads to GameDB games.")}\n` +
         `${formatCommandLine("rss", "Manage RSS relays with filters.")}`);

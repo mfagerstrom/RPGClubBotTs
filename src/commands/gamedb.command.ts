@@ -24,6 +24,7 @@ import {
   SlashOption,
 } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import Game, { type IGameAssociationSummary } from "../classes/Game.js";
 import axios from "axios"; // For downloading image attachments
 import { igdbService } from "../services/IgdbService.js";
@@ -1041,23 +1042,31 @@ export class GameDb {
 
     const selectRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
 
+    const prevDisabled = safePage === 0;
+    const nextDisabled = safePage >= totalPages - 1;
+
     const prevButton = new ButtonBuilder()
       .setCustomId(`gamedb-search-page:${sessionId}:${session.userId}:${safePage}:prev`)
       .setLabel("Previous Page")
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled(safePage === 0);
+      .setDisabled(prevDisabled);
 
     const nextButton = new ButtonBuilder()
       .setCustomId(`gamedb-search-page:${sessionId}:${session.userId}:${safePage}:next`)
       .setLabel("Next Page")
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled(safePage >= totalPages - 1);
+      .setDisabled(nextDisabled);
 
     const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(prevButton, nextButton);
+    const components: ActionRowBuilder<any>[] = [selectRow];
+
+    if (shouldRenderPrevNextButtons(prevDisabled, nextDisabled)) {
+      components.push(buttonRow);
+    }
 
     return {
       embeds: [embed],
-      components: [selectRow, buttonRow],
+      components,
       files: [buildGameDbThumbAttachment()],
     };
   }

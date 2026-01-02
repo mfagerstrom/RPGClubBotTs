@@ -10,6 +10,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 import { ActionRowBuilder, ApplicationCommandOptionType, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, StringSelectMenuBuilder, } from "discord.js";
 import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption, } from "discordx";
 import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
+import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import { isAdmin } from "./admin.command.js";
 import Game from "../classes/Game.js";
 import { setThreadGameLink } from "../classes/Thread.js";
@@ -284,19 +285,25 @@ let GameDbAdmin = class GameDbAdmin {
             value: String(g.id),
             description: `ID: ${g.id}`,
         })));
+        const prevDisabled = page === 0;
+        const nextDisabled = page >= totalPages - 1;
         const buttons = new ActionRowBuilder().addComponents(new ButtonBuilder()
             .setCustomId(`audit-page:${sessionId}:prev`)
             .setLabel("Previous")
             .setStyle(ButtonStyle.Secondary)
-            .setDisabled(page === 0), new ButtonBuilder()
+            .setDisabled(prevDisabled), new ButtonBuilder()
             .setCustomId(`audit-page:${sessionId}:next`)
             .setLabel("Next")
             .setStyle(ButtonStyle.Secondary)
-            .setDisabled(page >= totalPages - 1));
+            .setDisabled(nextDisabled));
         const row = new ActionRowBuilder().addComponents(select);
+        const components = [row];
+        if (shouldRenderPrevNextButtons(prevDisabled, nextDisabled)) {
+            components.push(buttons);
+        }
         return {
             embeds: [embed],
-            components: [row, buttons],
+            components,
             files: []
         };
     }

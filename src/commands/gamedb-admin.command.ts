@@ -20,6 +20,7 @@ import {
   SlashOption,
 } from "discordx";
 import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
+import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import { isAdmin } from "./admin.command.js";
 import Game, { IGame } from "../classes/Game.js";
 import { setThreadGameLink } from "../classes/Thread.js";
@@ -405,24 +406,32 @@ export class GameDbAdmin {
         }))
       );
 
+    const prevDisabled = page === 0;
+    const nextDisabled = page >= totalPages - 1;
+
     const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`audit-page:${sessionId}:prev`)
         .setLabel("Previous")
         .setStyle(ButtonStyle.Secondary)
-        .setDisabled(page === 0),
+        .setDisabled(prevDisabled),
       new ButtonBuilder()
         .setCustomId(`audit-page:${sessionId}:next`)
         .setLabel("Next")
         .setStyle(ButtonStyle.Secondary)
-        .setDisabled(page >= totalPages - 1)
+        .setDisabled(nextDisabled)
     );
 
     const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
 
+    const components: ActionRowBuilder<any>[] = [row];
+    if (shouldRenderPrevNextButtons(prevDisabled, nextDisabled)) {
+      components.push(buttons);
+    }
+
     return {
       embeds: [embed],
-      components: [row, buttons],
+      components,
       files: []
     };
   }
@@ -598,4 +607,3 @@ export class GameDbAdmin {
     await interaction.editReply({ embeds: [embed] });
   }
 }
-
