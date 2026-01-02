@@ -161,7 +161,7 @@ export function formatDiscordTimestamp(value: Date | null): string {
 function buildProfileFields(
   record: Awaited<ReturnType<typeof Member.getByUserId>>,
   nickHistory: string[],
-  nowPlaying: { title: string; threadId: string | null }[],
+  nowPlaying: { title: string; threadId: string | null; note: string | null }[],
   completions: Awaited<ReturnType<typeof Member.getCompletions>>,
   guildId?: string,
 ): ProfileField[] {
@@ -235,10 +235,11 @@ function buildProfileFields(
 
   if (nowPlaying.length) {
     const lines = nowPlaying.map((entry) => {
+      const noteSuffix = entry.note ? ` - ${entry.note}` : "";
       if (entry.threadId && guildId) {
-        return `[${entry.title}](https://discord.com/channels/${guildId}/${entry.threadId})`;
+        return `[${entry.title}](https://discord.com/channels/${guildId}/${entry.threadId})${noteSuffix}`;
       }
-      return entry.title;
+      return `${entry.title}${noteSuffix}`;
     });
     fields.push({
       label: "Now Playing",

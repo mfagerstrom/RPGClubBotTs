@@ -184,10 +184,11 @@ function buildProfileFields(record, nickHistory, nowPlaying, completions, guildI
     }
     if (nowPlaying.length) {
         const lines = nowPlaying.map((entry) => {
+            const noteSuffix = entry.note ? ` - ${entry.note}` : "";
             if (entry.threadId && guildId) {
-                return `[${entry.title}](https://discord.com/channels/${guildId}/${entry.threadId})`;
+                return `[${entry.title}](https://discord.com/channels/${guildId}/${entry.threadId})${noteSuffix}`;
             }
-            return entry.title;
+            return `${entry.title}${noteSuffix}`;
         });
         fields.push({
             label: "Now Playing",

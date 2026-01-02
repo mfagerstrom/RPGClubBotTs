@@ -71,7 +71,7 @@ const HELP_TOPICS = [
         id: "now-playing",
         label: "/now-playing",
         summary: "Manage your Now Playing list and view others'.",
-        syntax: "Use /now-playing help for subcommands: list, add, remove.",
+        syntax: "Use /now-playing help for subcommands: list, add, remove, edit-note, delete-note.",
     },
     {
         id: "game-completion",
@@ -485,14 +485,14 @@ const NOW_PLAYING_HELP_TOPICS = [
         id: "list",
         label: "/now-playing list",
         summary: "Show Now Playing lists for you, someone else, or everyone.",
-        syntax: "Syntax: /now-playing list [member:<user>] [all:<boolean>]",
+        syntax: "Syntax: /now-playing list [member:<user>] [all:<boolean>] [showinchat:<boolean>]",
         notes: "Defaults to a private view for one member. Set all:true to list everyone (sent publicly) with thread links when available.",
     },
     {
         id: "add",
         label: "/now-playing add",
         summary: "Add a GameDB title to your Now Playing list (max 10).",
-        syntax: "Syntax: /now-playing add title:<string>",
+        syntax: "Syntax: /now-playing add title:<string> [note:<string>]",
         notes: "Searches GameDB; choose from up to 24 results. Only GameDB titles are allowed; no free text.",
     },
     {
@@ -501,6 +501,20 @@ const NOW_PLAYING_HELP_TOPICS = [
         summary: "Remove a GameDB title from your Now Playing list.",
         syntax: "Syntax: /now-playing remove",
         notes: "Shows a dropdown of your current list to pick what to remove.",
+    },
+    {
+        id: "edit-note",
+        label: "/now-playing edit-note",
+        summary: "Add or update a note for a Now Playing entry.",
+        syntax: "Syntax: /now-playing edit-note",
+        notes: "Select a game, then enter the note (max 500 chars).",
+    },
+    {
+        id: "delete-note",
+        label: "/now-playing delete-note",
+        summary: "Delete the note from a Now Playing entry.",
+        syntax: "Syntax: /now-playing delete-note",
+        notes: "Select a game to clear its note.",
     },
 ];
 const GAME_COMPLETION_HELP_TOPICS = [

@@ -87,6 +87,7 @@ export interface IMemberNickHistory {
 export interface IMemberNowPlayingEntry {
   title: string;
   threadId: string | null;
+  note: string | null;
 }
 
 export interface IMemberNowPlayingList {
@@ -155,10 +156,14 @@ export default class Member {
 
   static async getNowPlaying(
     userId: string,
-  ): Promise<{ title: string; threadId: string | null }[]> {
+  ): Promise<{ title: string; threadId: string | null; note: string | null }[]> {
     const connection = await getOraclePool().getConnection();
     try {
-      const res = await connection.execute<{ TITLE: string; THREAD_ID: string | null }>(
+      const res = await connection.execute<{
+        TITLE: string;
+        THREAD_ID: string | null;
+        NOTE: string | null;
+      }>(
         `SELECT g.TITLE,
                 COALESCE(
                   (
@@ -171,7 +176,8 @@ export default class Member {
                     FROM THREADS th
                     WHERE th.GAMEDB_GAME_ID = u.GAMEDB_GAME_ID
                   )
-                ) AS THREAD_ID
+                ) AS THREAD_ID,
+                u.NOTE
            FROM USER_NOW_PLAYING u
            JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
           WHERE u.USER_ID = :userId
@@ -181,7 +187,11 @@ export default class Member {
         { outFormat: oracledb.OUT_FORMAT_OBJECT },
       );
       return (res.rows ?? [])
-        .map((r) => ({ title: r.TITLE, threadId: r.THREAD_ID ?? null }))
+        .map((r) => ({
+          title: r.TITLE,
+          threadId: r.THREAD_ID ?? null,
+          note: r.NOTE ?? null,
+        }))
         .slice(0, MAX_NOW_PLAYING);
     } finally {
       await connection.close();
@@ -197,6 +207,7 @@ export default class Member {
         GLOBAL_NAME: string | null;
         TITLE: string;
         THREAD_ID: string | null;
+        NOTE: string | null;
       }>(
         `SELECT u.USER_ID,
                 ru.USERNAME,
@@ -214,6 +225,7 @@ export default class Member {
                     WHERE th.GAMEDB_GAME_ID = u.GAMEDB_GAME_ID
                   )
                 ) AS THREAD_ID,
+                u.NOTE,
                 u.ADDED_AT,
                 u.ENTRY_ID
            FROM USER_NOW_PLAYING u
@@ -245,6 +257,7 @@ export default class Member {
           record.entries.push({
             title: row.TITLE,
             threadId: row.THREAD_ID ?? null,
+            note: row.NOTE ?? null,
           });
         }
       }
@@ -261,11 +274,15 @@ export default class Member {
 
   static async getNowPlayingEntries(
     userId: string,
-  ): Promise<{ gameId: number; title: string }[]> {
+  ): Promise<{ gameId: number; title: string; note: string | null }[]> {
     const connection = await getOraclePool().getConnection();
     try {
-      const res = await connection.execute<{ GAME_ID: number; TITLE: string }>(
-        `SELECT u.GAMEDB_GAME_ID AS GAME_ID, g.TITLE
+      const res = await connection.execute<{
+        GAME_ID: number;
+        TITLE: string;
+        NOTE: string | null;
+      }>(
+        `SELECT u.GAMEDB_GAME_ID AS GAME_ID, g.TITLE, u.NOTE
            FROM USER_NOW_PLAYING u
            JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
           WHERE u.USER_ID = :userId
@@ -277,17 +294,51 @@ export default class Member {
       return (res.rows ?? []).map((r) => ({
         gameId: Number(r.GAME_ID),
         title: r.TITLE,
+        note: r.NOTE ?? null,
       }));
     } finally {
       await connection.close();
     }
   }
 
-  static async addNowPlaying(userId: string, gameId: number): Promise<void> {
+  static async updateNowPlayingNote(
+    userId: string,
+    gameId: number,
+    note: string | null,
+  ): Promise<boolean> {
     if (!Number.isInteger(gameId) || gameId <= 0) {
       throw new Error("Invalid GameDB id.");
     }
     const connection = await getOraclePool().getConnection();
+    const normalizedNote = note?.trim();
+    const noteValue = normalizedNote ? normalizedNote : null;
+
+    try {
+      const res = await connection.execute(
+        `UPDATE USER_NOW_PLAYING
+            SET NOTE = :note
+          WHERE USER_ID = :userId
+            AND GAMEDB_GAME_ID = :gameId`,
+        { userId, gameId, note: noteValue },
+        { autoCommit: true },
+      );
+      return (res.rowsAffected ?? 0) > 0;
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async addNowPlaying(
+    userId: string,
+    gameId: number,
+    note: string | null = null,
+  ): Promise<void> {
+    if (!Number.isInteger(gameId) || gameId <= 0) {
+      throw new Error("Invalid GameDB id.");
+    }
+    const connection = await getOraclePool().getConnection();
+    const normalizedNote = note?.trim();
+    const noteValue = normalizedNote ? normalizedNote : null;
 
     try {
       const countRes = await connection.execute<{ CNT: number }>(
@@ -301,8 +352,9 @@ export default class Member {
       }
 
       await connection.execute(
-        `INSERT INTO USER_NOW_PLAYING (USER_ID, GAMEDB_GAME_ID) VALUES (:userId, :gameId)`,
-        { userId, gameId },
+        `INSERT INTO USER_NOW_PLAYING (USER_ID, GAMEDB_GAME_ID, NOTE)
+         VALUES (:userId, :gameId, :note)`,
+        { userId, gameId, note: noteValue },
         { autoCommit: true },
       );
     } catch (err: any) {

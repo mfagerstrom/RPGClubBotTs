@@ -55,14 +55,19 @@ export default class Member {
                     FROM THREADS th
                     WHERE th.GAMEDB_GAME_ID = u.GAMEDB_GAME_ID
                   )
-                ) AS THREAD_ID
+                ) AS THREAD_ID,
+                u.NOTE
            FROM USER_NOW_PLAYING u
            JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
           WHERE u.USER_ID = :userId
             AND u.GAMEDB_GAME_ID IS NOT NULL
           ORDER BY u.ADDED_AT DESC, u.ENTRY_ID DESC`, { userId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
             return (res.rows ?? [])
-                .map((r) => ({ title: r.TITLE, threadId: r.THREAD_ID ?? null }))
+                .map((r) => ({
+                title: r.TITLE,
+                threadId: r.THREAD_ID ?? null,
+                note: r.NOTE ?? null,
+            }))
                 .slice(0, MAX_NOW_PLAYING);
         }
         finally {
@@ -88,6 +93,7 @@ export default class Member {
                     WHERE th.GAMEDB_GAME_ID = u.GAMEDB_GAME_ID
                   )
                 ) AS THREAD_ID,
+                u.NOTE,
                 u.ADDED_AT,
                 u.ENTRY_ID
            FROM USER_NOW_PLAYING u
@@ -114,6 +120,7 @@ export default class Member {
                     record.entries.push({
                         title: row.TITLE,
                         threadId: row.THREAD_ID ?? null,
+                        note: row.NOTE ?? null,
                     });
                 }
             }
@@ -130,7 +137,7 @@ export default class Member {
     static async getNowPlayingEntries(userId) {
         const connection = await getOraclePool().getConnection();
         try {
-            const res = await connection.execute(`SELECT u.GAMEDB_GAME_ID AS GAME_ID, g.TITLE
+            const res = await connection.execute(`SELECT u.GAMEDB_GAME_ID AS GAME_ID, g.TITLE, u.NOTE
            FROM USER_NOW_PLAYING u
            JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
           WHERE u.USER_ID = :userId
@@ -139,24 +146,46 @@ export default class Member {
             return (res.rows ?? []).map((r) => ({
                 gameId: Number(r.GAME_ID),
                 title: r.TITLE,
+                note: r.NOTE ?? null,
             }));
         }
         finally {
             await connection.close();
         }
     }
-    static async addNowPlaying(userId, gameId) {
+    static async updateNowPlayingNote(userId, gameId, note) {
         if (!Number.isInteger(gameId) || gameId <= 0) {
             throw new Error("Invalid GameDB id.");
         }
         const connection = await getOraclePool().getConnection();
+        const normalizedNote = note?.trim();
+        const noteValue = normalizedNote ? normalizedNote : null;
+        try {
+            const res = await connection.execute(`UPDATE USER_NOW_PLAYING
+            SET NOTE = :note
+          WHERE USER_ID = :userId
+            AND GAMEDB_GAME_ID = :gameId`, { userId, gameId, note: noteValue }, { autoCommit: true });
+            return (res.rowsAffected ?? 0) > 0;
+        }
+        finally {
+            await connection.close();
+        }
+    }
+    static async addNowPlaying(userId, gameId, note = null) {
+        if (!Number.isInteger(gameId) || gameId <= 0) {
+            throw new Error("Invalid GameDB id.");
+        }
+        const connection = await getOraclePool().getConnection();
+        const normalizedNote = note?.trim();
+        const noteValue = normalizedNote ? normalizedNote : null;
         try {
             const countRes = await connection.execute(`SELECT COUNT(*) AS CNT FROM USER_NOW_PLAYING WHERE USER_ID = :userId`, { userId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
             const count = Number((countRes.rows ?? [])[0]?.CNT ?? 0);
             if (count >= MAX_NOW_PLAYING) {
                 throw new Error(`You can only track up to ${MAX_NOW_PLAYING} Now Playing titles.`);
             }
-            await connection.execute(`INSERT INTO USER_NOW_PLAYING (USER_ID, GAMEDB_GAME_ID) VALUES (:userId, :gameId)`, { userId, gameId }, { autoCommit: true });
+            await connection.execute(`INSERT INTO USER_NOW_PLAYING (USER_ID, GAMEDB_GAME_ID, NOTE)
+         VALUES (:userId, :gameId, :note)`, { userId, gameId, note: noteValue }, { autoCommit: true });
         }
         catch (err) {
             const msg = err?.message ?? String(err);

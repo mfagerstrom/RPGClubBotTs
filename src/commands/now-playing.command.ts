@@ -39,9 +39,10 @@ import {
 } from "../commands/profile.command.js";
 
 const MAX_NOW_PLAYING = 10;
+const MAX_NOW_PLAYING_NOTE_LEN = 500;
 const nowPlayingAddSessions = new Map<
   string,
-  { userId: string; query: string }
+  { userId: string; query: string; note: string | null }
 >();
 
 type NowPlayingCompleteContext = {
@@ -82,6 +83,81 @@ function chunkLines(lines: string[], maxLength: number = 3800): string[] {
   return chunks;
 }
 
+async function promptForNote(
+  interaction: CommandInteraction | StringSelectMenuInteraction,
+  question: string,
+  timeoutMs: number = 120_000,
+): Promise<string | null> {
+  const channel: any = interaction.channel;
+  const userId = interaction.user.id;
+
+  if (!channel || typeof channel.awaitMessages !== "function") {
+    await safeReply(interaction, {
+      content: "Cannot prompt for additional input; use this command in a text channel.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return null;
+  }
+
+  await safeReply(interaction, {
+    content: `<@${userId}> ${question}`,
+    flags: MessageFlags.Ephemeral,
+  });
+
+  try {
+    const collected = await channel.awaitMessages({
+      filter: (m: any) => m.author?.id === userId,
+      max: 1,
+      time: timeoutMs,
+    });
+
+    const first = collected?.first?.();
+    if (!first) {
+      await safeReply(interaction, {
+        content: "Timed out waiting for a response.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return null;
+    }
+
+    const content: string = (first.content ?? "").trim();
+    await first.delete().catch(() => {});
+
+    if (!content) {
+      await safeReply(interaction, {
+        content: "Empty response received. Cancelled.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return null;
+    }
+
+    if (/^cancel$/i.test(content)) {
+      await safeReply(interaction, {
+        content: "Cancelled.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return null;
+    }
+
+    if (content.length > MAX_NOW_PLAYING_NOTE_LEN) {
+      await safeReply(interaction, {
+        content: `Note must be ${MAX_NOW_PLAYING_NOTE_LEN} characters or fewer.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return null;
+    }
+
+    return content;
+  } catch (err: any) {
+    const msg = err?.message ?? String(err);
+    await safeReply(interaction, {
+      content: `Error while waiting for a response: ${msg}`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return null;
+  }
+}
+
 @Discord()
 @SlashGroup({ description: "Show now playing data", name: "now-playing" })
 @SlashGroup("now-playing")
@@ -102,11 +178,18 @@ export class NowPlayingCommand {
       type: ApplicationCommandOptionType.Boolean,
     })
     showAll: boolean | undefined,
+    @SlashOption({
+      description: "Show in chat (public) instead of ephemeral",
+      name: "showinchat",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    showInChat: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
     const showAllFlag = showAll === true;
     const target = member ?? interaction.user;
-    const ephemeral = !showAllFlag;
+    const ephemeral = !(showAllFlag || showInChat);
     await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
     if (showAllFlag) {
@@ -126,13 +209,32 @@ export class NowPlayingCommand {
       type: ApplicationCommandOptionType.String,
     })
     query: string,
+    @SlashOption({
+      description: "Optional note for this entry",
+      name: "note",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    note: string | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
     try {
       const results = await Game.searchGames(query);
+      const trimmedNote = note?.trim();
+      if (trimmedNote && trimmedNote.length > MAX_NOW_PLAYING_NOTE_LEN) {
+        await safeReply(interaction, {
+          content: `Note must be ${MAX_NOW_PLAYING_NOTE_LEN} characters or fewer.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
       const sessionId = `np-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-      nowPlayingAddSessions.set(sessionId, { userId: interaction.user.id, query });
+      nowPlayingAddSessions.set(sessionId, {
+        userId: interaction.user.id,
+        query,
+        note: trimmedNote ? trimmedNote : null,
+      });
 
       const options = results.slice(0, 23).map((g) => ({
         label: g.title.substring(0, 100),
@@ -233,7 +335,7 @@ export class NowPlayingCommand {
         return;
       }
 
-      await Member.addNowPlaying(ownerId, gameId);
+      await Member.addNowPlaying(ownerId, gameId, session.note);
       const list = await Member.getNowPlaying(ownerId);
       await interaction.update({
         content: `Added **${game.title}** to your Now Playing list (${list.length}/${MAX_NOW_PLAYING}).`,
@@ -294,6 +396,80 @@ export class NowPlayingCommand {
         flags: MessageFlags.Ephemeral,
       });
     }
+  }
+
+  @Slash({
+    description: "Add or update a note for a Now Playing entry",
+    name: "edit-note",
+  })
+  async editNowPlayingNote(interaction: CommandInteraction): Promise<void> {
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const current = await Member.getNowPlayingEntries(interaction.user.id);
+    if (!current.length) {
+      await safeReply(interaction, {
+        content: "Your Now Playing list is empty.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const options = current.map((entry) => ({
+      label: entry.title.slice(0, 100),
+      value: String(entry.gameId),
+      description: entry.note ? entry.note.slice(0, 95) : "Add a note",
+    }));
+
+    const selectId = `nowplaying-edit-note-select:${interaction.user.id}`;
+    const selectRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(selectId)
+        .setPlaceholder("Select a game to edit its note")
+        .addOptions(options),
+    );
+
+    await safeReply(interaction, {
+      content: "Select a game to add or update its note:",
+      components: [selectRow],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  @Slash({
+    description: "Delete a note from a Now Playing entry",
+    name: "delete-note",
+  })
+  async deleteNowPlayingNote(interaction: CommandInteraction): Promise<void> {
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const current = await Member.getNowPlayingEntries(interaction.user.id);
+    if (!current.length) {
+      await safeReply(interaction, {
+        content: "Your Now Playing list is empty.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const options = current.map((entry) => ({
+      label: entry.title.slice(0, 100),
+      value: String(entry.gameId),
+      description: entry.note ? entry.note.slice(0, 95) : "No note to delete",
+    }));
+
+    const selectId = `nowplaying-delete-note-select:${interaction.user.id}`;
+    const selectRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(selectId)
+        .setPlaceholder("Select a game to delete its note")
+        .addOptions(options),
+    );
+
+    await safeReply(interaction, {
+      content: "Select a game to delete its note:",
+      components: [selectRow],
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   @Slash({ description: "Log completion for a game in your Now Playing list", name: "complete-game" })
@@ -458,6 +634,70 @@ export class NowPlayingCommand {
     }
   }
 
+  @SelectMenuComponent({ id: /^nowplaying-edit-note-select:\d+$/ })
+  async handleEditNoteSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const [, ownerId] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await interaction.reply({
+        content: "This note prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const gameId = Number(interaction.values?.[0]);
+    if (!Number.isInteger(gameId) || gameId <= 0) {
+      await interaction.reply({
+        content: "Invalid selection.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await interaction.deferUpdate().catch(() => {});
+
+    const note = await promptForNote(
+      interaction,
+      "Enter a note for this Now Playing entry (or type `cancel`).",
+    );
+    if (!note) return;
+
+    const updated = await Member.updateNowPlayingNote(ownerId, gameId, note);
+    await safeReply(interaction, {
+      content: updated ? "Note saved." : "Could not update that entry.",
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  @SelectMenuComponent({ id: /^nowplaying-delete-note-select:\d+$/ })
+  async handleDeleteNoteSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const [, ownerId] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await interaction.reply({
+        content: "This note prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const gameId = Number(interaction.values?.[0]);
+    if (!Number.isInteger(gameId) || gameId <= 0) {
+      await interaction.reply({
+        content: "Invalid selection.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await interaction.deferUpdate().catch(() => {});
+
+    const updated = await Member.updateNowPlayingNote(ownerId, gameId, null);
+    await safeReply(interaction, {
+      content: updated ? "Note deleted." : "Could not update that entry.",
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
   @ButtonComponent({ id: /^np-remove:[^:]+:\d+$/ })
   async handleRemoveNowPlayingButton(interaction: ButtonInteraction): Promise<void> {
     const [, ownerId, gameIdRaw] = interaction.customId.split(":");
@@ -524,13 +764,17 @@ export class NowPlayingCommand {
     let hasLinks = false;
     let hasUnlinked = false;
 
-    const lines = entries.map((entry, idx) => {
+    const lines: string[] = [];
+    entries.forEach((entry, idx) => {
       if (entry.threadId) hasLinks = true;
       else hasUnlinked = true;
-      return `${idx + 1}. ${formatEntry(entry, interaction.guildId)}`;
+      lines.push(`${idx + 1}. ${formatEntry(entry, interaction.guildId)}`);
+      if (entry.note) {
+        lines.push(`> ${entry.note}`);
+      }
     });
 
-    const footerParts: string[] = [target.tag || target.username || target.id];
+    const footerParts: string[] = [];
     if (hasLinks) {
       footerParts.push("Links on game titles lead to their respective discussion threads.");
     }
@@ -540,13 +784,17 @@ export class NowPlayingCommand {
       );
     }
 
+    const displayName = target.displayName ?? target.username ?? "User";
     const embed = new EmbedBuilder()
-      .setTitle("Now Playing")
+      .setTitle(`${displayName}'s Now Playing List`)
       .setDescription(lines.join("\n"))
+      .setAuthor({
+        name: displayName,
+        iconURL: target.displayAvatarURL({ size: 64, forceStatic: false }),
+      })
       .setFooter({ text: footerParts.join("\n") });
 
     await safeReply(interaction, {
-      content: `<@${target.id}>`,
       embeds: [embed],
       flags: ephemeral ? MessageFlags.Ephemeral : undefined,
     });
@@ -571,14 +819,16 @@ export class NowPlayingCommand {
     const lines = lists.map((record, idx) => {
       const displayName =
         record.globalName ?? record.username ?? `Member ${idx + 1}`;
-      const games = record.entries
-        .map((entry) => {
-          if (entry.threadId) hasLinks = true;
-          else hasUnlinked = true;
-          return formatEntry(entry, interaction.guildId);
-        })
-        .join("; ");
-      return `${idx + 1}. <@${record.userId}> (${displayName}) - ${games}`;
+      const gameLines: string[] = [];
+      record.entries.forEach((entry) => {
+        if (entry.threadId) hasLinks = true;
+        else hasUnlinked = true;
+        gameLines.push(formatEntry(entry, interaction.guildId));
+        if (entry.note) {
+          gameLines.push(`> ${entry.note}`);
+        }
+      });
+      return `${idx + 1}. <@${record.userId}> (${displayName})\n${gameLines.join("\n")}`;
     });
 
     const footerParts: string[] = [];
@@ -613,7 +863,7 @@ export class NowPlayingCommand {
 
   private async startNowPlayingIgdbImport(
     interaction: StringSelectMenuInteraction,
-    session: { userId: string; query: string },
+    session: { userId: string; query: string; note: string | null },
   ): Promise<void> {
     try {
       const searchRes = await igdbService.searchGames(session.query);
@@ -639,7 +889,7 @@ export class NowPlayingCommand {
       const { components } = createIgdbSession(session.userId, opts, async (sel, igdbId) => {
         try {
           const imported = await this.importGameFromIgdb(igdbId);
-          await Member.addNowPlaying(session.userId, imported.gameId);
+          await Member.addNowPlaying(session.userId, imported.gameId, session.note);
           const list = await Member.getNowPlaying(session.userId);
           await sel.update({
             content: `Imported **${imported.title}** and added to Now Playing (${list.length}/${MAX_NOW_PLAYING}).`,
