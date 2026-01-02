@@ -528,14 +528,14 @@ const GAME_COMPLETION_HELP_TOPICS = [
         id: "add",
         label: "/game-completion add",
         summary: "Log that you completed a game (removes it from Now Playing if present).",
-        syntax: "Syntax: /game-completion add [game_id:<int> | title:<string> | from_now_playing:<bool>] completion_type:<choice> [completion_date:<date>] [final_playtime_hours:<number>] [note:<string>] [announce:<boolean>]",
+        syntax: "Syntax: /game-completion add [game_id:<int> | title:<string>] completion_type:<choice> [completion_date:<date>] [final_playtime_hours:<number>] [note:<string>] [announce:<boolean>]",
         notes: "Completion type choices: Main Story, Main Story + Side Content, Completionist. Completion date defaults to today; playtime is optional (e.g., 42.5). Uses GameDB lookup/import if you provide a title. Set announce:true to post to the completions channel.",
     },
     {
         id: "list",
         label: "/game-completion list",
         summary: "List recent completions for you, another member, or view the leaderboard.",
-        syntax: "Syntax: /game-completion list [year:<int>] [member:<user>] [all:<boolean>] [showinchat:<bool>]",
+        syntax: "Syntax: /game-completion list [year:<int>] [title:<string>] [member:<user>] [all:<boolean>] [showinchat:<bool>]",
         notes: "Shows your completions, another member's completions (member), or a leaderboard of all members (all).",
     },
     {
@@ -551,6 +551,13 @@ const GAME_COMPLETION_HELP_TOPICS = [
         summary: "Delete one of your completion records.",
         syntax: "Syntax: /game-completion delete",
         notes: "Interactive menu to pick a completion to delete.",
+    },
+    {
+        id: "completionator-import",
+        label: "/game-completion completionator-import",
+        summary: "Import completions from a Completionator CSV export.",
+        syntax: "Syntax: /game-completion completionator-import action:<start|resume|status|pause|cancel> [file:<csv>]",
+        notes: "Use action:start with the CSV file to begin. During review, reply with a GameDB id, skip, or pause, and choose Update Existing when you want to sync the CSV data.",
     },
 ];
 function buildGameCompletionHelpButtons(activeId) {

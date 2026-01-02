@@ -1,3 +1,17 @@
+2026-01-02 - Commit ID: c867cf5 - fix: tweaked ui for /profile view's now-playing notes
+2026-01-02 - Commit ID: 6b86c6f - feat: added optional notes for game completions
+2026-01-02 - Commit ID: f43bab5 - feat: added /suggestion command
+2026-01-02 - Commit ID: e80219f - fix: added gameDB thumbnail image for /now-playing list
+2026-01-02 - Commit ID: 9ee5223 - feat: implemented optional notes for now-playing entries
+2026-01-02 - Commit ID: 4eab777 - fix: corrected profile view recently completed sort
+2026-01-02 - Commit ID: 04717d5 - fix: If query is given for a search (completed games, gamedb list, etc), include the query in the output embed
+2026-01-02 - Commit ID: 65bb668 - fix: Rename query to title for slash command params
+2026-01-02 - Commit ID: bf8150b - fix: remove gameID parameter from /superadmin add other completion
+2026-01-02 - Commit ID: a64d599 - fix: voting-setup buttons don't handle long titles
+2026-01-02 - Commit ID: 30bb70c - fix: tags for new threads in nextround setup
+2026-01-02 - Commit ID: 3693d89 - fix: Next/Prev Page buttons both disabled = no rendering
+2026-01-02 - Commit ID: 269085a - chore: updated TODOs
+2026-01-02 - Commit ID: de591b9 - chore: updated commit history
 2026-01-02 - Commit ID: f46a3dc - feat: implemented superadmin ability to add completions for members
 2026-01-02 - Commit ID: 837081d - fix: corrected images not being imported when adding a game via completion
 2026-01-02 - Commit ID: 7606697 - feat: added /gamedb audit command for admins
