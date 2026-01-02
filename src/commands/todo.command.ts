@@ -1,11 +1,24 @@
 import type { CommandInteraction } from "discord.js";
 import {
+  ActionRowBuilder,
   ApplicationCommandOptionType,
   AttachmentBuilder,
+  ButtonBuilder,
+  ButtonInteraction,
+  ButtonStyle,
   EmbedBuilder,
   MessageFlags,
+  StringSelectMenuBuilder,
+  StringSelectMenuInteraction,
 } from "discord.js";
-import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
+import {
+  ButtonComponent,
+  Discord,
+  SelectMenuComponent,
+  Slash,
+  SlashGroup,
+  SlashOption,
+} from "discordx";
 import { readFileSync } from "fs";
 import path from "path";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
@@ -18,9 +31,16 @@ import {
   updateTodo,
   type ITodoItem,
 } from "../classes/Todo.js";
+import {
+  deleteSuggestion,
+  getSuggestionById,
+  listSuggestions,
+  type ISuggestionItem,
+} from "../classes/Suggestion.js";
 
 const MAX_LIST_ITEMS: number = 100;
 const MAX_TODO_DESCRIPTION: number = 3800;
+const MAX_SUGGESTION_OPTIONS: number = 25;
 const GAME_DB_THUMB_NAME: string = "gameDB.png";
 const GAME_DB_THUMB_PATH: string = path.join(
   process.cwd(),
@@ -103,6 +123,53 @@ function buildTodoListEmbed(
   return { embeds: [embed], files };
 }
 
+function formatSuggestionLine(item: ISuggestionItem): string {
+  const title = item.title;
+  return `- **#${item.suggestionId}** ${title}`;
+}
+
+function buildSuggestionListEmbed(
+  items: ISuggestionItem[],
+): { embeds: EmbedBuilder[]; files: AttachmentBuilder[] } {
+  if (items.length === 0) {
+    const emptyEmbed = new EmbedBuilder()
+      .setTitle("Suggestions")
+      .setDescription("No suggestions found.");
+    applyGameDbThumbnail(emptyEmbed);
+    return { embeds: [emptyEmbed], files: [buildGameDbThumbAttachment()] };
+  }
+
+  const lines = items.map((item) => formatSuggestionLine(item));
+  const description = lines.join("\n");
+  const embed = new EmbedBuilder()
+    .setTitle("Suggestions")
+    .setDescription(description)
+    .setFooter({ text: `${items.length} suggestion(s)` });
+  applyGameDbThumbnail(embed);
+
+  return { embeds: [embed], files: [buildGameDbThumbAttachment()] };
+}
+
+function buildSuggestionDetailEmbed(item: ISuggestionItem): EmbedBuilder {
+  const createdBy = item.createdBy ? `<@${item.createdBy}>` : "Unknown";
+  const createdAt = item.createdAt.toISOString().split("T")[0] ?? "n/a";
+
+  const embed = new EmbedBuilder()
+    .setTitle(`Suggestion #${item.suggestionId}`)
+    .setDescription(item.title)
+    .addFields(
+      { name: "Submitted By", value: createdBy, inline: true },
+      { name: "Submitted", value: createdAt, inline: true },
+    );
+
+  if (item.details) {
+    embed.addFields({ name: "Details", value: item.details });
+  }
+
+  applyGameDbThumbnail(embed);
+  return embed;
+}
+
 @Discord()
 @SlashGroup({ description: "Bot development TODOs (owner manages)", name: "todo" })
 @SlashGroup("todo")
@@ -133,6 +200,171 @@ export class TodoCommand {
     await safeReply(interaction, {
       ...response,
       flags: isPublic ? undefined : MessageFlags.Ephemeral,
+    });
+  }
+
+  @Slash({ description: "Review user suggestions", name: "review-suggestions" })
+  async reviewSuggestions(interaction: CommandInteraction): Promise<void> {
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const ok = await isSuperAdmin(interaction);
+    if (!ok) return;
+
+    const suggestions = await listSuggestions(MAX_SUGGESTION_OPTIONS);
+    const response = buildSuggestionListEmbed(suggestions);
+
+    if (!suggestions.length) {
+      await safeReply(interaction, {
+        ...response,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const select = new StringSelectMenuBuilder()
+      .setCustomId(`todo-suggestion-select:${interaction.user.id}`)
+      .setPlaceholder("Select a suggestion to review")
+      .addOptions(
+        suggestions.map((item) => ({
+          label: item.title.slice(0, 100),
+          value: String(item.suggestionId),
+          description: item.details ? item.details.slice(0, 95) : "No details",
+        })),
+      );
+
+    await safeReply(interaction, {
+      ...response,
+      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  @SelectMenuComponent({ id: /^todo-suggestion-select:\d+$/ })
+  async handleSuggestionSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const [, ownerId] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await interaction.reply({
+        content: "This review prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const suggestionId = Number(interaction.values?.[0]);
+    if (!Number.isInteger(suggestionId) || suggestionId <= 0) {
+      await interaction.reply({
+        content: "Invalid selection.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const suggestion = await getSuggestionById(suggestionId);
+    if (!suggestion) {
+      await interaction.reply({
+        content: "That suggestion no longer exists.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const embed = buildSuggestionDetailEmbed(suggestion);
+    const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`todo-suggestion-accept:${ownerId}:${suggestionId}`)
+        .setLabel("Accept (Create TODO)")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`todo-suggestion-decline:${ownerId}:${suggestionId}`)
+        .setLabel("Decline (Delete)")
+        .setStyle(ButtonStyle.Danger),
+    );
+
+    await interaction.update({
+      embeds: [embed],
+      components: [buttons],
+      files: [buildGameDbThumbAttachment()],
+    });
+  }
+
+  @ButtonComponent({ id: /^todo-suggestion-accept:\d+:\d+$/ })
+  async handleSuggestionAccept(interaction: ButtonInteraction): Promise<void> {
+    const [, ownerId, suggestionIdRaw] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await interaction.reply({
+        content: "This review prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const ok = await isSuperAdmin(interaction as any);
+    if (!ok) return;
+
+    const suggestionId = Number(suggestionIdRaw);
+    if (!Number.isInteger(suggestionId) || suggestionId <= 0) {
+      await interaction.reply({
+        content: "Invalid suggestion id.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const suggestion = await getSuggestionById(suggestionId);
+    if (!suggestion) {
+      await interaction.reply({
+        content: "That suggestion no longer exists.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const todo = await createTodo(
+      suggestion.title,
+      suggestion.details ?? null,
+      suggestion.createdBy,
+    );
+    await deleteSuggestion(suggestionId);
+
+    await interaction.update({
+      content: `Accepted suggestion #${suggestionId} and created TODO #${todo.todoId}.`,
+      embeds: [],
+      components: [],
+      files: [],
+    });
+  }
+
+  @ButtonComponent({ id: /^todo-suggestion-decline:\d+:\d+$/ })
+  async handleSuggestionDecline(interaction: ButtonInteraction): Promise<void> {
+    const [, ownerId, suggestionIdRaw] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await interaction.reply({
+        content: "This review prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const ok = await isSuperAdmin(interaction as any);
+    if (!ok) return;
+
+    const suggestionId = Number(suggestionIdRaw);
+    if (!Number.isInteger(suggestionId) || suggestionId <= 0) {
+      await interaction.reply({
+        content: "Invalid suggestion id.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const deleted = await deleteSuggestion(suggestionId);
+    await interaction.update({
+      content: deleted
+        ? `Declined suggestion #${suggestionId}.`
+        : "That suggestion no longer exists.",
+      embeds: [],
+      components: [],
+      files: [],
     });
   }
 

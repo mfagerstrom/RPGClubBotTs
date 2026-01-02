@@ -36,7 +36,8 @@ type HelpTopicId =
   | "admin"
   | "mod"
   | "superadmin"
-  | "todo";
+  | "todo"
+  | "suggestion";
 
 type HelpTopic = {
   id: HelpTopicId;
@@ -268,7 +269,13 @@ const HELP_TOPICS: HelpTopic[] = [
       "/todo edit id:<int> [title:<string>] [details:<string>] [showinchat:<boolean>] | " +
       "/todo delete id:<int> [showinchat:<boolean>] | /todo complete id:<int> " +
       "[showinchat:<boolean>] | /todo list [include_completed:<boolean>] " +
-      "[showinchat:<boolean>]",
+      "[showinchat:<boolean>] | /todo review-suggestions",
+  },
+  {
+    id: "suggestion",
+    label: "/suggestion",
+    summary: "Submit a bot suggestion for review.",
+    syntax: "Syntax: /suggestion title:<string> [details:<string>]",
   },
 ];
 
@@ -291,7 +298,7 @@ const HELP_CATEGORIES: { id: string; name: string; topicIds: HelpTopicId[] }[] =
   {
     id: "utilities",
     name: "Utilities",
-    topicIds: ["hltb", "coverart", "remindme"],
+    topicIds: ["hltb", "coverart", "remindme", "suggestion"],
   },
   {
     id: "server-admin",
@@ -935,7 +942,8 @@ export function buildMainHelpResponse(): {
         "**Utilities**\n" +
         `${formatCommandLine("hltb", "Look up HowLongToBeat playtimes.")}\n` +
         `${formatCommandLine("coverart", "Grab cover art for a game.")}\n` +
-        `${formatCommandLine("remindme", "Set personal reminders with snooze.")}\n\n` +
+        `${formatCommandLine("remindme", "Set personal reminders with snooze.")}\n` +
+        `${formatCommandLine("suggestion", "Submit a bot suggestion.")}\n\n` +
         "**Server Administration**\n" +
         `${formatCommandLine("mod", "Moderator tools.")}\n` +
         `${formatCommandLine("admin", "Admin tools.")}\n` +
