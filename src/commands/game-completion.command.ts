@@ -50,6 +50,7 @@ type CompletionAddContext = {
   completionType: CompletionType;
   completedAt: Date | null;
   finalPlaytimeHours: number | null;
+  note: string | null;
   source: "existing" | "igdb";
   query?: string;
   announce?: boolean;
@@ -61,6 +62,8 @@ const completionAddSessions = new Map<string, CompletionAddContext>();
 @SlashGroup({ description: "Manage game completions", name: "game-completion" })
 @SlashGroup("game-completion")
 export class GameCompletionCommands {
+  private readonly maxNoteLength = 500;
+
   @Slash({ description: "Add a game completion", name: "add" })
   async completionAdd(
     @SlashChoice(
@@ -90,6 +93,13 @@ export class GameCompletionCommands {
       type: ApplicationCommandOptionType.String,
     })
     query: string | undefined,
+    @SlashOption({
+      description: "Optional note for this completion",
+      name: "note",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    note: string | undefined,
     @SlashOption({
       description: "Completion date (defaults to today)",
       name: "completion_date",
@@ -147,6 +157,14 @@ export class GameCompletionCommands {
 
     const playtime = finalPlaytimeHours === undefined ? null : finalPlaytimeHours;
     const userId = interaction.user.id;
+    const trimmedNote = note?.trim() ?? null;
+    if (trimmedNote && trimmedNote.length > this.maxNoteLength) {
+      await safeReply(interaction, {
+        content: `Note must be ${this.maxNoteLength} characters or fewer.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
 
     if (gameId) {
       const game = await Game.getGameById(Number(gameId));
@@ -164,6 +182,7 @@ export class GameCompletionCommands {
         completionType,
         completedAt,
         playtime,
+        trimmedNote,
         game.title,
         announce,
       );
@@ -184,6 +203,7 @@ export class GameCompletionCommands {
       completionType,
       completedAt,
       finalPlaytimeHours: playtime,
+      note: trimmedNote,
       source: "existing",
       query: searchTerm,
       announce,
@@ -305,7 +325,16 @@ export class GameCompletionCommands {
       return;
     }
 
-    const headers = ["ID", "Game ID", "Title", "Type", "Completed Date", "Playtime (Hours)", "Created At"];
+    const headers = [
+      "ID",
+      "Game ID",
+      "Title",
+      "Type",
+      "Completed Date",
+      "Playtime (Hours)",
+      "Note",
+      "Created At",
+    ];
     const rows = completions.map((c) => {
       return [
         String(c.completionId),
@@ -314,6 +343,7 @@ export class GameCompletionCommands {
         c.completionType,
         c.completedAt ? c.completedAt.toISOString().split("T")[0] : "",
         c.finalPlaytimeHours != null ? String(c.finalPlaytimeHours) : "",
+        c.note ?? "",
         c.createdAt.toISOString(),
       ].map(escapeCsv).join(",");
     });
@@ -449,34 +479,45 @@ export class GameCompletionCommands {
       return;
     }
 
-    const fieldButtons = [
-      new ButtonBuilder()
-        .setCustomId(`comp-edit-field:${ownerId}:${completionId}:type`)
-        .setLabel("Completion Type")
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId(`comp-edit-field:${ownerId}:${completionId}:date`)
-        .setLabel("Completion Date")
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId(`comp-edit-field:${ownerId}:${completionId}:playtime`)
-        .setLabel("Final Playtime")
-        .setStyle(ButtonStyle.Secondary),
-    ];
+      const fieldButtons = [
+        new ButtonBuilder()
+          .setCustomId(`comp-edit-field:${ownerId}:${completionId}:type`)
+          .setLabel("Completion Type")
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`comp-edit-field:${ownerId}:${completionId}:date`)
+          .setLabel("Completion Date")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`comp-edit-field:${ownerId}:${completionId}:playtime`)
+          .setLabel("Final Playtime")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`comp-edit-field:${ownerId}:${completionId}:note`)
+          .setLabel("Note")
+          .setStyle(ButtonStyle.Secondary),
+      ];
 
-    await interaction.reply({
-      content: `Editing **${completion.title}** — choose a field to update:`,
-      embeds: [
-        new EmbedBuilder().setDescription(
-          `Current: ${completion.completionType} — ${completion.completedAt ? formatDiscordTimestamp(completion.completedAt) : "No date"}${completion.finalPlaytimeHours != null ? ` — ${formatPlaytimeHours(completion.finalPlaytimeHours)}` : ""}`,
-        ),
-      ],
-      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(fieldButtons)],
-      flags: MessageFlags.Ephemeral,
-    });
+      const currentParts = [
+        completion.completionType,
+        completion.completedAt ? formatDiscordTimestamp(completion.completedAt) : "No date",
+        completion.finalPlaytimeHours != null
+          ? formatPlaytimeHours(completion.finalPlaytimeHours)
+          : null,
+      ].filter(Boolean);
+      const noteLine = completion.note ? `\n> ${completion.note}` : "";
+
+      await interaction.reply({
+        content: `Editing **${completion.title}** — choose a field to update:`,
+        embeds: [
+          new EmbedBuilder().setDescription(`Current: ${currentParts.join(" — ")}${noteLine}`),
+        ],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(fieldButtons)],
+        flags: MessageFlags.Ephemeral,
+      });
   }
 
-  @ButtonComponent({ id: /^comp-edit-field:[^:]+:\d+:(type|date|playtime)$/ })
+  @ButtonComponent({ id: /^comp-edit-field:[^:]+:\d+:(type|date|playtime|note)$/ })
   async handleCompletionFieldEdit(interaction: ButtonInteraction): Promise<void> {
     const [, ownerId, completionIdRaw, field] = interaction.customId.split(":");
     if (interaction.user.id !== ownerId) {
@@ -513,7 +554,9 @@ export class GameCompletionCommands {
     const prompt =
       field === "date"
         ? "Type the new completion date (e.g., 2025-12-11)."
-        : "Type the new final playtime in hours (e.g., 42.5).";
+        : field === "playtime"
+          ? "Type the new final playtime in hours (e.g., 42.5)."
+          : "Type the new note (or `clear` to remove it).";
 
     await interaction.reply({
       content: prompt,
@@ -556,6 +599,14 @@ export class GameCompletionCommands {
         if (Number.isNaN(num) || num < 0)
           throw new Error("Playtime must be a non-negative number.");
         await Member.updateCompletion(ownerId, completionId, { finalPlaytimeHours: num });
+      } else if (field === "note") {
+        if (/^clear$/i.test(value)) {
+          await Member.updateCompletion(ownerId, completionId, { note: null });
+        } else if (value.length > this.maxNoteLength) {
+          throw new Error(`Note must be ${this.maxNoteLength} characters or fewer.`);
+        } else {
+          await Member.updateCompletion(ownerId, completionId, { note: value });
+        }
       }
 
       await interaction.followUp({
@@ -830,6 +881,9 @@ export class GameCompletionCommands {
       const dateBlock = `\`${dateLabel}\``;
       const line = `${idxBlock} ${dateBlock} **${c.title}** (${typeAbbrev})`;
       acc[yr].push(line);
+      if (c.note) {
+        acc[yr].push(`> ${c.note}`);
+      }
       return acc;
     }, {});
 
@@ -867,7 +921,7 @@ export class GameCompletionCommands {
     };
 
     for (const yr of sortedYears) {
-      const lines = grouped[yr];
+    const lines = grouped[yr];
       if (!lines || !lines.length) {
         addChunkedField(yr, "None", 0);
         continue;
@@ -1205,6 +1259,7 @@ export class GameCompletionCommands {
           ctx.completionType,
           ctx.completedAt,
           ctx.finalPlaytimeHours,
+          ctx.note,
           imported.title,
           ctx.announce,
         );
@@ -1304,6 +1359,7 @@ export class GameCompletionCommands {
         ctx.completionType,
         ctx.completedAt,
         ctx.finalPlaytimeHours,
+        ctx.note,
         gameTitle ?? undefined,
         ctx.announce,
       );

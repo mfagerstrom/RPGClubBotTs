@@ -644,6 +644,7 @@ export class NowPlayingCommand {
         ctx.completionType,
         ctx.completedAt,
         ctx.finalPlaytimeHours,
+        null,
         game?.title,
         ctx.announce,
       );

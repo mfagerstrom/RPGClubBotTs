@@ -433,7 +433,7 @@ let NowPlayingCommand = class NowPlayingCommand {
                 await interaction.deferUpdate();
             }
             const game = await Game.getGameById(gameId);
-            await saveCompletion(interaction, ctx.userId, gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, game?.title, ctx.announce);
+            await saveCompletion(interaction, ctx.userId, gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, null, game?.title, ctx.announce);
             await interaction.editReply({ components: [] });
         }
         finally {

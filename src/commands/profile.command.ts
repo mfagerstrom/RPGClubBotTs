@@ -248,7 +248,13 @@ function buildProfileFields(
   }
 
   if (completions.length) {
-    const lines = completions.map((c) => formatCompletionLine(c, guildId));
+    const lines: string[] = [];
+    completions.forEach((c) => {
+      lines.push(formatCompletionLine(c, guildId));
+      if (c.note) {
+        lines.push(`> ${c.note}`);
+      }
+    });
     fields.push({
       label: "Completed (recent)",
       value: lines.join("\n"),

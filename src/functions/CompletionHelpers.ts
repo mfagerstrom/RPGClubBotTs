@@ -23,6 +23,7 @@ export async function saveCompletion(
   completionType: CompletionType,
   completedAt: Date | null,
   finalPlaytimeHours: number | null,
+  note: string | null,
   gameTitle?: string,
   announce?: boolean,
   isAdminOverride: boolean = false,
@@ -51,6 +52,7 @@ export async function saveCompletion(
       completionType,
       completedAt,
       finalPlaytimeHours,
+      note,
     });
   } catch (err: any) {
     const msg = err?.message ?? "Failed to save completion.";

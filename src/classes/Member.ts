@@ -106,6 +106,7 @@ export interface ICompletionRecord {
   finalPlaytimeHours: number | null;
   createdAt: Date;
   threadId: string | null;
+  note: string | null;
 }
 
 type Connection = oracledb.Connection;
@@ -393,20 +394,23 @@ export default class Member {
     completionType: string;
     completedAt?: Date | null;
     finalPlaytimeHours?: number | null;
+    note?: string | null;
   }): Promise<number> {
-    const { userId, gameId, completionType, completedAt, finalPlaytimeHours } = params;
+    const { userId, gameId, completionType, completedAt, finalPlaytimeHours, note } = params;
     if (!Number.isInteger(gameId) || gameId <= 0) {
       throw new Error("Invalid GameDB id.");
     }
     const connection = await getOraclePool().getConnection();
+    const normalizedNote = note?.trim();
+    const noteValue = normalizedNote ? normalizedNote : null;
 
     try {
       const result = await connection.execute<{ COMPLETION_ID: number }>(
         `
         INSERT INTO USER_GAME_COMPLETIONS (
-          USER_ID, GAMEDB_GAME_ID, COMPLETION_TYPE, COMPLETED_AT, FINAL_PLAYTIME_HRS
+          USER_ID, GAMEDB_GAME_ID, COMPLETION_TYPE, COMPLETED_AT, FINAL_PLAYTIME_HRS, NOTE
         ) VALUES (
-          :userId, :gameId, :type, :completedAt, :playtime
+          :userId, :gameId, :type, :completedAt, :playtime, :note
         )
         RETURNING COMPLETION_ID INTO :completionId
         `,
@@ -416,6 +420,7 @@ export default class Member {
           type: completionType,
           completedAt: completedAt ?? new Date(),
           playtime: finalPlaytimeHours ?? null,
+          note: noteValue,
           completionId: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
         },
         { autoCommit: false },
@@ -456,6 +461,7 @@ export default class Member {
         FINAL_PLAYTIME_HRS: number | null;
         CREATED_AT: Date;
         THREAD_ID: string | null;
+        NOTE: string | null;
       }>(
         `
         SELECT c.COMPLETION_ID,
@@ -465,6 +471,7 @@ export default class Member {
                c.COMPLETED_AT,
                c.FINAL_PLAYTIME_HRS,
                c.CREATED_AT,
+               c.NOTE,
                COALESCE(
                   (
                     SELECT MIN(tgl.THREAD_ID)
@@ -508,6 +515,7 @@ export default class Member {
               ? new Date(row.CREATED_AT as any)
               : new Date(),
         threadId: row.THREAD_ID ?? null,
+        note: row.NOTE ?? null,
       };
     } finally {
       await connection.close();
@@ -547,6 +555,7 @@ export default class Member {
         FINAL_PLAYTIME_HRS: number | null;
         CREATED_AT: Date;
         THREAD_ID: string | null;
+        NOTE: string | null;
       }>(
         `
         SELECT c.COMPLETION_ID,
@@ -556,6 +565,7 @@ export default class Member {
                c.COMPLETED_AT,
                c.FINAL_PLAYTIME_HRS,
                c.CREATED_AT,
+               c.NOTE,
                COALESCE(
                   (
                     SELECT MIN(tgl.THREAD_ID)
@@ -598,6 +608,7 @@ export default class Member {
               ? new Date(row.CREATED_AT as any)
               : new Date(),
         threadId: row.THREAD_ID ?? null,
+        note: row.NOTE ?? null,
       }));
     } finally {
       await connection.close();
@@ -616,6 +627,7 @@ export default class Member {
         FINAL_PLAYTIME_HRS: number | null;
         CREATED_AT: Date;
         THREAD_ID: string | null;
+        NOTE: string | null;
       }>(
         `
         SELECT c.COMPLETION_ID,
@@ -625,6 +637,7 @@ export default class Member {
                c.COMPLETED_AT,
                c.FINAL_PLAYTIME_HRS,
                c.CREATED_AT,
+               c.NOTE,
                COALESCE(
                   (
                     SELECT MIN(tgl.THREAD_ID)
@@ -666,6 +679,7 @@ export default class Member {
               ? new Date(row.CREATED_AT as any)
               : new Date(),
         threadId: row.THREAD_ID ?? null,
+        note: row.NOTE ?? null,
       }));
     } finally {
       await connection.close();
@@ -674,7 +688,7 @@ export default class Member {
 
   static async countCompletions(userId: string, year?: number | null, title?: string): Promise<number> {
     const connection = await getOraclePool().getConnection();
-    const clauses: string[] = ["c.USER_ID = :userId"];
+    const clauses: string[] = ["c.USER_ID = :userId", "c.COMPLETED_AT IS NOT NULL"];
     const binds: Record<string, any> = { userId };
     if (year) {
       clauses.push("EXTRACT(YEAR FROM c.COMPLETED_AT) = :year");
@@ -709,6 +723,7 @@ export default class Member {
       completionType: string;
       completedAt: Date | null;
       finalPlaytimeHours: number | null;
+      note: string | null;
     }>,
   ): Promise<boolean> {
     if (!Number.isInteger(completionId) || completionId <= 0) {
@@ -729,6 +744,11 @@ export default class Member {
     if (updates.finalPlaytimeHours !== undefined) {
       fields.push("FINAL_PLAYTIME_HRS = :playtime");
       binds.playtime = updates.finalPlaytimeHours;
+    }
+    if (updates.note !== undefined) {
+      fields.push("NOTE = :note");
+      const normalizedNote = updates.note?.trim();
+      binds.note = normalizedNote ? normalizedNote : null;
     }
 
     if (!fields.length) return false;

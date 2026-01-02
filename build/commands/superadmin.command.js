@@ -292,7 +292,7 @@ let SuperAdmin = class SuperAdmin {
                 components: [],
             }).catch(() => { });
             const imported = await this.importGameFromIgdbForCompletion(gameId);
-            await saveCompletion(sel, ctx.targetUserId, imported.gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, imported.title, ctx.announce, true);
+            await saveCompletion(sel, ctx.targetUserId, imported.gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, null, imported.title, ctx.announce, true);
         });
         const content = `No GameDB match; select an IGDB result to import for "${searchTerm}".`;
         if (interaction.isMessageComponent()) {
@@ -339,7 +339,7 @@ let SuperAdmin = class SuperAdmin {
                 });
                 return false;
             }
-            await saveCompletion(interaction, ctx.targetUserId, game.id, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, game.title, ctx.announce, true);
+            await saveCompletion(interaction, ctx.targetUserId, game.id, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, null, game.title, ctx.announce, true);
             return true;
         }
         catch (err) {

@@ -11,6 +11,8 @@ import { ApplicationCommandOptionType, MessageFlags } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import { createSuggestion } from "../classes/Suggestion.js";
+const BOT_DEV_CHANNEL_ID = "549603388334014464";
+const BOT_DEV_PING_USER_ID = "191938640413327360";
 let SuggestionCommand = class SuggestionCommand {
     async suggestion(title, details, interaction) {
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
@@ -28,6 +30,18 @@ let SuggestionCommand = class SuggestionCommand {
             content: `Thanks! Suggestion #${suggestion.suggestionId} submitted.`,
             flags: MessageFlags.Ephemeral,
         });
+        try {
+            const channel = await interaction.client.channels.fetch(BOT_DEV_CHANNEL_ID);
+            if (channel && "send" in channel) {
+                await channel.send({
+                    content: `<@${BOT_DEV_PING_USER_ID}> New suggestion #${suggestion.suggestionId} submitted by ` +
+                        `<@${interaction.user.id}>: **${suggestion.title}**`,
+                });
+            }
+        }
+        catch {
+            // ignore notification failures
+        }
     }
 };
 __decorate([

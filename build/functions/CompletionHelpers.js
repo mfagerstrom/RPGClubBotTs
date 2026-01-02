@@ -3,7 +3,7 @@ import { applyGameDbThumbnail, buildGameDbThumbAttachment, formatPlaytimeHours, 
 import Game from "../classes/Game.js";
 import Member from "../classes/Member.js";
 const ANNOUNCEMENT_CHANNEL_ID = "360819470836695042";
-export async function saveCompletion(interaction, userId, gameId, completionType, completedAt, finalPlaytimeHours, gameTitle, announce, isAdminOverride = false) {
+export async function saveCompletion(interaction, userId, gameId, completionType, completedAt, finalPlaytimeHours, note, gameTitle, announce, isAdminOverride = false) {
     if (interaction.user.id !== userId && !isAdminOverride) {
         await interaction.followUp({
             content: "You can only log completions for yourself.",
@@ -26,6 +26,7 @@ export async function saveCompletion(interaction, userId, gameId, completionType
             completionType,
             completedAt,
             finalPlaytimeHours,
+            note,
         });
     }
     catch (err) {

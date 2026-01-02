@@ -20,7 +20,8 @@ import { COMPLETION_TYPES, COMPLETION_PAGE_SIZE, formatDiscordTimestamp, formatP
 import { saveCompletion } from "../functions/CompletionHelpers.js";
 const completionAddSessions = new Map();
 let GameCompletionCommands = class GameCompletionCommands {
-    async completionAdd(completionType, gameId, query, completionDate, finalPlaytimeHours, announce, interaction) {
+    maxNoteLength = 500;
+    async completionAdd(completionType, gameId, query, note, completionDate, finalPlaytimeHours, announce, interaction) {
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         if (!COMPLETION_TYPES.includes(completionType)) {
             await safeReply(interaction, {
@@ -50,6 +51,14 @@ let GameCompletionCommands = class GameCompletionCommands {
         }
         const playtime = finalPlaytimeHours === undefined ? null : finalPlaytimeHours;
         const userId = interaction.user.id;
+        const trimmedNote = note?.trim() ?? null;
+        if (trimmedNote && trimmedNote.length > this.maxNoteLength) {
+            await safeReply(interaction, {
+                content: `Note must be ${this.maxNoteLength} characters or fewer.`,
+                flags: MessageFlags.Ephemeral,
+            });
+            return;
+        }
         if (gameId) {
             const game = await Game.getGameById(Number(gameId));
             if (!game) {
@@ -59,7 +68,7 @@ let GameCompletionCommands = class GameCompletionCommands {
                 });
                 return;
             }
-            await saveCompletion(interaction, userId, game.id, completionType, completedAt, playtime, game.title, announce);
+            await saveCompletion(interaction, userId, game.id, completionType, completedAt, playtime, trimmedNote, game.title, announce);
             return;
         }
         const searchTerm = (query ?? "").trim();
@@ -75,6 +84,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             completionType,
             completedAt,
             finalPlaytimeHours: playtime,
+            note: trimmedNote,
             source: "existing",
             query: searchTerm,
             announce,
@@ -108,7 +118,16 @@ let GameCompletionCommands = class GameCompletionCommands {
             });
             return;
         }
-        const headers = ["ID", "Game ID", "Title", "Type", "Completed Date", "Playtime (Hours)", "Created At"];
+        const headers = [
+            "ID",
+            "Game ID",
+            "Title",
+            "Type",
+            "Completed Date",
+            "Playtime (Hours)",
+            "Note",
+            "Created At",
+        ];
         const rows = completions.map((c) => {
             return [
                 String(c.completionId),
@@ -117,6 +136,7 @@ let GameCompletionCommands = class GameCompletionCommands {
                 c.completionType,
                 c.completedAt ? c.completedAt.toISOString().split("T")[0] : "",
                 c.finalPlaytimeHours != null ? String(c.finalPlaytimeHours) : "",
+                c.note ?? "",
                 c.createdAt.toISOString(),
             ].map(escapeCsv).join(",");
         });
@@ -248,11 +268,23 @@ let GameCompletionCommands = class GameCompletionCommands {
                 .setCustomId(`comp-edit-field:${ownerId}:${completionId}:playtime`)
                 .setLabel("Final Playtime")
                 .setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder()
+                .setCustomId(`comp-edit-field:${ownerId}:${completionId}:note`)
+                .setLabel("Note")
+                .setStyle(ButtonStyle.Secondary),
         ];
+        const currentParts = [
+            completion.completionType,
+            completion.completedAt ? formatDiscordTimestamp(completion.completedAt) : "No date",
+            completion.finalPlaytimeHours != null
+                ? formatPlaytimeHours(completion.finalPlaytimeHours)
+                : null,
+        ].filter(Boolean);
+        const noteLine = completion.note ? `\n> ${completion.note}` : "";
         await interaction.reply({
             content: `Editing **${completion.title}** — choose a field to update:`,
             embeds: [
-                new EmbedBuilder().setDescription(`Current: ${completion.completionType} — ${completion.completedAt ? formatDiscordTimestamp(completion.completedAt) : "No date"}${completion.finalPlaytimeHours != null ? ` — ${formatPlaytimeHours(completion.finalPlaytimeHours)}` : ""}`),
+                new EmbedBuilder().setDescription(`Current: ${currentParts.join(" — ")}${noteLine}`),
             ],
             components: [new ActionRowBuilder().addComponents(fieldButtons)],
             flags: MessageFlags.Ephemeral,
@@ -289,7 +321,9 @@ let GameCompletionCommands = class GameCompletionCommands {
         }
         const prompt = field === "date"
             ? "Type the new completion date (e.g., 2025-12-11)."
-            : "Type the new final playtime in hours (e.g., 42.5).";
+            : field === "playtime"
+                ? "Type the new final playtime in hours (e.g., 42.5)."
+                : "Type the new note (or `clear` to remove it).";
         await interaction.reply({
             content: prompt,
             flags: MessageFlags.Ephemeral,
@@ -328,6 +362,17 @@ let GameCompletionCommands = class GameCompletionCommands {
                 if (Number.isNaN(num) || num < 0)
                     throw new Error("Playtime must be a non-negative number.");
                 await Member.updateCompletion(ownerId, completionId, { finalPlaytimeHours: num });
+            }
+            else if (field === "note") {
+                if (/^clear$/i.test(value)) {
+                    await Member.updateCompletion(ownerId, completionId, { note: null });
+                }
+                else if (value.length > this.maxNoteLength) {
+                    throw new Error(`Note must be ${this.maxNoteLength} characters or fewer.`);
+                }
+                else {
+                    await Member.updateCompletion(ownerId, completionId, { note: value });
+                }
             }
             await interaction.followUp({
                 content: "Completion updated.",
@@ -541,6 +586,9 @@ let GameCompletionCommands = class GameCompletionCommands {
             const dateBlock = `\`${dateLabel}\``;
             const line = `${idxBlock} ${dateBlock} **${c.title}** (${typeAbbrev})`;
             acc[yr].push(line);
+            if (c.note) {
+                acc[yr].push(`> ${c.note}`);
+            }
             return acc;
         }, {});
         const authorName = interactionUser.displayName ?? interactionUser.username ?? "User";
@@ -835,7 +883,7 @@ let GameCompletionCommands = class GameCompletionCommands {
                 components: [],
             }).catch(() => { });
             const imported = await this.importGameFromIgdb(gameId);
-            await saveCompletion(sel, ctx.userId, imported.gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, imported.title, ctx.announce);
+            await saveCompletion(sel, ctx.userId, imported.gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, ctx.note, imported.title, ctx.announce);
         });
         const content = `No GameDB match; select an IGDB result to import for "${searchTerm}".`;
         if (interaction.isMessageComponent()) {
@@ -916,7 +964,7 @@ let GameCompletionCommands = class GameCompletionCommands {
                 });
                 return false;
             }
-            await saveCompletion(interaction, ctx.userId, gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, gameTitle ?? undefined, ctx.announce);
+            await saveCompletion(interaction, ctx.userId, gameId, ctx.completionType, ctx.completedAt, ctx.finalPlaytimeHours, ctx.note, gameTitle ?? undefined, ctx.announce);
             return false;
         }
         catch (err) {
@@ -978,18 +1026,24 @@ __decorate([
         type: ApplicationCommandOptionType.String,
     })),
     __param(3, SlashOption({
+        description: "Optional note for this completion",
+        name: "note",
+        required: false,
+        type: ApplicationCommandOptionType.String,
+    })),
+    __param(4, SlashOption({
         description: "Completion date (defaults to today)",
         name: "completion_date",
         required: false,
         type: ApplicationCommandOptionType.String,
     })),
-    __param(4, SlashOption({
+    __param(5, SlashOption({
         description: "Final playtime in hours (e.g., 12.5)",
         name: "final_playtime_hours",
         required: false,
         type: ApplicationCommandOptionType.Number,
     })),
-    __param(5, SlashOption({
+    __param(6, SlashOption({
         description: "Announce this completion in the completions channel?",
         name: "announce",
         required: false,
@@ -1066,7 +1120,7 @@ __decorate([
     SelectMenuComponent({ id: /^comp-edit-menu:.+$/ })
 ], GameCompletionCommands.prototype, "handleCompletionEditMenu", null);
 __decorate([
-    ButtonComponent({ id: /^comp-edit-field:[^:]+:\d+:(type|date|playtime)$/ })
+    ButtonComponent({ id: /^comp-edit-field:[^:]+:\d+:(type|date|playtime|note)$/ })
 ], GameCompletionCommands.prototype, "handleCompletionFieldEdit", null);
 __decorate([
     SelectMenuComponent({ id: /^comp-edit-type-select:[^:]+:\d+$/ })
