@@ -316,8 +316,14 @@ let Admin = class Admin {
             };
             const gotmAnswers = gotmNoms.map((n) => n.gameTitle).map((t) => t.trim()).filter(Boolean);
             const nrAnswers = nrNoms.map((n) => n.gameTitle).map((t) => t.trim()).filter(Boolean);
-            const gotmPoll = buildPoll("GOTM", gotmAnswers);
-            const nrPoll = buildPoll("NR-GOTM", nrAnswers);
+            const normalizedGotmAnswers = await normalizeVotingTitles(interaction, "GOTM", gotmAnswers);
+            if (!normalizedGotmAnswers)
+                return;
+            const normalizedNrAnswers = await normalizeVotingTitles(interaction, "NR-GOTM", nrAnswers);
+            if (!normalizedNrAnswers)
+                return;
+            const gotmPoll = buildPoll("GOTM", normalizedGotmAnswers);
+            const nrPoll = buildPoll("NR-GOTM", normalizedNrAnswers);
             const adminChannelId = "428142514222923776";
             const adminChannel = adminChannelId
                 ? await interaction.client.channels.fetch(adminChannelId).catch(() => null)
@@ -1264,6 +1270,36 @@ async function promptUserForInput(interaction, question, timeoutMs = 120_000) {
         return null;
     }
 }
+async function normalizeVotingTitles(interaction, kindLabel, answers) {
+    const normalized = [];
+    for (const answer of answers) {
+        if (answer.length < 39) {
+            normalized.push(answer);
+            continue;
+        }
+        while (true) {
+            const prompt = `The ${kindLabel} title "${answer}" is ${answer.length} characters. ` +
+                `Enter a shorter title (max ${VOTING_TITLE_MAX_LEN}).`;
+            const response = await promptUserForInput(interaction, prompt, 180_000);
+            if (!response)
+                return null;
+            const trimmed = response.trim();
+            if (!trimmed) {
+                await safeReply(interaction, { content: "Title cannot be empty." });
+                continue;
+            }
+            if (trimmed.length >= 39) {
+                await safeReply(interaction, {
+                    content: `Title must be ${VOTING_TITLE_MAX_LEN} characters or fewer.`,
+                });
+                continue;
+            }
+            normalized.push(trimmed);
+            break;
+        }
+    }
+    return normalized;
+}
 function calculateNextVoteDate() {
     const now = new Date();
     // Move to next month
@@ -1275,9 +1311,13 @@ function calculateNextVoteDate() {
     return d;
 }
 const NOW_PLAYING_FORUM_ID = "1059875931356938240";
+const GOTM_FORUM_TAG_ID = "1059913568545415330";
+const NR_GOTM_FORUM_TAG_ID = "1148709881784832030";
 const ADMIN_CHANNEL_ID = "428142514222923776";
+const VOTING_TITLE_MAX_LEN = 38;
 async function setupRoundGames(label, roundNumber, testMode, log, prompt, interaction) {
     const kind = label.toLowerCase();
+    const forumTagId = label === "GOTM" ? GOTM_FORUM_TAG_ID : NR_GOTM_FORUM_TAG_ID;
     const nominations = await listNominationsForRound(kind, roundNumber);
     const games = [];
     const actions = [];
@@ -1305,7 +1345,7 @@ async function setupRoundGames(label, roundNumber, testMode, log, prompt, intera
                 else {
                     for (const nom of selectedNoms) {
                         await log(`Processing winner: **${nom.gameTitle}** (GameDB #${nom.gamedbGameId}).`);
-                        const result = await processWinnerGame(interaction, nom.gamedbGameId, nom.gameTitle, testMode, log, prompt);
+                        const result = await processWinnerGame(interaction, nom.gamedbGameId, nom.gameTitle, testMode, log, prompt, forumTagId);
                         if (!result)
                             return null;
                         games.push(result.data);
@@ -1343,7 +1383,7 @@ async function setupRoundGames(label, roundNumber, testMode, log, prompt, intera
             await log("Game not found.");
             return null;
         }
-        const result = await processWinnerGame(interaction, gamedbId, game.title, testMode, log, prompt);
+        const result = await processWinnerGame(interaction, gamedbId, game.title, testMode, log, prompt, forumTagId);
         if (!result)
             return null;
         games.push(result.data);
@@ -1351,7 +1391,7 @@ async function setupRoundGames(label, roundNumber, testMode, log, prompt, intera
     }
     return { games, actions };
 }
-async function processWinnerGame(interaction, gamedbId, gameTitle, testMode, log, prompt) {
+async function processWinnerGame(interaction, gamedbId, gameTitle, testMode, log, prompt, forumTagId) {
     const actions = [];
     const threads = await getThreadsByGameId(gamedbId);
     const threadId = threads.length ? threads[0] : null;
@@ -1381,6 +1421,7 @@ async function processWinnerGame(interaction, gamedbId, gameTitle, testMode, log
                         const thread = await forum.threads.create({
                             name: gameTitle,
                             message: { content: `Discussion thread for **${gameTitle}**.` },
+                            appliedTags: [forumTagId],
                         });
                         await setThreadGameLink(thread.id, gamedbId);
                         gameData.threadId = thread.id;

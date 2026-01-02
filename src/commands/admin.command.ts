@@ -488,8 +488,22 @@ export class Admin {
       const gotmAnswers = gotmNoms.map((n) => n.gameTitle).map((t) => t.trim()).filter(Boolean);
       const nrAnswers = nrNoms.map((n) => n.gameTitle).map((t) => t.trim()).filter(Boolean);
 
-      const gotmPoll = buildPoll("GOTM", gotmAnswers);
-      const nrPoll = buildPoll("NR-GOTM", nrAnswers);
+      const normalizedGotmAnswers = await normalizeVotingTitles(
+        interaction,
+        "GOTM",
+        gotmAnswers,
+      );
+      if (!normalizedGotmAnswers) return;
+
+      const normalizedNrAnswers = await normalizeVotingTitles(
+        interaction,
+        "NR-GOTM",
+        nrAnswers,
+      );
+      if (!normalizedNrAnswers) return;
+
+      const gotmPoll = buildPoll("GOTM", normalizedGotmAnswers);
+      const nrPoll = buildPoll("NR-GOTM", normalizedNrAnswers);
 
       const adminChannelId = "428142514222923776";
       const adminChannel = adminChannelId
@@ -1556,6 +1570,47 @@ async function promptUserForInput(
   }
 }
 
+async function normalizeVotingTitles(
+  interaction: CommandInteraction,
+  kindLabel: string,
+  answers: string[],
+): Promise<string[] | null> {
+  const normalized: string[] = [];
+
+  for (const answer of answers) {
+    if (answer.length < 39) {
+      normalized.push(answer);
+      continue;
+    }
+
+    while (true) {
+      const prompt =
+        `The ${kindLabel} title "${answer}" is ${answer.length} characters. ` +
+        `Enter a shorter title (max ${VOTING_TITLE_MAX_LEN}).`;
+      const response = await promptUserForInput(interaction, prompt, 180_000);
+      if (!response) return null;
+
+      const trimmed = response.trim();
+      if (!trimmed) {
+        await safeReply(interaction, { content: "Title cannot be empty." });
+        continue;
+      }
+
+      if (trimmed.length >= 39) {
+        await safeReply(interaction, {
+          content: `Title must be ${VOTING_TITLE_MAX_LEN} characters or fewer.`,
+        });
+        continue;
+      }
+
+      normalized.push(trimmed);
+      break;
+    }
+  }
+
+  return normalized;
+}
+
 function calculateNextVoteDate(): Date {
   const now = new Date();
   // Move to next month
@@ -1571,6 +1626,7 @@ const NOW_PLAYING_FORUM_ID = "1059875931356938240";
 const GOTM_FORUM_TAG_ID = "1059913568545415330";
 const NR_GOTM_FORUM_TAG_ID = "1148709881784832030";
 const ADMIN_CHANNEL_ID = "428142514222923776";
+const VOTING_TITLE_MAX_LEN = 38;
 
 type WizardAction = {
   description: string;
