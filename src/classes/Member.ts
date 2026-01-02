@@ -474,7 +474,7 @@ export default class Member {
     const safeLimit = Math.min(Math.max(limit, 1), 1000);
     const safeOffset = Math.max(offset, 0);
 
-    const clauses: string[] = ["c.USER_ID = :userId"];
+    const clauses: string[] = ["c.USER_ID = :userId", "c.COMPLETED_AT IS NOT NULL"];
     const binds: Record<string, any> = { userId, limit: safeLimit, offset: safeOffset };
     if (year) {
       clauses.push("EXTRACT(YEAR FROM c.COMPLETED_AT) = :year");
@@ -519,7 +519,7 @@ export default class Member {
           FROM USER_GAME_COMPLETIONS c
           JOIN GAMEDB_GAMES g ON g.GAME_ID = c.GAMEDB_GAME_ID
          WHERE ${clauses.join(" AND ")}
-         ORDER BY c.COMPLETED_AT DESC NULLS LAST, c.CREATED_AT DESC, c.COMPLETION_ID DESC
+         ORDER BY c.COMPLETED_AT DESC NULLS LAST, c.COMPLETION_ID DESC
          OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
         `,
         binds,
