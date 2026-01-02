@@ -3,6 +3,7 @@ import {
   type CommandInteraction,
   EmbedBuilder,
   type User,
+  AttachmentBuilder,
   MessageFlags,
   ActionRowBuilder,
   StringSelectMenuBuilder,
@@ -23,6 +24,8 @@ import {
   SelectMenuComponent,
   ButtonComponent,
 } from "discordx";
+import { readFileSync } from "fs";
+import path from "path";
 import Member, { type IMemberNowPlayingEntry } from "../classes/Member.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import Game from "../classes/Game.js";
@@ -40,6 +43,15 @@ import {
 
 const MAX_NOW_PLAYING = 10;
 const MAX_NOW_PLAYING_NOTE_LEN = 500;
+const GAME_DB_THUMB_NAME = "gameDB.png";
+const GAME_DB_THUMB_PATH = path.join(
+  process.cwd(),
+  "src",
+  "assets",
+  "images",
+  GAME_DB_THUMB_NAME,
+);
+const gameDbThumbBuffer = readFileSync(GAME_DB_THUMB_PATH);
 const nowPlayingAddSessions = new Map<
   string,
   { userId: string; query: string; note: string | null }
@@ -81,6 +93,14 @@ function chunkLines(lines: string[], maxLength: number = 3800): string[] {
     chunks.push(current);
   }
   return chunks;
+}
+
+function buildGameDbThumbAttachment(): AttachmentBuilder {
+  return new AttachmentBuilder(gameDbThumbBuffer, { name: GAME_DB_THUMB_NAME });
+}
+
+function applyGameDbThumbnail(embed: EmbedBuilder): EmbedBuilder {
+  return embed.setThumbnail(`attachment://${GAME_DB_THUMB_NAME}`);
 }
 
 async function promptForNote(
@@ -793,9 +813,11 @@ export class NowPlayingCommand {
         iconURL: target.displayAvatarURL({ size: 64, forceStatic: false }),
       })
       .setFooter({ text: footerParts.join("\n") });
+    applyGameDbThumbnail(embed);
 
     await safeReply(interaction, {
       embeds: [embed],
+      files: [buildGameDbThumbAttachment()],
       flags: ephemeral ? MessageFlags.Ephemeral : undefined,
     });
   }
@@ -843,12 +865,14 @@ export class NowPlayingCommand {
     const footerText = footerParts.join("\n");
 
     const chunks = chunkLines(lines);
-    const embeds = chunks.slice(0, 10).map((chunk, idx) =>
-      new EmbedBuilder()
+    const embeds = chunks.slice(0, 10).map((chunk, idx) => {
+      const embed = new EmbedBuilder()
         .setTitle(idx === 0 ? "Now Playing - Everyone" : "Now Playing (continued)")
         .setDescription(chunk)
-        .setFooter(footerText ? { text: footerText } : null),
-    );
+        .setFooter(footerText ? { text: footerText } : null);
+      applyGameDbThumbnail(embed);
+      return embed;
+    });
 
     const truncated = chunks.length > embeds.length;
 
@@ -857,6 +881,7 @@ export class NowPlayingCommand {
         ? "Showing the first set of results (truncated to Discord embed limits)."
         : undefined,
       embeds,
+      files: [buildGameDbThumbAttachment()],
       flags: ephemeral ? MessageFlags.Ephemeral : undefined,
     });
   }

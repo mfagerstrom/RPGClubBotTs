@@ -7,8 +7,10 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ApplicationCommandOptionType, EmbedBuilder, MessageFlags, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, } from "discord.js";
+import { ApplicationCommandOptionType, EmbedBuilder, AttachmentBuilder, MessageFlags, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, } from "discord.js";
 import { Discord, Slash, SlashOption, SlashGroup, SlashChoice, SelectMenuComponent, ButtonComponent, } from "discordx";
+import { readFileSync } from "fs";
+import path from "path";
 import Member from "../classes/Member.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import Game from "../classes/Game.js";
@@ -18,6 +20,9 @@ import { saveCompletion } from "../functions/CompletionHelpers.js";
 import { COMPLETION_TYPES, parseCompletionDateInput, } from "../commands/profile.command.js";
 const MAX_NOW_PLAYING = 10;
 const MAX_NOW_PLAYING_NOTE_LEN = 500;
+const GAME_DB_THUMB_NAME = "gameDB.png";
+const GAME_DB_THUMB_PATH = path.join(process.cwd(), "src", "assets", "images", GAME_DB_THUMB_NAME);
+const gameDbThumbBuffer = readFileSync(GAME_DB_THUMB_PATH);
 const nowPlayingAddSessions = new Map();
 const nowPlayingCompleteSessions = new Map();
 function formatEntry(entry, guildId) {
@@ -42,6 +47,12 @@ function chunkLines(lines, maxLength = 3800) {
         chunks.push(current);
     }
     return chunks;
+}
+function buildGameDbThumbAttachment() {
+    return new AttachmentBuilder(gameDbThumbBuffer, { name: GAME_DB_THUMB_NAME });
+}
+function applyGameDbThumbnail(embed) {
+    return embed.setThumbnail(`attachment://${GAME_DB_THUMB_NAME}`);
 }
 async function promptForNote(interaction, question, timeoutMs = 120_000) {
     const channel = interaction.channel;
@@ -564,8 +575,10 @@ let NowPlayingCommand = class NowPlayingCommand {
             iconURL: target.displayAvatarURL({ size: 64, forceStatic: false }),
         })
             .setFooter({ text: footerParts.join("\n") });
+        applyGameDbThumbnail(embed);
         await safeReply(interaction, {
             embeds: [embed],
+            files: [buildGameDbThumbAttachment()],
             flags: ephemeral ? MessageFlags.Ephemeral : undefined,
         });
     }
@@ -604,16 +617,21 @@ let NowPlayingCommand = class NowPlayingCommand {
         }
         const footerText = footerParts.join("\n");
         const chunks = chunkLines(lines);
-        const embeds = chunks.slice(0, 10).map((chunk, idx) => new EmbedBuilder()
-            .setTitle(idx === 0 ? "Now Playing - Everyone" : "Now Playing (continued)")
-            .setDescription(chunk)
-            .setFooter(footerText ? { text: footerText } : null));
+        const embeds = chunks.slice(0, 10).map((chunk, idx) => {
+            const embed = new EmbedBuilder()
+                .setTitle(idx === 0 ? "Now Playing - Everyone" : "Now Playing (continued)")
+                .setDescription(chunk)
+                .setFooter(footerText ? { text: footerText } : null);
+            applyGameDbThumbnail(embed);
+            return embed;
+        });
         const truncated = chunks.length > embeds.length;
         await safeReply(interaction, {
             content: truncated
                 ? "Showing the first set of results (truncated to Discord embed limits)."
                 : undefined,
             embeds,
+            files: [buildGameDbThumbAttachment()],
             flags: ephemeral ? MessageFlags.Ephemeral : undefined,
         });
     }
