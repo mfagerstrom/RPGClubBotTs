@@ -538,6 +538,67 @@ export default class Game {
             await connection.close();
         }
     }
+    static async getGamesForAudit(missingImage, missingThread) {
+        const pool = getOraclePool();
+        const connection = await pool.getConnection();
+        try {
+            const whereClauses = [];
+            if (missingImage) {
+                whereClauses.push("IMAGE_DATA IS NULL");
+            }
+            if (missingThread) {
+                // Checking for missing thread links requires looking at associations or Thread table logic?
+                // The prompt says "check for missing images and thread links".
+                // GAMEDB_GAMES doesn't store thread_id directly.
+                // It's linked via GOTM_ENTRIES, NR_GOTM_ENTRIES, THREAD_GAME_LINKS, THREADS.
+                // But for "audit", we probably want to know if there is *any* thread linked to this game.
+                // A game is "missing thread" if no row exists in THREAD_GAME_LINKS and no row in THREADS for this GAME_ID.
+                // Wait, looking at `getGameAssociations` and `getNowPlayingMembers` queries...
+                // THREAD_GAME_LINKS seems to be the main join table for "generic" links.
+                // THREADS table might also have GAMEDB_GAME_ID.
+                // Let's assume a game has a thread if it appears in THREAD_GAME_LINKS or THREADS.
+                whereClauses.push(`
+          NOT EXISTS (SELECT 1 FROM THREAD_GAME_LINKS tgl WHERE tgl.GAMEDB_GAME_ID = g.GAME_ID)
+          AND NOT EXISTS (SELECT 1 FROM THREADS th WHERE th.GAMEDB_GAME_ID = g.GAME_ID)
+          AND NOT EXISTS (SELECT 1 FROM GOTM_ENTRIES ge WHERE ge.GAMEDB_GAME_ID = g.GAME_ID AND ge.THREAD_ID IS NOT NULL)
+          AND NOT EXISTS (SELECT 1 FROM NR_GOTM_ENTRIES nge WHERE nge.GAMEDB_GAME_ID = g.GAME_ID AND nge.THREAD_ID IS NOT NULL)
+        `);
+            }
+            if (whereClauses.length === 0) {
+                return [];
+            }
+            // If both are true, we want games that have missing image OR missing thread?
+            // "check for missing images and thread links" -> usually implies Union or OR logic in an audit.
+            // If I say "audit images", I get missing images.
+            // If I say "audit threads", I get missing threads.
+            // If I say "audit both", I probably want anything that is missing either.
+            const whereClause = whereClauses.join(" OR ");
+            const result = await connection.execute(`SELECT g.GAME_ID, g.TITLE, g.DESCRIPTION, g.IMAGE_DATA, g.IGDB_ID, g.SLUG, g.TOTAL_RATING, g.IGDB_URL, g.CREATED_AT, g.UPDATED_AT
+           FROM GAMEDB_GAMES g
+          WHERE ${whereClause}
+          ORDER BY g.TITLE ASC`, [], {
+                outFormat: oracledb.OUT_FORMAT_OBJECT,
+                fetchInfo: {
+                    IMAGE_DATA: { type: oracledb.BUFFER },
+                    DESCRIPTION: { type: oracledb.STRING },
+                },
+            });
+            return (result.rows ?? []).map(mapGameRow);
+        }
+        finally {
+            await connection.close();
+        }
+    }
+    static async updateGameImage(gameId, imageData) {
+        const pool = getOraclePool();
+        const connection = await pool.getConnection();
+        try {
+            await connection.execute(`UPDATE GAMEDB_GAMES SET IMAGE_DATA = :imageData, UPDATED_AT = SYSTIMESTAMP WHERE GAME_ID = :gameId`, { imageData, gameId }, { autoCommit: true });
+        }
+        finally {
+            await connection.close();
+        }
+    }
     static async getGameAssociations(gameId) {
         const pool = getOraclePool();
         const connection = await pool.getConnection();

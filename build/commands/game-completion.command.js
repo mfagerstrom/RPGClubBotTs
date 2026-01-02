@@ -7,7 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { ApplicationCommandOptionType, EmbedBuilder, MessageFlags, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, } from "discord.js";
+import { ApplicationCommandOptionType, EmbedBuilder, MessageFlags, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, } from "discord.js";
 import { Discord, Slash, SlashOption, SlashGroup, SelectMenuComponent, ButtonComponent, SlashChoice, } from "discordx";
 import Member from "../classes/Member.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
@@ -95,6 +95,37 @@ let GameCompletionCommands = class GameCompletionCommands {
     async completionDelete(query, interaction) {
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         await this.renderSelectionPage(interaction, interaction.user.id, 0, "delete", null, query);
+    }
+    async completionExport(interaction) {
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+        const completions = await Member.getAllCompletions(interaction.user.id);
+        if (!completions.length) {
+            await safeReply(interaction, {
+                content: "You have no completions to export.",
+                flags: MessageFlags.Ephemeral,
+            });
+            return;
+        }
+        const headers = ["ID", "Game ID", "Title", "Type", "Completed Date", "Playtime (Hours)", "Created At"];
+        const rows = completions.map((c) => {
+            return [
+                String(c.completionId),
+                String(c.gameId),
+                c.title,
+                c.completionType,
+                c.completedAt ? c.completedAt.toISOString().split("T")[0] : "",
+                c.finalPlaytimeHours != null ? String(c.finalPlaytimeHours) : "",
+                c.createdAt.toISOString(),
+            ].map(escapeCsv).join(",");
+        });
+        const csvContent = [headers.join(","), ...rows].join("\n");
+        const buffer = Buffer.from(csvContent, "utf-8");
+        const attachment = new AttachmentBuilder(buffer, { name: "completions.csv" });
+        await safeReply(interaction, {
+            content: `Here is your completion data export (${completions.length} records).`,
+            files: [attachment],
+            flags: MessageFlags.Ephemeral,
+        });
     }
     async handleCompletionAddSelect(interaction) {
         const [, sessionId] = interaction.customId.split(":");
@@ -997,6 +1028,9 @@ __decorate([
     }))
 ], GameCompletionCommands.prototype, "completionDelete", null);
 __decorate([
+    Slash({ description: "Export your completions to a CSV file", name: "export" })
+], GameCompletionCommands.prototype, "completionExport", null);
+__decorate([
     SelectMenuComponent({ id: /^completion-add-select:.+/ })
 ], GameCompletionCommands.prototype, "handleCompletionAddSelect", null);
 __decorate([
@@ -1026,3 +1060,9 @@ GameCompletionCommands = __decorate([
     SlashGroup("game-completion")
 ], GameCompletionCommands);
 export { GameCompletionCommands };
+function escapeCsv(field) {
+    if (field.includes(",") || field.includes('"') || field.includes("\n")) {
+        return `"${field.replace(/"/g, '""')}"`;
+    }
+    return field;
+}

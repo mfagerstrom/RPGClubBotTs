@@ -189,3 +189,53 @@
 2025-12-11 - Commit ID: 19c16cc - refactor: menu refactor, work in progress
 2025-12-11 - Commit ID: 403f030 - refactor: help overhaul completed
 2025-12-11 - Commit ID: 5b5565b - refactor: ok, help is really done now.
+2025-12-11 - Commit ID: 1f73183 - chore: updated changelog
+2025-12-11 - Commit ID: 957c3e7 - feat: threads can now be linked to more than one game
+2025-12-11 - Commit ID: 0554c1a - feat: /gamedb view now shows who is playing a game
+2025-12-12 - Commit ID: 1e3ef71 - fix: corrected display of /profile nowplaying-remove buttons
+2025-12-12 - Commit ID: 76b507b - feat: implemented game completions (beta)
+2025-12-12 - Commit ID: 65ceb71 - refactor: created helpers for IGDB lookups to normalize the behavior(s)
+2025-12-12 - Commit ID: d551626 - feat: some improvements to gamedb add
+2025-12-12 - Commit ID: b738679 - refactor: fixed ephemeral deprecation errors across the codebase
+2025-12-12 - Commit ID: dcfd10e - feat: added paging to IGDB import results.  Max matches is 500 now
+2025-12-12 - Commit ID: 944f178 - fix: excluded romhacks/unofficial releases from IGDB importing
+2025-12-12 - Commit ID: abb4e25 - fix: more lint issues
+2025-12-12 - Commit ID: 1954010 - refactor: migrated now-playing add/etc to /now-playing
+2025-12-12 - Commit ID: 9f92e88 - feat: /now-playing list improvements
+2025-12-12 - Commit ID: 1c80839 - refactor: moved game completion commands to /now-playing
+2025-12-12 - Commit ID: c21f6c8 - feat: implemented /admin nextround-setup (beta)
+2025-12-12 - Commit ID: 1531e4a - fix: tweaked to output that command to #admin
+2025-12-12 - Commit ID: 79b662c - feat: moved game completion commands under /now-playing
+2025-12-12 - Commit ID: ba47e12 - fix: corrected wonky numbering in large completion lists
+2025-12-12 - Commit ID: 98b5dbd - chore: updated help files
+2025-12-12 - Commit ID: 3e0b8aa - fix: corrected wonky numbering in large completion lists, for real this time
+2025-12-12 - Commit ID: 7ff1837 - chore: edited TODOs
+2025-12-15 - Commit ID: d3f2e9e - feat: /game-completion updates
+2025-12-15 - Commit ID: 29013bd - feat: /game-completion updates
+2025-12-15 - Commit ID: 64de502 - fix: more game completion updates
+2025-12-15 - Commit ID: 05bee0f - fix: /game-completion edit/delete improvements
+2025-12-15 - Commit ID: 2f2fa5b - fix: corrected paging issue for /game-completion edit
+2025-12-15 - Commit ID: b91fcc9 - fix: corrected paging issue for /game-completion edit
+2025-12-15 - Commit ID: 3fbec28 - fix: added per-year totals to /game-completion list
+2025-12-15 - Commit ID: 5b8b455 - fix: corrected completion list rendering error when > 50 game completions in a year
+2025-12-15 - Commit ID: 3b8e5d1 - fix: improvements
+2025-12-15 - Commit ID: 2e35c15 - fix: /game-completion list member implemented
+2025-12-15 - Commit ID: fee6669 - feat: added announce option for game completions
+2025-12-15 - Commit ID: 2e19268 - fix : tweaked embed for game-completion announce
+2025-12-15 - Commit ID: e02e6be - fix: changed paging on game completion lists to be a dropdown
+2025-12-15 - Commit ID: 1362a36 - fix: corrected flow when adding a completion, getting a partial match from gamedb, then selecting import another game
+2025-12-15 - Commit ID: da52585 - fix: more small tweaks
+2025-12-15 - Commit ID: c6e6db4 - C:/Program Files/Git/admin nextround-setup changes, WIP
+2025-12-15 - Commit ID: 91b26ca - feat: implemented /admin nextround-setup wizard
+2025-12-16 - Commit ID: c669389 - chore: updated TODOs
+2025-12-18 - Commit ID: c68383d - refactor: cleaned up setPresence
+2025-12-18 - Commit ID: bb5c1cb - fix: increased RSS timeout to 60 seconds
+2025-12-18 - Commit ID: 1201c00 - refactor: cleaned up RSS logic
+2025-12-18 - Commit ID: d6367c3 - refactor: further setPresence cleanup
+2025-12-18 - Commit ID: ca991a7 - fix: corrected db error
+2025-12-20 - Commit ID: 71108ff - fix: migrated complete from now playing to /now-playing sub command
+2025-12-20 - Commit ID: 2905e26 - fix: rate-limited 500 errors from RSS
+2025-12-20 - Commit ID: 4c48ea5 - fix: cleaned up some text
+2025-12-20 - Commit ID: e22c4f9 - fix: cleaned up RSS polling logic
+2025-12-20 - Commit ID: af7fb72 - fix: cleaned up /remindme logic
+2025-12-20 - Commit ID: d0694cf - fix: build fixes

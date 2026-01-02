@@ -290,6 +290,43 @@ export class GameCompletionCommands {
     );
   }
 
+  @Slash({ description: "Export your completions to a CSV file", name: "export" })
+  async completionExport(interaction: CommandInteraction): Promise<void> {
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const completions = await Member.getAllCompletions(interaction.user.id);
+    if (!completions.length) {
+      await safeReply(interaction, {
+        content: "You have no completions to export.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const headers = ["ID", "Game ID", "Title", "Type", "Completed Date", "Playtime (Hours)", "Created At"];
+    const rows = completions.map((c) => {
+      return [
+        String(c.completionId),
+        String(c.gameId),
+        c.title,
+        c.completionType,
+        c.completedAt ? c.completedAt.toISOString().split("T")[0] : "",
+        c.finalPlaytimeHours != null ? String(c.finalPlaytimeHours) : "",
+        c.createdAt.toISOString(),
+      ].map(escapeCsv).join(",");
+    });
+
+    const csvContent = [headers.join(","), ...rows].join("\n");
+    const buffer = Buffer.from(csvContent, "utf-8");
+    const attachment = new AttachmentBuilder(buffer, { name: "completions.csv" });
+
+    await safeReply(interaction, {
+      content: `Here is your completion data export (${completions.length} records).`,
+      files: [attachment],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
   @SelectMenuComponent({ id: /^completion-add-select:.+/ })
   async handleCompletionAddSelect(interaction: StringSelectMenuInteraction): Promise<void> {
     const [, sessionId] = interaction.customId.split(":");
@@ -1287,4 +1324,11 @@ export class GameCompletionCommands {
     await Game.saveFullGameMetadata(newGame.id, details);
     return { gameId: newGame.id, title: details.name };
   }
+}
+
+function escapeCsv(field: string): string {
+  if (field.includes(",") || field.includes('"') || field.includes("\n")) {
+    return `"${field.replace(/"/g, '""')}"`;
+  }
+  return field;
 }
