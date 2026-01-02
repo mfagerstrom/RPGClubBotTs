@@ -1,3 +1,16 @@
+- across codebase, if next/previous page buttons are to be rendered, skip rendering them if they are both disabled.
+- for /admin nextround-setup, add appropriate tags for new threads.
+- when creating the vote buttons, have it use numerical buttons if any entry is over the character limit for a button
+- remove gameID parameter from /superadmin add other completion
+- If query is given for a search (completed games, gamedb list, etc), include the query in the output embed
+- Profile view completed games (recent) should return games by date rather than addition.  Or figure out why my list is wonky, maybe bad data
+
+
+LOW PRIORITY
+- Voting functionality
+- Automatic tiebreaker functionality
+- Automated vote creation
+- Automated winner processing for each vote
 - Normalize all embed styles / colors / etc
 - Finish developing now-playing commands, the embeds could use some work
 - Add parameters to /gamedb add to narrow down to certain categories
