@@ -388,16 +388,17 @@ let GameDbAdmin = class GameDbAdmin {
             embeds: [embed],
             flags: isPublic ? undefined : MessageFlags.Ephemeral,
         });
-        let logHistory = "";
+        const logLines = [];
         const updateEmbed = async (log) => {
             if (log) {
-                logHistory = (logHistory + "\n" + log).trim();
-                // Truncate from the beginning if too long
-                if (logHistory.length > 3500) {
-                    logHistory = "..." + logHistory.slice(logHistory.length - 3500);
-                }
+                logLines.push(log);
             }
-            embed.setDescription(logHistory || "Processing...");
+            let content = logLines.join("\n");
+            while (content.length > 3500) {
+                logLines.shift();
+                content = logLines.join("\n");
+            }
+            embed.setDescription(content || "Processing...");
             try {
                 await interaction.editReply({ embeds: [embed] });
             }

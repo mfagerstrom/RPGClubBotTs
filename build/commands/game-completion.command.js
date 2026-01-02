@@ -8,6 +8,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
 import { ApplicationCommandOptionType, EmbedBuilder, MessageFlags, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, } from "discord.js";
+import axios from "axios";
 import { Discord, Slash, SlashOption, SlashGroup, SelectMenuComponent, ButtonComponent, SlashChoice, } from "discordx";
 import Member from "../classes/Member.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
@@ -922,7 +923,18 @@ let GameCompletionCommands = class GameCompletionCommands {
         if (!details) {
             throw new Error("Failed to load game details from IGDB.");
         }
-        const newGame = await Game.createGame(details.name, details.summary ?? "", null, details.id, details.slug ?? null, details.total_rating ?? null, details.url ?? null);
+        let imageData = null;
+        if (details.cover?.image_id) {
+            try {
+                const imageUrl = `https://images.igdb.com/igdb/image/upload/t_cover_big/${details.cover.image_id}.jpg`;
+                const imageResponse = await axios.get(imageUrl, { responseType: "arraybuffer" });
+                imageData = Buffer.from(imageResponse.data);
+            }
+            catch (err) {
+                console.error("Failed to download cover image:", err);
+            }
+        }
+        const newGame = await Game.createGame(details.name, details.summary ?? "", imageData, details.id, details.slug ?? null, details.total_rating ?? null, details.url ?? null);
         await Game.saveFullGameMetadata(newGame.id, details);
         return { gameId: newGame.id, title: details.name };
     }
