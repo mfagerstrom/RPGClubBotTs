@@ -549,6 +549,10 @@ let GameCompletionCommands = class GameCompletionCommands {
             forceStatic: false,
         });
         const embed = new EmbedBuilder().setTitle(`${authorName}'s Completed Games (${total} total)`);
+        const queryLabel = query?.trim();
+        if (queryLabel) {
+            embed.setDescription(`Filter: "${queryLabel}"`);
+        }
         embed.setAuthor({
             name: authorName,
             iconURL: authorIcon ?? undefined,
