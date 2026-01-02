@@ -85,7 +85,7 @@ export class GameCompletionCommands {
     gameId: number | undefined,
     @SlashOption({
       description: "Search text to find/import the game",
-      name: "query",
+      name: "title",
       required: false,
       type: ApplicationCommandOptionType.String,
     })
@@ -208,7 +208,7 @@ export class GameCompletionCommands {
     year: number | undefined,
     @SlashOption({
       description: "Filter by title (optional)",
-      name: "query",
+      name: "title",
       required: false,
       type: ApplicationCommandOptionType.String,
     })
@@ -245,7 +245,7 @@ export class GameCompletionCommands {
   async completionEdit(
     @SlashOption({
       description: "Filter by title (optional)",
-      name: "query",
+      name: "title",
       required: false,
       type: ApplicationCommandOptionType.String,
     })
@@ -274,7 +274,7 @@ export class GameCompletionCommands {
   async completionDelete(
     @SlashOption({
       description: "Filter by title (optional)",
-      name: "query",
+      name: "title",
       required: false,
       type: ApplicationCommandOptionType.String,
     })

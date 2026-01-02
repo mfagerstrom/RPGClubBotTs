@@ -513,7 +513,7 @@ __decorate([
     Slash({ description: "Add a game to your Now Playing list", name: "add" }),
     __param(0, SlashOption({
         description: "Search text to find the game in GameDB",
-        name: "query",
+        name: "title",
         required: true,
         type: ApplicationCommandOptionType.String,
     }))

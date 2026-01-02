@@ -121,7 +121,7 @@ export class NowPlayingCommand {
   async addNowPlaying(
     @SlashOption({
       description: "Search text to find the game in GameDB",
-      name: "query",
+      name: "title",
       required: true,
       type: ApplicationCommandOptionType.String,
     })

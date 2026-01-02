@@ -32,7 +32,7 @@ export const SUPERADMIN_HELP_TOPICS = [
         id: "completion-add-other",
         label: "/superadmin completion-add-other",
         summary: "Add a game completion for another user.",
-        syntax: "Syntax: /superadmin completion-add-other user:<user> completion_type:<type> query:<string> [completion_date:<string>] [final_playtime_hours:<number>] [announce:<bool>]",
+        syntax: "Syntax: /superadmin completion-add-other user:<user> completion_type:<type> title:<string> [completion_date:<string>] [final_playtime_hours:<number>] [announce:<bool>]",
         notes: "Uses a search query to find or import the game.",
     },
     {
@@ -1009,7 +1009,7 @@ __decorate([
     })),
     __param(2, SlashOption({
         description: "Search text to find/import the game",
-        name: "query",
+        name: "title",
         required: true,
         type: ApplicationCommandOptionType.String,
     })),

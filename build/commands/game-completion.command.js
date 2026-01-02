@@ -969,7 +969,7 @@ __decorate([
     })),
     __param(2, SlashOption({
         description: "Search text to find/import the game",
-        name: "query",
+        name: "title",
         required: false,
         type: ApplicationCommandOptionType.String,
     })),
@@ -1008,7 +1008,7 @@ __decorate([
     })),
     __param(2, SlashOption({
         description: "Filter by title (optional)",
-        name: "query",
+        name: "title",
         required: false,
         type: ApplicationCommandOptionType.String,
     })),
@@ -1029,7 +1029,7 @@ __decorate([
     Slash({ description: "Edit one of your completion records", name: "edit" }),
     __param(0, SlashOption({
         description: "Filter by title (optional)",
-        name: "query",
+        name: "title",
         required: false,
         type: ApplicationCommandOptionType.String,
     })),
@@ -1044,7 +1044,7 @@ __decorate([
     Slash({ description: "Delete one of your completion records", name: "delete" }),
     __param(0, SlashOption({
         description: "Filter by title (optional)",
-        name: "query",
+        name: "title",
         required: false,
         type: ApplicationCommandOptionType.String,
     }))

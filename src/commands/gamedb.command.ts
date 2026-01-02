@@ -462,7 +462,7 @@ export class GameDb {
     gameId: number,
     @SlashOption({
       description: "Search query (falls back to search flow if no ID provided)",
-      name: "query",
+      name: "title",
       required: false,
       type: ApplicationCommandOptionType.String,
     })
@@ -825,7 +825,7 @@ export class GameDb {
   async search(
     @SlashOption({
       description: "Search query (game title). Leave empty to list all.",
-      name: "query",
+      name: "title",
       required: false,
       type: ApplicationCommandOptionType.String,
     })

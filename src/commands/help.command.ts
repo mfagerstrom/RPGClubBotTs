@@ -717,7 +717,7 @@ const NOW_PLAYING_HELP_TOPICS: NowPlayingHelpTopic[] = [
     id: "add",
     label: "/now-playing add",
     summary: "Add a GameDB title to your Now Playing list (max 10).",
-    syntax: "Syntax: /now-playing add query:<string>",
+    syntax: "Syntax: /now-playing add title:<string>",
     notes:
       "Searches GameDB; choose from up to 24 results. Only GameDB titles are allowed; no free text.",
   },
@@ -737,9 +737,9 @@ const GAME_COMPLETION_HELP_TOPICS: GameCompletionHelpTopic[] = [
     label: "/game-completion add",
     summary: "Log that you completed a game (removes it from Now Playing if present).",
     syntax:
-      "Syntax: /game-completion add [game_id:<int> | query:<string> | from_now_playing:<bool>] completion_type:<choice> [completion_date:<date>] [final_playtime_hours:<number>] [announce:<boolean>]",
+      "Syntax: /game-completion add [game_id:<int> | title:<string> | from_now_playing:<bool>] completion_type:<choice> [completion_date:<date>] [final_playtime_hours:<number>] [announce:<boolean>]",
     notes:
-      "Completion type choices: Main Story, Main Story + Side Content, Completionist. Completion date defaults to today; playtime is optional (e.g., 42.5). Uses GameDB lookup/import if you provide a query. Set announce:true to post to the completions channel.",
+      "Completion type choices: Main Story, Main Story + Side Content, Completionist. Completion date defaults to today; playtime is optional (e.g., 42.5). Uses GameDB lookup/import if you provide a title. Set announce:true to post to the completions channel.",
   },
   {
     id: "list",
@@ -754,7 +754,7 @@ const GAME_COMPLETION_HELP_TOPICS: GameCompletionHelpTopic[] = [
     id: "edit",
     label: "/game-completion edit",
     summary: "Edit one of your completion records.",
-    syntax: "Syntax: /game-completion edit [query:<string>] [year:<int>]",
+    syntax: "Syntax: /game-completion edit [title:<string>] [year:<int>]",
     notes:
       "Interactive menu to pick a completion and field to update. You can filter the selection by title or year.",
   },
@@ -832,7 +832,7 @@ const GAMEDB_HELP_TOPICS: GameDbHelpTopic[] = [
     id: "search",
     label: "/gamedb search",
     summary: "Search GameDB titles with paged dropdown navigation.",
-    syntax: "Syntax: /gamedb search [query:<string>]",
+    syntax: "Syntax: /gamedb search [title:<string>]",
     notes:
       "Query is optional; omit to list all games. Results show a dropdown and Previous/Next " +
       "buttons; selecting a game shows its profile.",

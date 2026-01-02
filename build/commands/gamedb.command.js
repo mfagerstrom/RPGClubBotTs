@@ -828,7 +828,7 @@ __decorate([
     })),
     __param(1, SlashOption({
         description: "Search query (falls back to search flow if no ID provided)",
-        name: "query",
+        name: "title",
         required: false,
         type: ApplicationCommandOptionType.String,
     }))
@@ -837,7 +837,7 @@ __decorate([
     Slash({ description: "Search for a game", name: "search" }),
     __param(0, SlashOption({
         description: "Search query (game title). Leave empty to list all.",
-        name: "query",
+        name: "title",
         required: false,
         type: ApplicationCommandOptionType.String,
     }))
