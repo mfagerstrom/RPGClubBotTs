@@ -1568,6 +1568,8 @@ function calculateNextVoteDate(): Date {
 }
 
 const NOW_PLAYING_FORUM_ID = "1059875931356938240";
+const GOTM_FORUM_TAG_ID = "1059913568545415330";
+const NR_GOTM_FORUM_TAG_ID = "1148709881784832030";
 const ADMIN_CHANNEL_ID = "428142514222923776";
 
 type WizardAction = {
@@ -1608,6 +1610,7 @@ async function setupRoundGames(
 } | null> {
 
   const kind = label.toLowerCase() as "gotm" | "nr-gotm";
+  const forumTagId = label === "GOTM" ? GOTM_FORUM_TAG_ID : NR_GOTM_FORUM_TAG_ID;
 
   const nominations = await listNominationsForRound(kind, roundNumber);
 
@@ -1701,6 +1704,8 @@ async function setupRoundGames(
 
               prompt,
 
+              forumTagId,
+
             );
 
             if (!result) return null;
@@ -1791,6 +1796,8 @@ async function setupRoundGames(
 
       prompt,
 
+      forumTagId,
+
     );
 
     if (!result) return null;
@@ -1834,6 +1841,10 @@ async function processWinnerGame(
 
 
   prompt: (q: string) => Promise<string | null>,
+
+
+
+  forumTagId: string,
 
 
 
@@ -2006,6 +2017,10 @@ async function processWinnerGame(
 
 
               message: { content: `Discussion thread for **${gameTitle}**.` },
+
+
+
+              appliedTags: [forumTagId],
 
 
 
