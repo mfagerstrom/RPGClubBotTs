@@ -711,7 +711,8 @@ export class GameCompletionCommands {
 
     const lines = leaderboard.map((m, idx) => {
       const name = m.globalName ?? m.username ?? m.userId;
-      return `${idx + 1}. **${name}**: ${m.count} completions`;
+      const suffix = m.count === 1 ? "completion" : "completions";
+      return `${idx + 1}. **${name}**: ${m.count} ${suffix}`;
     });
 
     const embed = new EmbedBuilder()
@@ -721,7 +722,7 @@ export class GameCompletionCommands {
     const options = leaderboard.map((m) => ({
       label: (m.globalName ?? m.username ?? m.userId).slice(0, 100),
       value: m.userId,
-      description: `${m.count} completions`,
+      description: `${m.count} ${m.count === 1 ? "completion" : "completions"}`,
     }));
 
     const select = new StringSelectMenuBuilder()

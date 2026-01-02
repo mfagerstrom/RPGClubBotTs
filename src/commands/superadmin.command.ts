@@ -8,7 +8,7 @@ import {
   StringSelectMenuBuilder,
   type StringSelectMenuInteraction,
 } from "discord.js";
-import type { ButtonInteraction, CommandInteraction, Message } from "discord.js";
+import type { ButtonInteraction, CommandInteraction, Message, User } from "discord.js";
 import axios from "axios";
 import {
   ButtonComponent,
@@ -17,6 +17,7 @@ import {
   SlashGroup,
   SlashOption,
   SelectMenuComponent,
+  SlashChoice,
 } from "discordx";
 import {
   getPresenceHistory,
@@ -42,12 +43,31 @@ import {
   deleteIgdbSession,
   type IgdbSelectOption,
 } from "../services/IgdbSelectService.js";
+import {
+  COMPLETION_TYPES,
+  type CompletionType,
+  parseCompletionDateInput,
+} from "./profile.command.js";
+import { saveCompletion } from "../functions/CompletionHelpers.js";
+
+type CompletionAddContext = {
+  targetUserId: string;
+  completionType: CompletionType;
+  completedAt: Date | null;
+  finalPlaytimeHours: number | null;
+  source: "existing" | "igdb";
+  query?: string;
+  announce?: boolean;
+};
+
+const superadminCompletionAddSessions = new Map<string, CompletionAddContext>();
 
 type SuperAdminHelpTopicId =
   | "memberscan"
   | "gamedb-backfill"
   | "thread-game-link-backfill"
-  | "presence";
+  | "presence"
+  | "completion-add-other";
 
 type SuperAdminHelpTopic = {
   id: SuperAdminHelpTopicId;
@@ -71,6 +91,13 @@ type GameDbSeed = {
 };
 
 export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
+  {
+    id: "completion-add-other",
+    label: "/superadmin completion-add-other",
+    summary: "Add a game completion for another user.",
+    syntax: "Syntax: /superadmin completion-add-other user:<user> completion_type:<type> game_id:<int> [completion_date:<string>] [final_playtime_hours:<number>] [announce:<bool>]",
+    notes: "Requires GameDB ID.",
+  },
   {
     id: "memberscan",
     label: "/superadmin memberscan",
@@ -209,6 +236,402 @@ export class SuperAdmin {
     }
 
     await showSuperAdminPresenceHistory(interaction);
+  }
+
+  @Slash({ description: "Add a game completion for another user", name: "completion-add-other" })
+  async completionAddOther(
+    @SlashOption({
+      description: "User to add completion for",
+      name: "user",
+      required: true,
+      type: ApplicationCommandOptionType.User,
+    })
+    user: User,
+    @SlashChoice(
+      ...COMPLETION_TYPES.map((t) => ({
+        name: t,
+        value: t,
+      })),
+    )
+    @SlashOption({
+      description: "Type of completion",
+      name: "completion_type",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    completionType: CompletionType,
+    @SlashOption({
+      description: "GameDB ID (optional if using query)",
+      name: "game_id",
+      required: false,
+      type: ApplicationCommandOptionType.Integer,
+    })
+    gameId: number | undefined,
+    @SlashOption({
+      description: "Search text to find/import the game",
+      name: "query",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    query: string | undefined,
+    @SlashOption({
+      description: "Completion date (defaults to today)",
+      name: "completion_date",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    completionDate: string | undefined,
+    @SlashOption({
+      description: "Final playtime in hours (e.g., 12.5)",
+      name: "final_playtime_hours",
+      required: false,
+      type: ApplicationCommandOptionType.Number,
+    })
+    finalPlaytimeHours: number | undefined,
+    @SlashOption({
+      description: "Announce this completion in the completions channel?",
+      name: "announce",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    announce: boolean | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const okToUseCommand: boolean = await isSuperAdmin(interaction);
+    if (!okToUseCommand) return;
+
+    if (!COMPLETION_TYPES.includes(completionType)) {
+      await safeReply(interaction, {
+        content: "Invalid completion type.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    let completedAt: Date | null;
+    try {
+      completedAt = parseCompletionDateInput(completionDate);
+    } catch (err: any) {
+      await safeReply(interaction, {
+        content: err?.message ?? "Invalid completion date.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (
+      finalPlaytimeHours !== undefined &&
+      (Number.isNaN(finalPlaytimeHours) || finalPlaytimeHours < 0)
+    ) {
+      await safeReply(interaction, {
+        content: "Final playtime must be a non-negative number of hours.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const playtime = finalPlaytimeHours === undefined ? null : finalPlaytimeHours;
+
+    if (gameId) {
+      const game = await Game.getGameById(Number(gameId));
+      if (!game) {
+        await safeReply(interaction, {
+          content: `GameDB #${gameId} was not found.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      await saveCompletion(
+        interaction,
+        user.id,
+        game.id,
+        completionType,
+        completedAt,
+        playtime,
+        game.title,
+        announce,
+        true, // isAdminOverride
+      );
+      return;
+    }
+
+    const searchTerm = (query ?? "").trim();
+    if (!searchTerm) {
+      await safeReply(interaction, {
+        content: "Provide a game_id or include a search query.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await this.promptCompletionSelection(interaction, searchTerm, {
+      targetUserId: user.id,
+      completionType,
+      completedAt,
+      finalPlaytimeHours: playtime,
+      source: "existing",
+      query: searchTerm,
+      announce,
+    });
+  }
+
+  @SelectMenuComponent({ id: /^sa-comp-add-select:.+/ })
+  async handleSuperAdminCompletionSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const [, sessionId] = interaction.customId.split(":");
+    const ctx = superadminCompletionAddSessions.get(sessionId);
+
+    if (!ctx) {
+      await interaction
+        .reply({
+          content: "This completion prompt has expired.",
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    // Since it's admin, we check if the interaction user is an admin, not necessarily the context target user
+    const okToUseCommand: boolean = await isSuperAdmin(interaction as any);
+    if (!okToUseCommand) return;
+
+    const value = interaction.values?.[0];
+    if (!value) {
+      await interaction
+        .reply({
+          content: "No selection received.",
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    await interaction.deferUpdate().catch(() => {});
+
+    try {
+      await this.processCompletionSelection(interaction, value, ctx);
+    } finally {
+      superadminCompletionAddSessions.delete(sessionId);
+      try {
+        await interaction.editReply({ components: [] }).catch(() => {});
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  private async promptCompletionSelection(
+    interaction: CommandInteraction,
+    searchTerm: string,
+    ctx: CompletionAddContext,
+  ): Promise<void> {
+    const localResults = await Game.searchGames(searchTerm);
+    if (localResults.length) {
+      const sessionId = `sacomp-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+      superadminCompletionAddSessions.set(sessionId, ctx);
+
+      const options = localResults.slice(0, 24).map((game) => ({
+        label: game.title.slice(0, 100),
+        value: String(game.id),
+        description: `GameDB #${game.id}`,
+      }));
+
+      options.push({
+        label: "Import another game from IGDB",
+        value: "import-igdb",
+        description: "Search IGDB and import a new GameDB entry",
+      });
+
+      const select = new StringSelectMenuBuilder()
+        .setCustomId(`sa-comp-add-select:${sessionId}`)
+        .setPlaceholder("Select a game to log completion")
+        .addOptions(options);
+
+      await safeReply(interaction, {
+        content: `Select the game for "${searchTerm}".`,
+        components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await this.promptIgdbSelection(interaction, searchTerm, ctx);
+  }
+
+  private async promptIgdbSelection(
+    interaction: CommandInteraction | StringSelectMenuInteraction,
+    searchTerm: string,
+    ctx: CompletionAddContext,
+  ): Promise<void> {
+    if (interaction.isMessageComponent()) {
+      const loading = { content: `Searching IGDB for "${searchTerm}"...`, components: [] };
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply(loading);
+      } else {
+        await interaction.update(loading);
+      }
+    }
+
+    const igdbSearch = await igdbService.searchGames(searchTerm);
+    if (!igdbSearch.results.length) {
+      const content = `No GameDB or IGDB matches found for "${searchTerm}".`;
+      if (interaction.isMessageComponent()) {
+        await interaction.editReply({ content, components: [] });
+      } else {
+        await safeReply(interaction, {
+          content,
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+      return;
+    }
+
+    const opts: IgdbSelectOption[] = igdbSearch.results.map((game) => {
+      const year = game.first_release_date
+        ? new Date(game.first_release_date * 1000).getFullYear()
+        : "TBD";
+      return {
+        id: game.id,
+        label: `${game.name} (${year})`,
+        description: (game.summary || "No summary").slice(0, 95),
+      };
+    });
+
+    const { components } = createIgdbSession(
+      interaction.user.id,
+      opts,
+      async (sel, gameId) => {
+        if (!sel.deferred && !sel.replied) {
+          await sel.deferUpdate().catch(() => {});
+        }
+        await sel.editReply({
+          content: "Importing game details from IGDB...",
+          components: [],
+        }).catch(() => {});
+
+        const imported = await this.importGameFromIgdbForCompletion(gameId);
+        await saveCompletion(
+          sel,
+          ctx.targetUserId,
+          imported.gameId,
+          ctx.completionType,
+          ctx.completedAt,
+          ctx.finalPlaytimeHours,
+          imported.title,
+          ctx.announce,
+          true,
+        );
+      },
+    );
+
+    const content = `No GameDB match; select an IGDB result to import for "${searchTerm}".`;
+    if (interaction.isMessageComponent()) {
+      await interaction.editReply({
+        content: "Found results on IGDB. See message below.",
+        components: [],
+      });
+      await interaction.followUp({ content, components, flags: MessageFlags.Ephemeral });
+    } else {
+      await safeReply(interaction, {
+        content,
+        components,
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+  }
+
+  private async processCompletionSelection(
+    interaction: StringSelectMenuInteraction,
+    value: string,
+    ctx: CompletionAddContext,
+  ): Promise<boolean> {
+    if (value === "import-igdb") {
+      if (!ctx.query) {
+        await interaction.reply({
+          content: "Original search query lost. Please try again.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return false;
+      }
+      await this.promptIgdbSelection(interaction, ctx.query, ctx);
+      return true;
+    }
+
+    try {
+      const parsedId = Number(value);
+      if (!Number.isInteger(parsedId) || parsedId <= 0) {
+        await interaction.followUp({
+          content: "Invalid selection.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return false;
+      }
+      const game = await Game.getGameById(parsedId);
+      if (!game) {
+        await interaction.followUp({
+          content: "Selected game was not found in GameDB.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return false;
+      }
+
+      await saveCompletion(
+        interaction,
+        ctx.targetUserId,
+        game.id,
+        ctx.completionType,
+        ctx.completedAt,
+        ctx.finalPlaytimeHours,
+        game.title,
+        ctx.announce,
+        true,
+      );
+      return true;
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      await interaction.followUp({
+        content: `Failed to add completion: ${msg}`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return false;
+    }
+  }
+
+  private async importGameFromIgdbForCompletion(igdbId: number): Promise<{ gameId: number; title: string }> {
+    const existing = await Game.getGameByIgdbId(igdbId);
+    if (existing) {
+      return { gameId: existing.id, title: existing.title };
+    }
+
+    const details = await igdbService.getGameDetails(igdbId);
+    if (!details) {
+      throw new Error("Failed to load game details from IGDB.");
+    }
+
+    let imageData: Buffer | null = null;
+    if (details.cover?.image_id) {
+      try {
+        const imageUrl = `https://images.igdb.com/igdb/image/upload/t_cover_big/${details.cover.image_id}.jpg`;
+        const imageResponse = await axios.get(imageUrl, { responseType: "arraybuffer" });
+        imageData = Buffer.from(imageResponse.data);
+      } catch (err) {
+        console.error("Failed to download cover image:", err);
+      }
+    }
+
+    const newGame = await Game.createGame(
+      details.name,
+      details.summary ?? "",
+      imageData,
+      details.id,
+      details.slug ?? null,
+      details.total_rating ?? null,
+      details.url ?? null,
+    );
+    await Game.saveFullGameMetadata(newGame.id, details);
+    return { gameId: newGame.id, title: details.name };
   }
 
   @ButtonComponent({ id: /^superadmin-presence-restore-\d+$/ })
