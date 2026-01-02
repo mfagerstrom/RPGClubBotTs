@@ -95,8 +95,8 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
     id: "completion-add-other",
     label: "/superadmin completion-add-other",
     summary: "Add a game completion for another user.",
-    syntax: "Syntax: /superadmin completion-add-other user:<user> completion_type:<type> game_id:<int> [completion_date:<string>] [final_playtime_hours:<number>] [announce:<bool>]",
-    notes: "Requires GameDB ID.",
+    syntax: "Syntax: /superadmin completion-add-other user:<user> completion_type:<type> query:<string> [completion_date:<string>] [final_playtime_hours:<number>] [announce:<bool>]",
+    notes: "Uses a search query to find or import the game.",
   },
   {
     id: "memberscan",
@@ -261,19 +261,12 @@ export class SuperAdmin {
     })
     completionType: CompletionType,
     @SlashOption({
-      description: "GameDB ID (optional if using query)",
-      name: "game_id",
-      required: false,
-      type: ApplicationCommandOptionType.Integer,
-    })
-    gameId: number | undefined,
-    @SlashOption({
       description: "Search text to find/import the game",
       name: "query",
-      required: false,
+      required: true,
       type: ApplicationCommandOptionType.String,
     })
-    query: string | undefined,
+    query: string,
     @SlashOption({
       description: "Completion date (defaults to today)",
       name: "completion_date",
@@ -334,38 +327,7 @@ export class SuperAdmin {
 
     const playtime = finalPlaytimeHours === undefined ? null : finalPlaytimeHours;
 
-    if (gameId) {
-      const game = await Game.getGameById(Number(gameId));
-      if (!game) {
-        await safeReply(interaction, {
-          content: `GameDB #${gameId} was not found.`,
-          flags: MessageFlags.Ephemeral,
-        });
-        return;
-      }
-
-      await saveCompletion(
-        interaction,
-        user.id,
-        game.id,
-        completionType,
-        completedAt,
-        playtime,
-        game.title,
-        announce,
-        true, // isAdminOverride
-      );
-      return;
-    }
-
-    const searchTerm = (query ?? "").trim();
-    if (!searchTerm) {
-      await safeReply(interaction, {
-        content: "Provide a game_id or include a search query.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
+    const searchTerm = query.trim();
 
     await this.promptCompletionSelection(interaction, searchTerm, {
       targetUserId: user.id,

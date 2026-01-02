@@ -32,8 +32,8 @@ export const SUPERADMIN_HELP_TOPICS = [
         id: "completion-add-other",
         label: "/superadmin completion-add-other",
         summary: "Add a game completion for another user.",
-        syntax: "Syntax: /superadmin completion-add-other user:<user> completion_type:<type> game_id:<int> [completion_date:<string>] [final_playtime_hours:<number>] [announce:<bool>]",
-        notes: "Requires GameDB ID.",
+        syntax: "Syntax: /superadmin completion-add-other user:<user> completion_type:<type> query:<string> [completion_date:<string>] [final_playtime_hours:<number>] [announce:<bool>]",
+        notes: "Uses a search query to find or import the game.",
     },
     {
         id: "memberscan",
@@ -138,7 +138,7 @@ let SuperAdmin = class SuperAdmin {
         }
         await showSuperAdminPresenceHistory(interaction);
     }
-    async completionAddOther(user, completionType, gameId, query, completionDate, finalPlaytimeHours, announce, interaction) {
+    async completionAddOther(user, completionType, query, completionDate, finalPlaytimeHours, announce, interaction) {
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         const okToUseCommand = await isSuperAdmin(interaction);
         if (!okToUseCommand)
@@ -170,26 +170,7 @@ let SuperAdmin = class SuperAdmin {
             return;
         }
         const playtime = finalPlaytimeHours === undefined ? null : finalPlaytimeHours;
-        if (gameId) {
-            const game = await Game.getGameById(Number(gameId));
-            if (!game) {
-                await safeReply(interaction, {
-                    content: `GameDB #${gameId} was not found.`,
-                    flags: MessageFlags.Ephemeral,
-                });
-                return;
-            }
-            await saveCompletion(interaction, user.id, game.id, completionType, completedAt, playtime, game.title, announce, true);
-            return;
-        }
-        const searchTerm = (query ?? "").trim();
-        if (!searchTerm) {
-            await safeReply(interaction, {
-                content: "Provide a game_id or include a search query.",
-                flags: MessageFlags.Ephemeral,
-            });
-            return;
-        }
+        const searchTerm = query.trim();
         await this.promptCompletionSelection(interaction, searchTerm, {
             targetUserId: user.id,
             completionType,
@@ -1027,30 +1008,24 @@ __decorate([
         type: ApplicationCommandOptionType.String,
     })),
     __param(2, SlashOption({
-        description: "GameDB ID (optional if using query)",
-        name: "game_id",
-        required: false,
-        type: ApplicationCommandOptionType.Integer,
-    })),
-    __param(3, SlashOption({
         description: "Search text to find/import the game",
         name: "query",
-        required: false,
+        required: true,
         type: ApplicationCommandOptionType.String,
     })),
-    __param(4, SlashOption({
+    __param(3, SlashOption({
         description: "Completion date (defaults to today)",
         name: "completion_date",
         required: false,
         type: ApplicationCommandOptionType.String,
     })),
-    __param(5, SlashOption({
+    __param(4, SlashOption({
         description: "Final playtime in hours (e.g., 12.5)",
         name: "final_playtime_hours",
         required: false,
         type: ApplicationCommandOptionType.Number,
     })),
-    __param(6, SlashOption({
+    __param(5, SlashOption({
         description: "Announce this completion in the completions channel?",
         name: "announce",
         required: false,
