@@ -770,7 +770,7 @@ const GAME_COMPLETION_HELP_TOPICS: GameCompletionHelpTopic[] = [
     label: "/game-completion list",
     summary: "List recent completions for you, another member, or view the leaderboard.",
     syntax:
-      "Syntax: /game-completion list [year:<int>] [title:<string>] [member:<user>] [all:<boolean>] [showinchat:<bool>]",
+      "Syntax: /game-completion list [year:<int|unknown>] [title:<string>] [member:<user>] [all:<boolean>] [showinchat:<bool>]",
     notes:
       "Shows your completions, another member's completions (member), or a leaderboard of all members (all).",
   },

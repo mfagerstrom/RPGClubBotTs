@@ -607,7 +607,7 @@ export default class Member {
     userId: string;
     limit: number;
     offset?: number;
-    year?: number | null;
+    year?: number | "unknown" | null;
     title?: string;
   }): Promise<ICompletionRecord[]> {
     const { userId, limit, offset = 0, year = null, title } = params;
@@ -617,7 +617,9 @@ export default class Member {
 
     const clauses: string[] = ["c.USER_ID = :userId"];
     const binds: Record<string, any> = { userId, limit: safeLimit, offset: safeOffset };
-    if (year) {
+    if (year === "unknown") {
+      clauses.push("c.COMPLETED_AT IS NULL");
+    } else if (typeof year === "number") {
       clauses.push("EXTRACT(YEAR FROM c.COMPLETED_AT) = :year");
       binds.year = year;
     }
@@ -767,11 +769,17 @@ export default class Member {
     }
   }
 
-  static async countCompletions(userId: string, year?: number | null, title?: string): Promise<number> {
+  static async countCompletions(
+    userId: string,
+    year?: number | "unknown" | null,
+    title?: string,
+  ): Promise<number> {
     const connection = await getOraclePool().getConnection();
     const clauses: string[] = ["c.USER_ID = :userId"];
     const binds: Record<string, any> = { userId };
-    if (year) {
+    if (year === "unknown") {
+      clauses.push("c.COMPLETED_AT IS NULL");
+    } else if (typeof year === "number") {
       clauses.push("EXTRACT(YEAR FROM c.COMPLETED_AT) = :year");
       binds.year = year;
     }
