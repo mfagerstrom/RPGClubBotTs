@@ -11,6 +11,7 @@ type Session = {
   ownerId: string;
   options: IgdbSelectOption[];
   onSelect: (interaction: StringSelectMenuInteraction, gameId: number) => Promise<void>;
+  extraComponents?: ActionRowBuilder<any>[];
 };
 
 // Leave room for prev/next navigation in the 25-option Discord limit.
@@ -40,9 +41,10 @@ export function createIgdbSession(
   ownerId: string,
   options: IgdbSelectOption[],
   onSelect: Session["onSelect"],
+  extraComponents?: ActionRowBuilder<any>[],
 ): {
   sessionId: string;
-  components: ActionRowBuilder<StringSelectMenuBuilder>[];
+  components: ActionRowBuilder<any>[];
 } {
   const sessionId = `igdb-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
   const sorted = [...options].sort((a, b) => {
@@ -50,7 +52,7 @@ export function createIgdbSession(
     if (lenDiff !== 0) return lenDiff;
     return a.label.localeCompare(b.label);
   });
-  getSessionStore().set(sessionId, { ownerId, options: sorted, onSelect });
+  getSessionStore().set(sessionId, { ownerId, options: sorted, onSelect, extraComponents });
   return {
     sessionId,
     components: buildIgdbComponents(sessionId, 0),
@@ -60,7 +62,7 @@ export function createIgdbSession(
 export function buildIgdbComponents(
   sessionId: string,
   page: number,
-): ActionRowBuilder<StringSelectMenuBuilder>[] {
+): ActionRowBuilder<any>[] {
   const session = getSessionStore().get(sessionId);
   if (!session) return [];
   const { pageOptions, totalPages } = chunkOptions(session.options, page);
@@ -93,7 +95,10 @@ export function buildIgdbComponents(
     }
   }
 
-  return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
+  return [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select),
+    ...(session.extraComponents ?? []),
+  ];
 }
 
 export function getIgdbSession(sessionId: string): Session | undefined {

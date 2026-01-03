@@ -162,12 +162,13 @@ let GameCompletionCommands = class GameCompletionCommands {
             });
             return;
         }
+        const ephemeral = this.isInteractionEphemeral(interaction);
         const importId = Number(importIdRaw);
         const itemId = Number(itemIdRaw);
         if (!Number.isInteger(importId) || !Number.isInteger(itemId)) {
             await interaction.reply({
                 content: "Invalid import selection.",
-                flags: MessageFlags.Ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -175,7 +176,7 @@ let GameCompletionCommands = class GameCompletionCommands {
         if (!session) {
             await interaction.reply({
                 content: "Import session not found.",
-                flags: MessageFlags.Ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -183,7 +184,7 @@ let GameCompletionCommands = class GameCompletionCommands {
         if (!choice) {
             await interaction.reply({
                 content: "No selection received.",
-                flags: MessageFlags.Ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -192,11 +193,23 @@ let GameCompletionCommands = class GameCompletionCommands {
             await this.processNextCompletionatorItem(interaction, session);
             return;
         }
+        if (choice === "import-igdb") {
+            const item = await getImportItemById(itemId);
+            if (!item) {
+                await interaction.reply({
+                    content: "Import item not found.",
+                    flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+                });
+                return;
+            }
+            await this.promptCompletionatorIgdbSelection(interaction, session, item);
+            return;
+        }
         const gameId = Number(choice);
         if (!Number.isInteger(gameId) || gameId <= 0) {
             await interaction.reply({
                 content: "Invalid game selection.",
-                flags: MessageFlags.Ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -204,11 +217,84 @@ let GameCompletionCommands = class GameCompletionCommands {
         if (!item) {
             await interaction.reply({
                 content: "Import item not found.",
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+            });
+            return;
+        }
+        await this.handleCompletionatorMatch(interaction, session, item, gameId, this.isInteractionEphemeral(interaction));
+    }
+    async handleCompletionatorUpdateFields(interaction) {
+        const [, ownerId, importIdRaw, itemIdRaw] = interaction.customId.split(":");
+        if (interaction.user.id !== ownerId) {
+            await interaction.reply({
+                content: "This import prompt isn't for you.",
                 flags: MessageFlags.Ephemeral,
             });
             return;
         }
-        await this.handleCompletionatorMatch(interaction, session, item, gameId);
+        const ephemeral = this.isInteractionEphemeral(interaction);
+        const importId = Number(importIdRaw);
+        const itemId = Number(itemIdRaw);
+        if (!Number.isInteger(importId) || !Number.isInteger(itemId)) {
+            await interaction.reply({
+                content: "Invalid import selection.",
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+            });
+            return;
+        }
+        const session = await getImportById(importId);
+        if (!session) {
+            await interaction.reply({
+                content: "Import session not found.",
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+            });
+            return;
+        }
+        const item = await getImportItemById(itemId);
+        if (!item || !item.completionId) {
+            await interaction.reply({
+                content: "Import item not found.",
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+            });
+            return;
+        }
+        const existing = await Member.getCompletion(item.completionId);
+        if (!existing) {
+            await interaction.reply({
+                content: "Completion not found.",
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+            });
+            return;
+        }
+        const updates = this.buildCompletionUpdate(existing, item);
+        if (!updates) {
+            await updateImportItem(item.itemId, { status: "SKIPPED" });
+            await this.processNextCompletionatorItem(interaction, session, { ephemeral });
+            return;
+        }
+        const selected = new Set(interaction.values ?? []);
+        const filtered = {};
+        if (selected.has("type") && updates.completionType !== undefined) {
+            filtered.completionType = updates.completionType;
+        }
+        if (selected.has("date") && updates.completedAt !== undefined) {
+            filtered.completedAt = updates.completedAt;
+        }
+        if (selected.has("playtime") && updates.finalPlaytimeHours !== undefined) {
+            filtered.finalPlaytimeHours = updates.finalPlaytimeHours;
+        }
+        if (!Object.keys(filtered).length) {
+            await updateImportItem(item.itemId, { status: "SKIPPED" });
+            await this.processNextCompletionatorItem(interaction, session, { ephemeral });
+            return;
+        }
+        await Member.updateCompletion(interaction.user.id, existing.completionId, filtered);
+        await updateImportItem(item.itemId, {
+            status: "UPDATED",
+            gameDbGameId: item.gameDbGameId,
+            completionId: existing.completionId,
+        });
+        await this.processNextCompletionatorItem(interaction, session, { ephemeral });
     }
     async handleCompletionatorAction(interaction) {
         const [, ownerId, importIdRaw, itemIdRaw, action] = interaction.customId.split(":");
@@ -219,12 +305,13 @@ let GameCompletionCommands = class GameCompletionCommands {
             });
             return;
         }
+        const ephemeral = this.isInteractionEphemeral(interaction);
         const importId = Number(importIdRaw);
         const itemId = Number(itemIdRaw);
         if (!Number.isInteger(importId) || !Number.isInteger(itemId)) {
             await interaction.reply({
                 content: "Invalid import action.",
-                flags: MessageFlags.Ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -232,7 +319,7 @@ let GameCompletionCommands = class GameCompletionCommands {
         if (!session) {
             await interaction.reply({
                 content: "Import session not found.",
-                flags: MessageFlags.Ephemeral,
+                flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
@@ -241,7 +328,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             if (!item || !item.gameDbGameId) {
                 await interaction.reply({
                     content: "Import item data is missing. Please resume the import.",
-                    flags: MessageFlags.Ephemeral,
+                    flags: ephemeral ? MessageFlags.Ephemeral : undefined,
                 });
                 return;
             }
@@ -267,11 +354,61 @@ let GameCompletionCommands = class GameCompletionCommands {
             if (!item) {
                 await interaction.reply({
                     content: "Import item not found.",
-                    flags: MessageFlags.Ephemeral,
+                    flags: ephemeral ? MessageFlags.Ephemeral : undefined,
                 });
                 return;
             }
             await this.promptCompletionatorIgdbSelection(interaction, session, item);
+            return;
+        }
+        if (action === "igdb-manual") {
+            const item = await getImportItemById(itemId);
+            if (!item) {
+                await interaction.reply({
+                    content: "Import item not found.",
+                    flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+                });
+                return;
+            }
+            await this.editImportPrompt(interaction, `Enter the IGDB id for "${item.gameTitle}".`);
+            const response = await this.promptCompletionatorText(interaction);
+            if (!response)
+                return;
+            if (response === COMPLETIONATOR_PAUSE_SENTINEL) {
+                await setImportStatus(session.importId, "PAUSED");
+                await this.editImportPrompt(interaction, `Import #${session.importId} paused. ` +
+                    "Resume with `/game-completion completionator-import action:resume`.");
+                return;
+            }
+            if (response === COMPLETIONATOR_SKIP_SENTINEL) {
+                await updateImportItem(item.itemId, { status: "SKIPPED" });
+                await this.processNextCompletionatorItem(interaction, session);
+                return;
+            }
+            const igdbId = Number(response);
+            if (!Number.isInteger(igdbId) || igdbId <= 0) {
+                await updateImportItem(item.itemId, {
+                    status: "ERROR",
+                    errorText: "Invalid IGDB id entered.",
+                });
+                await this.processNextCompletionatorItem(interaction, session);
+                return;
+            }
+            const imported = await this.importGameFromIgdb(igdbId);
+            await this.handleCompletionatorMatch(interaction, session, item, imported.gameId, this.isInteractionEphemeral(interaction));
+            return;
+        }
+        if (action === "query") {
+            const item = await getImportItemById(itemId);
+            if (!item) {
+                await interaction.reply({
+                    content: "Import item not found.",
+                    flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+                });
+                return;
+            }
+            await this.editImportPrompt(interaction, `Enter a GameDB search string for "${item.gameTitle}".`);
+            await this.promptCompletionatorGameDbSearch(interaction, session, item, ephemeral);
             return;
         }
         if (action === "manual") {
@@ -279,24 +416,18 @@ let GameCompletionCommands = class GameCompletionCommands {
             if (!item) {
                 await interaction.reply({
                     content: "Import item not found.",
-                    flags: MessageFlags.Ephemeral,
+                    flags: ephemeral ? MessageFlags.Ephemeral : undefined,
                 });
                 return;
             }
-            await safeReply(interaction, {
-                content: `Enter the GameDB id for "${item.gameTitle}".`,
-                flags: MessageFlags.Ephemeral,
-            });
+            await this.editImportPrompt(interaction, `Enter the GameDB id for "${item.gameTitle}".`);
             const response = await this.promptCompletionatorText(interaction);
             if (!response)
                 return;
             if (response === COMPLETIONATOR_PAUSE_SENTINEL) {
                 await setImportStatus(session.importId, "PAUSED");
-                await safeReply(interaction, {
-                    content: `Import #${session.importId} paused. ` +
-                        "Resume with `/game-completion completionator-import action:resume`.",
-                    flags: MessageFlags.Ephemeral,
-                });
+                await this.editImportPrompt(interaction, `Import #${session.importId} paused. ` +
+                    "Resume with `/game-completion completionator-import action:resume`.");
                 return;
             }
             if (response === COMPLETIONATOR_SKIP_SENTINEL) {
@@ -313,7 +444,7 @@ let GameCompletionCommands = class GameCompletionCommands {
                 await this.processNextCompletionatorItem(interaction, session);
                 return;
             }
-            await this.handleCompletionatorMatch(interaction, session, item, manualId);
+            await this.handleCompletionatorMatch(interaction, session, item, manualId, this.isInteractionEphemeral(interaction));
             return;
         }
         if (action === "pause") {
@@ -337,7 +468,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             if (!item || !item.gameDbGameId || !item.completionId) {
                 await interaction.reply({
                     content: "Import item data is missing. Please resume the import.",
-                    flags: MessageFlags.Ephemeral,
+                    flags: ephemeral ? MessageFlags.Ephemeral : undefined,
                 });
                 return;
             }
@@ -345,7 +476,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             if (!existing) {
                 await interaction.reply({
                     content: "Completion not found.",
-                    flags: MessageFlags.Ephemeral,
+                    flags: ephemeral ? MessageFlags.Ephemeral : undefined,
                 });
                 return;
             }
@@ -365,16 +496,9 @@ let GameCompletionCommands = class GameCompletionCommands {
         }
     }
     async completionatorImport(action, file, interaction) {
+        const ephemeral = true;
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
         const userId = interaction.user.id;
-        const ownerId = interaction.guild?.ownerId;
-        if (!ownerId || ownerId !== userId) {
-            await safeReply(interaction, {
-                content: "Sorry, but that command is still under development. Stay tuned for updates.",
-                flags: MessageFlags.Ephemeral,
-            });
-            return;
-        }
         if (action === "start") {
             if (!file?.url) {
                 await safeReply(interaction, {
@@ -410,7 +534,7 @@ let GameCompletionCommands = class GameCompletionCommands {
                     "Starting review...",
                 flags: MessageFlags.Ephemeral,
             });
-            await this.processNextCompletionatorItem(interaction, session);
+            await this.processNextCompletionatorItem(interaction, session, { ephemeral });
             return;
         }
         if (action === "status") {
@@ -461,7 +585,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             return;
         }
         await setImportStatus(session.importId, "ACTIVE");
-        await this.processNextCompletionatorItem(interaction, session);
+        await this.processNextCompletionatorItem(interaction, session, { ephemeral });
     }
     async handleCompletionAddSelect(interaction) {
         const [, sessionId] = interaction.customId.split(":");
@@ -946,7 +1070,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             return null;
         return new Date(year, month - 1, day);
     }
-    async processNextCompletionatorItem(interaction, session) {
+    async processNextCompletionatorItem(interaction, session, options) {
         const nextItem = await getNextPendingItem(session.importId);
         if (!nextItem) {
             await setImportStatus(session.importId, "COMPLETED");
@@ -955,11 +1079,11 @@ let GameCompletionCommands = class GameCompletionCommands {
                 components: [],
                 embeds: [],
                 files: [],
-            });
+            }, options?.ephemeral);
             return;
         }
         await updateImportIndex(session.importId, nextItem.rowIndex);
-        await this.renderCompletionatorItem(interaction, session, nextItem);
+        await this.renderCompletionatorItem(interaction, session, nextItem, options?.ephemeral);
     }
     buildCompletionatorEmbed(session, item) {
         const embed = new EmbedBuilder()
@@ -973,59 +1097,29 @@ let GameCompletionCommands = class GameCompletionCommands {
         applyGameDbThumbnail(embed);
         return embed;
     }
-    async renderCompletionatorItem(interaction, session, item) {
+    async renderCompletionatorItem(interaction, session, item, ephemeral) {
         const results = await Game.searchGames(item.gameTitle);
         const embed = this.buildCompletionatorEmbed(session, item);
         if (!results.length) {
             const content = `No GameDB matches found for "${item.gameTitle}". ` +
                 "Choose an option below.";
             const actionEmbed = this.buildCompletionatorActionEmbed(session, item, "Awaiting GameDB id");
-            const buttons = this.buildCompletionatorNoMatchRow(interaction.user.id, session.importId, item.itemId);
+            const rows = this.buildCompletionatorNoMatchRows(interaction.user.id, session.importId, item.itemId);
             await this.respondToImportInteraction(interaction, {
                 embeds: [actionEmbed],
                 files: [buildGameDbThumbAttachment()],
-                components: [buttons],
+                components: rows,
                 content,
-            });
+            }, ephemeral);
             return;
         }
         if (results.length === 1) {
-            await this.handleCompletionatorMatch(interaction, session, item, results[0].id);
+            await this.handleCompletionatorMatch(interaction, session, item, results[0].id, ephemeral);
             return;
         }
-        const options = results.slice(0, 24).map((game) => ({
-            label: game.title.slice(0, 100),
-            value: String(game.id),
-            description: `GameDB #${game.id}`,
-        }));
-        options.push({
-            label: `Skip (${COMPLETIONATOR_SKIP_SENTINEL})`,
-            value: COMPLETIONATOR_SKIP_SENTINEL,
-            description: "Skip this completion",
-        });
-        const select = new StringSelectMenuBuilder()
-            .setCustomId(`comp-import-select:${interaction.user.id}:${session.importId}:${item.itemId}`)
-            .setPlaceholder("Select the matching game")
-            .addOptions(options);
-        const pauseButton = new ButtonBuilder()
-            .setCustomId(`comp-import-action:${interaction.user.id}:${session.importId}:${item.itemId}:pause`)
-            .setLabel("Pause Import")
-            .setStyle(ButtonStyle.Secondary);
-        const skipButton = new ButtonBuilder()
-            .setCustomId(`comp-import-action:${interaction.user.id}:${session.importId}:${item.itemId}:skip`)
-            .setLabel("Skip")
-            .setStyle(ButtonStyle.Secondary);
-        await this.respondToImportInteraction(interaction, {
-            embeds: [embed],
-            files: [buildGameDbThumbAttachment()],
-            components: [
-                new ActionRowBuilder().addComponents(select),
-                new ActionRowBuilder().addComponents(pauseButton, skipButton),
-            ],
-            content: "",
-        });
+        await this.renderCompletionatorGameDbResults(interaction, session, item, results, embed, ephemeral);
     }
-    async handleCompletionatorMatch(interaction, session, item, gameId) {
+    async handleCompletionatorMatch(interaction, session, item, gameId, ephemeral) {
         const game = await Game.getGameById(gameId);
         if (!game) {
             await updateImportItem(item.itemId, {
@@ -1033,13 +1127,13 @@ let GameCompletionCommands = class GameCompletionCommands {
                 errorText: `GameDB id ${gameId} not found.`,
             });
             const actionEmbed = this.buildCompletionatorActionEmbed(session, item, "Awaiting GameDB id");
-            const buttons = this.buildCompletionatorNoMatchRow(interaction.user.id, session.importId, item.itemId);
+            const rows = this.buildCompletionatorNoMatchRows(interaction.user.id, session.importId, item.itemId);
             await this.respondToImportInteraction(interaction, {
                 content: `GameDB id ${gameId} was not found. Choose another option below.`,
                 embeds: [actionEmbed],
                 files: [buildGameDbThumbAttachment()],
-                components: [buttons],
-            });
+                components: rows,
+            }, ephemeral);
             return;
         }
         const existing = await Member.getCompletionByGameId(interaction.user.id, gameId);
@@ -1064,7 +1158,7 @@ let GameCompletionCommands = class GameCompletionCommands {
                 files: [buildGameDbThumbAttachment()],
                 components: [buttons],
                 content: "",
-            });
+            }, ephemeral);
             return;
         }
         const updates = this.buildCompletionUpdate(existing, item);
@@ -1082,10 +1176,23 @@ let GameCompletionCommands = class GameCompletionCommands {
             return;
         }
         const embed = this.buildCompletionUpdateEmbed(session, item, existing);
+        const updateOptions = this.buildCompletionUpdateOptions(existing, item);
+        if (!updateOptions.length) {
+            await updateImportItem(item.itemId, {
+                status: "SKIPPED",
+                gameDbGameId: gameId,
+                completionId: existing.completionId,
+            });
+            await this.processNextCompletionatorItem(interaction, session, { ephemeral });
+            return;
+        }
+        const updateSelect = new StringSelectMenuBuilder()
+            .setCustomId(`comp-import-update-fields:${interaction.user.id}:${session.importId}:${item.itemId}`)
+            .setPlaceholder("Select fields to update")
+            .setMinValues(1)
+            .setMaxValues(updateOptions.length)
+            .addOptions(updateOptions);
         const buttons = new ActionRowBuilder().addComponents(new ButtonBuilder()
-            .setCustomId(`comp-import-action:${interaction.user.id}:${session.importId}:${item.itemId}:update`)
-            .setLabel("Update Existing")
-            .setStyle(ButtonStyle.Success), new ButtonBuilder()
             .setCustomId(`comp-import-action:${interaction.user.id}:${session.importId}:${item.itemId}:skip`)
             .setLabel("Skip")
             .setStyle(ButtonStyle.Secondary), new ButtonBuilder()
@@ -1095,9 +1202,12 @@ let GameCompletionCommands = class GameCompletionCommands {
         await this.respondToImportInteraction(interaction, {
             embeds: [embed],
             files: [buildGameDbThumbAttachment()],
-            components: [buttons],
+            components: [
+                new ActionRowBuilder().addComponents(updateSelect),
+                buttons,
+            ],
             content: "",
-        });
+        }, ephemeral);
     }
     buildCompletionUpdate(existing, item) {
         if (!existing)
@@ -1108,7 +1218,10 @@ let GameCompletionCommands = class GameCompletionCommands {
         }
         if (item.playtimeHours != null) {
             const existingPlaytime = existing.finalPlaytimeHours ?? null;
-            if (existingPlaytime == null || existingPlaytime !== item.playtimeHours) {
+            if (existingPlaytime == null) {
+                updates.finalPlaytimeHours = item.playtimeHours;
+            }
+            else if (Math.abs(existingPlaytime - item.playtimeHours) >= 1) {
                 updates.finalPlaytimeHours = item.playtimeHours;
             }
         }
@@ -1137,52 +1250,189 @@ let GameCompletionCommands = class GameCompletionCommands {
             value: `${item.completionType ?? "Unknown"} — ` +
                 `${item.completedAt ? formatTableDate(item.completedAt) : "Unknown"} — ` +
                 `${item.playtimeHours ?? "Unknown"} hrs`,
-        }, { name: "Action", value: "Update existing completion", inline: false });
+        }, { name: "Action", value: "Select fields to update", inline: false });
         applyGameDbThumbnail(embed);
         return embed;
+    }
+    buildCompletionUpdateOptions(existing, item) {
+        const options = [];
+        const clamp = (value) => value.slice(0, 95);
+        if (item.completionType && item.completionType !== existing?.completionType) {
+            options.push({
+                label: "Completion Type",
+                value: "type",
+                description: clamp(`${existing?.completionType ?? "Unknown"} → ${item.completionType}`),
+            });
+        }
+        if (item.completedAt) {
+            const existingDate = existing?.completedAt
+                ? formatTableDate(existing.completedAt)
+                : "Unknown";
+            const incomingDate = formatTableDate(item.completedAt);
+            if (existingDate !== incomingDate) {
+                options.push({
+                    label: "Completion Date",
+                    value: "date",
+                    description: clamp(`${existingDate} → ${incomingDate}`),
+                });
+            }
+        }
+        if (item.playtimeHours != null) {
+            const existingPlaytime = existing?.finalPlaytimeHours ?? null;
+            const delta = existingPlaytime == null
+                ? null
+                : Math.abs(existingPlaytime - item.playtimeHours);
+            if (existingPlaytime == null || (delta != null && delta >= 1)) {
+                options.push({
+                    label: "Playtime",
+                    value: "playtime",
+                    description: clamp(`${existingPlaytime ?? "Unknown"} hrs` +
+                        ` → ${item.playtimeHours} hrs`),
+                });
+            }
+        }
+        return options;
     }
     async promptCompletionatorIgdbSelection(interaction, session, item) {
         if (!interaction.deferred && !interaction.replied) {
             await interaction.deferUpdate().catch(() => { });
         }
-        await interaction.editReply({
-            content: `Searching IGDB for "${item.gameTitle}"...`,
-            components: [],
-        }).catch(() => { });
-        const igdbSearch = await igdbService.searchGames(item.gameTitle);
-        if (!igdbSearch.results.length) {
-            await safeReply(interaction, {
-                content: `No IGDB matches found for "${item.gameTitle}".`,
-                flags: MessageFlags.Ephemeral,
-            });
-            return;
-        }
-        const opts = igdbSearch.results.map((game) => {
-            const year = game.first_release_date
-                ? new Date(game.first_release_date * 1000).getFullYear()
-                : "TBD";
-            return {
-                id: game.id,
-                label: `${game.name} (${year})`,
-                description: (game.summary || "No summary").slice(0, 95),
-            };
-        });
-        const { components } = createIgdbSession(interaction.user.id, opts, async (sel, gameId) => {
-            if (!sel.deferred && !sel.replied) {
-                await sel.deferUpdate().catch(() => { });
-            }
-            await sel.editReply({
-                content: "Importing game details from IGDB...",
+        const ephemeral = this.isInteractionEphemeral(interaction);
+        let searchTerm = item.gameTitle;
+        while (true) {
+            await interaction.editReply({
+                content: `Searching IGDB for "${searchTerm}"...`,
                 components: [],
             }).catch(() => { });
-            const imported = await this.importGameFromIgdb(gameId);
-            await this.handleCompletionatorMatch(sel, session, item, imported.gameId);
+            const igdbSearch = await igdbService.searchGames(searchTerm);
+            if (igdbSearch.results.length) {
+                const opts = igdbSearch.results.map((game) => {
+                    const year = game.first_release_date
+                        ? new Date(game.first_release_date * 1000).getFullYear()
+                        : "TBD";
+                    return {
+                        id: game.id,
+                        label: `${game.name} (${year})`,
+                        description: (game.summary || "No summary").slice(0, 95),
+                    };
+                });
+                const pauseButton = new ButtonBuilder()
+                    .setCustomId(`comp-import-action:${interaction.user.id}:${session.importId}:${item.itemId}:pause`)
+                    .setLabel("Pause")
+                    .setStyle(ButtonStyle.Secondary);
+                const skipButton = new ButtonBuilder()
+                    .setCustomId(`comp-import-action:${interaction.user.id}:${session.importId}:${item.itemId}:skip`)
+                    .setLabel("Skip")
+                    .setStyle(ButtonStyle.Secondary);
+                const extraRows = [
+                    new ActionRowBuilder().addComponents(pauseButton, skipButton),
+                ];
+                const { components } = createIgdbSession(interaction.user.id, opts, async (sel, gameId) => {
+                    if (!sel.deferred && !sel.replied) {
+                        await sel.deferUpdate().catch(() => { });
+                    }
+                    await sel.editReply({
+                        content: "Importing game details from IGDB...",
+                        components: [],
+                    }).catch(() => { });
+                    const imported = await this.importGameFromIgdb(gameId);
+                    await this.handleCompletionatorMatch(sel, session, item, imported.gameId, this.isInteractionEphemeral(sel));
+                }, extraRows);
+                await interaction.editReply({
+                    content: `Select an IGDB result to import for "${searchTerm}".`,
+                    components,
+                }).catch(() => { });
+                return;
+            }
+            await this.editImportPrompt(interaction, `No IGDB matches found for "${searchTerm}". ` +
+                `Reply with a new search string, "${COMPLETIONATOR_SKIP_SENTINEL}" to skip, ` +
+                `or "${COMPLETIONATOR_PAUSE_SENTINEL}" to pause.`);
+            const response = await this.promptCompletionatorText(interaction);
+            if (!response)
+                return;
+            if (response === COMPLETIONATOR_PAUSE_SENTINEL) {
+                await setImportStatus(session.importId, "PAUSED");
+                await this.editImportPrompt(interaction, `Import #${session.importId} paused. ` +
+                    "Resume with `/game-completion completionator-import action:resume`.");
+                return;
+            }
+            if (response === COMPLETIONATOR_SKIP_SENTINEL) {
+                await updateImportItem(item.itemId, { status: "SKIPPED" });
+                await this.processNextCompletionatorItem(interaction, session);
+                return;
+            }
+            searchTerm = response;
+        }
+    }
+    async promptCompletionatorGameDbSearch(interaction, session, item, ephemeral) {
+        while (true) {
+            const response = await this.promptCompletionatorText(interaction);
+            if (!response)
+                return;
+            if (response === COMPLETIONATOR_PAUSE_SENTINEL) {
+                await setImportStatus(session.importId, "PAUSED");
+                await this.editImportPrompt(interaction, `Import #${session.importId} paused. ` +
+                    "Resume with `/game-completion completionator-import action:resume`.");
+                return;
+            }
+            if (response === COMPLETIONATOR_SKIP_SENTINEL) {
+                await updateImportItem(item.itemId, { status: "SKIPPED" });
+                await this.processNextCompletionatorItem(interaction, session, { ephemeral });
+                return;
+            }
+            const results = await Game.searchGames(response);
+            if (!results.length) {
+                await this.editImportPrompt(interaction, `No GameDB matches found for "${response}". ` +
+                    `Reply with a new search string, "${COMPLETIONATOR_SKIP_SENTINEL}" to skip, ` +
+                    `or "${COMPLETIONATOR_PAUSE_SENTINEL}" to pause.`);
+                continue;
+            }
+            const embed = this.buildCompletionatorEmbed(session, item);
+            await this.renderCompletionatorGameDbResults(interaction, session, item, results, embed, ephemeral);
+            return;
+        }
+    }
+    async renderCompletionatorGameDbResults(interaction, session, item, results, embed, ephemeral) {
+        if (results.length === 1) {
+            await this.handleCompletionatorMatch(interaction, session, item, results[0].id, ephemeral);
+            return;
+        }
+        const options = results.slice(0, 23).map((game) => ({
+            label: game.title.slice(0, 100),
+            value: String(game.id),
+            description: `GameDB #${game.id}`,
+        }));
+        options.push({
+            label: "Import another title from IGDB",
+            value: "import-igdb",
+            description: "Search IGDB and import a new GameDB entry",
         });
-        await interaction.followUp({
-            content: `Select an IGDB result to import for "${item.gameTitle}".`,
-            components,
-            flags: MessageFlags.Ephemeral,
+        options.push({
+            label: `Skip (${COMPLETIONATOR_SKIP_SENTINEL})`,
+            value: COMPLETIONATOR_SKIP_SENTINEL,
+            description: "Skip this completion",
         });
+        const select = new StringSelectMenuBuilder()
+            .setCustomId(`comp-import-select:${interaction.user.id}:${session.importId}:${item.itemId}`)
+            .setPlaceholder("Select the matching game")
+            .addOptions(options);
+        const pauseButton = new ButtonBuilder()
+            .setCustomId(`comp-import-action:${interaction.user.id}:${session.importId}:${item.itemId}:pause`)
+            .setLabel("Pause Import")
+            .setStyle(ButtonStyle.Secondary);
+        const skipButton = new ButtonBuilder()
+            .setCustomId(`comp-import-action:${interaction.user.id}:${session.importId}:${item.itemId}:skip`)
+            .setLabel("Skip")
+            .setStyle(ButtonStyle.Secondary);
+        await this.respondToImportInteraction(interaction, {
+            embeds: [embed],
+            files: [buildGameDbThumbAttachment()],
+            components: [
+                new ActionRowBuilder().addComponents(select),
+                new ActionRowBuilder().addComponents(pauseButton, skipButton),
+            ],
+            content: "",
+        }, ephemeral);
     }
     buildCompletionatorActionEmbed(session, item, actionText) {
         const embed = this.buildCompletionatorEmbed(session, item).addFields({
@@ -1192,11 +1442,18 @@ let GameCompletionCommands = class GameCompletionCommands {
         });
         return embed;
     }
-    buildCompletionatorNoMatchRow(userId, importId, itemId) {
-        return new ActionRowBuilder().addComponents(new ButtonBuilder()
+    buildCompletionatorNoMatchRows(userId, importId, itemId) {
+        const primaryRow = new ActionRowBuilder().addComponents(new ButtonBuilder()
             .setCustomId(`comp-import-action:${userId}:${importId}:${itemId}:igdb`)
             .setLabel("Import from IGDB")
             .setStyle(ButtonStyle.Primary), new ButtonBuilder()
+            .setCustomId(`comp-import-action:${userId}:${importId}:${itemId}:igdb-manual`)
+            .setLabel("Enter IGDB ID")
+            .setStyle(ButtonStyle.Primary), new ButtonBuilder()
+            .setCustomId(`comp-import-action:${userId}:${importId}:${itemId}:query`)
+            .setLabel("Query GameDB")
+            .setStyle(ButtonStyle.Primary));
+        const secondaryRow = new ActionRowBuilder().addComponents(new ButtonBuilder()
             .setCustomId(`comp-import-action:${userId}:${importId}:${itemId}:manual`)
             .setLabel("Enter GameDB ID")
             .setStyle(ButtonStyle.Primary), new ButtonBuilder()
@@ -1206,8 +1463,9 @@ let GameCompletionCommands = class GameCompletionCommands {
             .setCustomId(`comp-import-action:${userId}:${importId}:${itemId}:pause`)
             .setLabel("Pause")
             .setStyle(ButtonStyle.Secondary));
+        return [primaryRow, secondaryRow];
     }
-    async respondToImportInteraction(interaction, payload) {
+    async respondToImportInteraction(interaction, payload, ephemeral) {
         if ("isMessageComponent" in interaction && interaction.isMessageComponent()) {
             if (interaction.deferred || interaction.replied) {
                 await interaction.editReply(payload);
@@ -1219,17 +1477,43 @@ let GameCompletionCommands = class GameCompletionCommands {
         }
         await safeReply(interaction, {
             ...payload,
-            flags: MessageFlags.Ephemeral,
+            flags: ephemeral ? MessageFlags.Ephemeral : undefined,
         });
+    }
+    isInteractionEphemeral(interaction) {
+        const flags = interaction.message?.flags;
+        return Boolean(flags && flags.has(MessageFlags.Ephemeral));
+    }
+    async editImportPrompt(interaction, content) {
+        const payload = {
+            content,
+            components: [],
+            embeds: interaction.message?.embeds?.length ? interaction.message.embeds : undefined,
+            attachments: [],
+        };
+        if (interaction.deferred || interaction.replied) {
+            await interaction.editReply(payload).catch(() => { });
+        }
+        else {
+            await interaction.update(payload).catch(() => { });
+        }
     }
     async promptCompletionatorText(interaction) {
         const channel = interaction.channel;
         const userId = interaction.user.id;
+        const ephemeral = interaction.isMessageComponent()
+            ? this.isInteractionEphemeral(interaction)
+            : true;
         if (!channel || typeof channel.awaitMessages !== "function") {
-            await safeReply(interaction, {
-                content: "Cannot prompt for input in this channel.",
-                flags: MessageFlags.Ephemeral,
-            });
+            if (interaction.isMessageComponent()) {
+                await this.editImportPrompt(interaction, "Cannot prompt for input in this channel.");
+            }
+            else {
+                await safeReply(interaction, {
+                    content: "Cannot prompt for input in this channel.",
+                    flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+                });
+            }
             return null;
         }
         const collected = await channel.awaitMessages({
@@ -1287,7 +1571,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             const yearIdx = yearIndices.get(c.completionId);
             const idxLabelRaw = `${yearIdx}.`;
             const idxLabel = idxLabelRaw.padStart(maxIndexLabelLength, " ");
-            const formattedDate = formatTableDate(c.completedAt);
+            const formattedDate = c.completedAt ? formatTableDate(c.completedAt) : "Unknown";
             const dateLabel = formattedDate.padStart(dateWidth, " ");
             const typeAbbrev = c.completionType === "Main Story"
                 ? "M"
@@ -1329,7 +1613,8 @@ let GameCompletionCommands = class GameCompletionCommands {
             let name = "";
             if (chunkIndex === 0) {
                 const count = yearCounts[yr] ?? 0;
-                name = `${yr} (${count})`;
+                const displayYear = yr === "Unknown" ? "Unknown Date" : yr;
+                name = `${displayYear} (${count})`;
             }
             embed.addFields({ name, value: content || "None", inline: false });
         };
@@ -1708,7 +1993,18 @@ let GameCompletionCommands = class GameCompletionCommands {
                 console.error("Failed to download cover image:", err);
             }
         }
-        const newGame = await Game.createGame(details.name, details.summary ?? "", imageData, details.id, details.slug ?? null, details.total_rating ?? null, details.url ?? null);
+        const newGame = await Game.createGame(details.name, details.summary ?? "", imageData, details.id, details.slug ?? null, details.total_rating ?? null, details.url ?? null).catch(async (err) => {
+            const message = String(err?.message ?? "");
+            if (!message.includes("ORA-00001")) {
+                throw err;
+            }
+            const matches = await Game.searchGames(details.name);
+            const exact = matches.find((game) => game.title.toLowerCase() === details.name.toLowerCase());
+            if (exact) {
+                return { id: exact.id, title: exact.title };
+            }
+            throw err;
+        });
         await Game.saveFullGameMetadata(newGame.id, details);
         return { gameId: newGame.id, title: details.name };
     }
@@ -1826,7 +2122,12 @@ __decorate([
     SelectMenuComponent({ id: /^comp-import-select:\d+:\d+:\d+$/ })
 ], GameCompletionCommands.prototype, "handleCompletionatorSelect", null);
 __decorate([
-    ButtonComponent({ id: /^comp-import-action:\d+:\d+:\d+:(add|update|skip|pause|manual|igdb)$/ })
+    SelectMenuComponent({ id: /^comp-import-update-fields:\d+:\d+:\d+$/ })
+], GameCompletionCommands.prototype, "handleCompletionatorUpdateFields", null);
+__decorate([
+    ButtonComponent({
+        id: /^comp-import-action:\d+:\d+:\d+:(add|update|skip|pause|manual|igdb|igdb-manual|query)$/,
+    })
 ], GameCompletionCommands.prototype, "handleCompletionatorAction", null);
 __decorate([
     Slash({

@@ -418,7 +418,7 @@ export default class Member {
           userId,
           gameId,
           type: completionType,
-          completedAt: completedAt ?? new Date(),
+          completedAt: completedAt ?? null,
           playtime: finalPlaytimeHours ?? null,
           note: noteValue,
           completionId: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
@@ -615,7 +615,7 @@ export default class Member {
     const safeLimit = Math.min(Math.max(limit, 1), 1000);
     const safeOffset = Math.max(offset, 0);
 
-    const clauses: string[] = ["c.USER_ID = :userId", "c.COMPLETED_AT IS NOT NULL"];
+    const clauses: string[] = ["c.USER_ID = :userId"];
     const binds: Record<string, any> = { userId, limit: safeLimit, offset: safeOffset };
     if (year) {
       clauses.push("EXTRACT(YEAR FROM c.COMPLETED_AT) = :year");
@@ -769,7 +769,7 @@ export default class Member {
 
   static async countCompletions(userId: string, year?: number | null, title?: string): Promise<number> {
     const connection = await getOraclePool().getConnection();
-    const clauses: string[] = ["c.USER_ID = :userId", "c.COMPLETED_AT IS NOT NULL"];
+    const clauses: string[] = ["c.USER_ID = :userId"];
     const binds: Record<string, any> = { userId };
     if (year) {
       clauses.push("EXTRACT(YEAR FROM c.COMPLETED_AT) = :year");

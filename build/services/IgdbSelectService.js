@@ -16,7 +16,7 @@ function chunkOptions(options, page) {
     const pageOptions = options.slice(start, start + PAGE_SIZE);
     return { pageOptions, totalPages };
 }
-export function createIgdbSession(ownerId, options, onSelect) {
+export function createIgdbSession(ownerId, options, onSelect, extraComponents) {
     const sessionId = `igdb-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
     const sorted = [...options].sort((a, b) => {
         const lenDiff = a.label.length - b.label.length;
@@ -24,7 +24,7 @@ export function createIgdbSession(ownerId, options, onSelect) {
             return lenDiff;
         return a.label.localeCompare(b.label);
     });
-    getSessionStore().set(sessionId, { ownerId, options: sorted, onSelect });
+    getSessionStore().set(sessionId, { ownerId, options: sorted, onSelect, extraComponents });
     return {
         sessionId,
         components: buildIgdbComponents(sessionId, 0),
@@ -59,7 +59,10 @@ export function buildIgdbComponents(sessionId, page) {
             });
         }
     }
-    return [new ActionRowBuilder().addComponents(select)];
+    return [
+        new ActionRowBuilder().addComponents(select),
+        ...(session.extraComponents ?? []),
+    ];
 }
 export function getIgdbSession(sessionId) {
     return getSessionStore().get(sessionId);
