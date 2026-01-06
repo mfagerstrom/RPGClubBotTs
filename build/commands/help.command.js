@@ -618,8 +618,8 @@ const GAMEDB_HELP_TOPICS = [
     {
         id: "view",
         label: "/gamedb view",
-        summary: "View a GameDB entry by id.",
-        syntax: "Syntax: /gamedb view game_id:<number>",
+        summary: "View a GameDB entry by id or search query.",
+        syntax: "Syntax: /gamedb view [game_id:<number>] [title:<string>]",
         notes: "Shows cover art, metadata, releases, and IGDB link when available, plus GOTM/NR-GOTM " +
             "associations: winning rounds (with thread/Reddit links) and nomination rounds with " +
             "nominator mentions.",

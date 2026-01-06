@@ -486,10 +486,7 @@ export class GameDb {
 
     const searchTerm = (query ?? "").trim();
     if (!searchTerm) {
-      await safeReply(interaction, {
-        content: "Provide a game_id or a search query.",
-        flags: MessageFlags.Ephemeral,
-      });
+      await this.runSearchFlow(interaction, "");
       return;
     }
 
