@@ -559,7 +559,7 @@ let NowPlayingCommand = class NowPlayingCommand {
         })
             .setFooter({ text: footerParts.join("\n") });
         applyGameDbThumbnail(embed);
-        const files = await this.buildNowPlayingAttachments(entries);
+        const files = await this.buildNowPlayingAttachments(entries, 6);
         await safeReply(interaction, {
             embeds: [embed],
             files,
@@ -662,16 +662,21 @@ let NowPlayingCommand = class NowPlayingCommand {
         applyGameDbThumbnail(embed);
         return { embed };
     }
-    async buildNowPlayingAttachments(entries) {
+    async buildNowPlayingAttachments(entries, maxImages = Number.POSITIVE_INFINITY) {
         const files = [buildGameDbThumbAttachment()];
         const seen = new Set();
+        let imageCount = 0;
         for (const entry of entries) {
             if (!entry.gameId || seen.has(entry.gameId))
                 continue;
             seen.add(entry.gameId);
             const game = await Game.getGameById(entry.gameId);
             if (game?.imageData) {
+                if (imageCount >= maxImages) {
+                    break;
+                }
                 files.push(new AttachmentBuilder(game.imageData, { name: `now_playing_${entry.gameId}.png` }));
+                imageCount += 1;
             }
         }
         return files;

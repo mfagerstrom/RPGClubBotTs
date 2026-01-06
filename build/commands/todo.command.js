@@ -27,11 +27,6 @@ function buildGameDbThumbAttachment() {
 function applyGameDbThumbnail(embed) {
     return embed.setThumbnail(`attachment://${GAME_DB_THUMB_NAME}`);
 }
-function formatDate(value) {
-    if (!value)
-        return "n/a";
-    return value.toISOString().split("T")[0] ?? "n/a";
-}
 function formatTodoLines(items) {
     const lines = [];
     const labelLengths = items.map((item) => `[${item.todoId}]`.length);

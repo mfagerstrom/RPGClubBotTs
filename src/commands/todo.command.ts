@@ -59,11 +59,6 @@ function applyGameDbThumbnail(embed: EmbedBuilder): EmbedBuilder {
   return embed.setThumbnail(`attachment://${GAME_DB_THUMB_NAME}`);
 }
 
-function formatDate(value: Date | null): string {
-  if (!value) return "n/a";
-  return value.toISOString().split("T")[0] ?? "n/a";
-}
-
 function formatTodoLines(items: ITodoItem[]): string[] {
   const lines: string[] = [];
   const labelLengths: number[] = items.map((item) => `[${item.todoId}]`.length);
