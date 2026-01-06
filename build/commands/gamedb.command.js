@@ -17,6 +17,8 @@ import Game from "../classes/Game.js";
 import axios from "axios"; // For downloading image attachments
 import { igdbService } from "../services/IgdbService.js";
 import { createIgdbSession, } from "../services/IgdbSelectService.js";
+import Member from "../classes/Member.js";
+import { COMPLETION_TYPES, parseCompletionDateInput, } from "./profile.command.js";
 const GAME_SEARCH_PAGE_SIZE = 25;
 const GAME_SEARCH_SESSIONS = new Map();
 function isUniqueConstraintError(err) {
@@ -30,6 +32,8 @@ function isUnknownWebhookError(err) {
 const GAME_DB_THUMB_NAME = "gameDB.png";
 const GAME_DB_THUMB_PATH = path.join(process.cwd(), "src", "assets", "images", GAME_DB_THUMB_NAME);
 const gameDbThumbBuffer = readFileSync(GAME_DB_THUMB_PATH);
+const MAX_COMPLETION_NOTE_LEN = 500;
+const MAX_NOW_PLAYING_NOTE_LEN = 500;
 function buildGameDbThumbAttachment() {
     return new AttachmentBuilder(gameDbThumbBuffer, { name: GAME_DB_THUMB_NAME });
 }
@@ -337,9 +341,13 @@ let GameDb = class GameDb {
             });
             return;
         }
+        const includeActions = !("isMessageComponent" in interaction) ||
+            !interaction.isMessageComponent();
+        const components = includeActions ? [this.buildGameProfileActionRow(gameId)] : [];
         await safeReply(interaction, {
             embeds: profile.embeds,
             files: profile.files,
+            components: components.length ? components : undefined,
         });
     }
     async buildGameProfile(gameId, interaction) {
@@ -536,6 +544,250 @@ let GameDb = class GameDb {
             return null;
         }
     }
+    buildGameProfileActionRow(gameId) {
+        const addNowPlaying = new ButtonBuilder()
+            .setCustomId(`gamedb-action:nowplaying:${gameId}`)
+            .setLabel("Add to Now Playing List")
+            .setStyle(ButtonStyle.Primary);
+        const addCompletion = new ButtonBuilder()
+            .setCustomId(`gamedb-action:completion:${gameId}`)
+            .setLabel("Add Completion")
+            .setStyle(ButtonStyle.Success);
+        return new ActionRowBuilder().addComponents(addNowPlaying, addCompletion);
+    }
+    async handleGameDbAction(interaction) {
+        const [, action, gameIdRaw] = interaction.customId.split(":");
+        const gameId = Number(gameIdRaw);
+        if (!Number.isInteger(gameId) || gameId <= 0) {
+            await interaction.reply({
+                content: "Invalid GameDB id.",
+                flags: MessageFlags.Ephemeral,
+            });
+            return;
+        }
+        try {
+            await interaction.deferUpdate();
+        }
+        catch {
+            // ignore
+        }
+        const game = await Game.getGameById(gameId);
+        if (!game) {
+            await interaction.editReply({
+                content: `No game found with ID ${gameId}.`,
+                embeds: [],
+                components: [],
+            }).catch(() => { });
+            return;
+        }
+        if (action === "nowplaying") {
+            await this.runNowPlayingWizard(interaction, gameId, game.title);
+            return;
+        }
+        await this.runCompletionWizard(interaction, gameId, game.title);
+    }
+    async runNowPlayingWizard(interaction, gameId, gameTitle) {
+        const baseEmbed = this.getWizardBaseEmbed(interaction, "Now Playing Wizard");
+        let logHistory = "";
+        const updateEmbed = async (log) => {
+            if (log) {
+                logHistory += `${log}\n`;
+            }
+            if (logHistory.length > 3500) {
+                logHistory = "..." + logHistory.slice(logHistory.length - 3500);
+            }
+            const embed = this.buildWizardEmbed(baseEmbed, logHistory || "Processing...");
+            await interaction.editReply({ embeds: [embed], components: [] }).catch(() => { });
+        };
+        const wizardPrompt = async (question) => {
+            await updateEmbed(`\n❓ **${question}**`);
+            const channel = interaction.channel;
+            if (!channel || typeof channel.awaitMessages !== "function") {
+                await updateEmbed("❌ Cannot prompt for input in this channel.");
+                return null;
+            }
+            const collected = await channel.awaitMessages({
+                filter: (m) => m.author.id === interaction.user.id,
+                max: 1,
+                time: 120_000,
+            }).catch(() => null);
+            const first = collected?.first();
+            if (!first) {
+                await updateEmbed("❌ Timed out.");
+                return null;
+            }
+            const content = first.content.trim();
+            await first.delete().catch(() => { });
+            await updateEmbed(`> *${content}*`);
+            if (/^cancel$/i.test(content)) {
+                await updateEmbed("❌ Cancelled by user.");
+                return null;
+            }
+            return content;
+        };
+        await updateEmbed(`✅ Starting for **${gameTitle}**`);
+        let note = null;
+        while (true) {
+            const response = await wizardPrompt("Optional note? Type it, or reply `skip` to leave blank.");
+            if (response === null)
+                return;
+            if (/^skip$/i.test(response)) {
+                note = null;
+                break;
+            }
+            if (response.length > MAX_NOW_PLAYING_NOTE_LEN) {
+                await updateEmbed(`❌ Note must be ${MAX_NOW_PLAYING_NOTE_LEN} characters or fewer.`);
+                continue;
+            }
+            note = response;
+            break;
+        }
+        try {
+            await Member.addNowPlaying(interaction.user.id, gameId, note);
+            await updateEmbed(`✅ Added **${gameTitle}** to your Now Playing list.`);
+        }
+        catch (err) {
+            await updateEmbed(`❌ Failed to add: ${err?.message ?? String(err)}`);
+        }
+    }
+    async runCompletionWizard(interaction, gameId, gameTitle) {
+        const baseEmbed = this.getWizardBaseEmbed(interaction, "Completion Wizard");
+        let logHistory = "";
+        const updateEmbed = async (log) => {
+            if (log) {
+                logHistory += `${log}\n`;
+            }
+            if (logHistory.length > 3500) {
+                logHistory = "..." + logHistory.slice(logHistory.length - 3500);
+            }
+            const embed = this.buildWizardEmbed(baseEmbed, logHistory || "Processing...");
+            await interaction.editReply({ embeds: [embed], components: [] }).catch(() => { });
+        };
+        const wizardPrompt = async (question) => {
+            await updateEmbed(`\n❓ **${question}**`);
+            const channel = interaction.channel;
+            if (!channel || typeof channel.awaitMessages !== "function") {
+                await updateEmbed("❌ Cannot prompt for input in this channel.");
+                return null;
+            }
+            const collected = await channel.awaitMessages({
+                filter: (m) => m.author.id === interaction.user.id,
+                max: 1,
+                time: 120_000,
+            }).catch(() => null);
+            const first = collected?.first();
+            if (!first) {
+                await updateEmbed("❌ Timed out.");
+                return null;
+            }
+            const content = first.content.trim();
+            await first.delete().catch(() => { });
+            await updateEmbed(`> *${content}*`);
+            if (/^cancel$/i.test(content)) {
+                await updateEmbed("❌ Cancelled by user.");
+                return null;
+            }
+            return content;
+        };
+        await updateEmbed(`✅ Starting for **${gameTitle}**`);
+        let completionType = null;
+        while (true) {
+            const response = await wizardPrompt(`Completion type? (${COMPLETION_TYPES.join(" / ")})`);
+            if (response === null)
+                return;
+            const normalized = COMPLETION_TYPES.find((t) => t.toLowerCase() === response.toLowerCase());
+            if (!normalized) {
+                await updateEmbed("❌ Invalid completion type.");
+                continue;
+            }
+            completionType = normalized;
+            break;
+        }
+        let completedAt = null;
+        while (true) {
+            const response = await wizardPrompt("Completion date? (YYYY-MM-DD, `unknown`, or `today`)");
+            if (response === null)
+                return;
+            if (/^unknown$/i.test(response)) {
+                completedAt = null;
+                break;
+            }
+            if (/^today$/i.test(response)) {
+                completedAt = new Date();
+                break;
+            }
+            try {
+                completedAt = parseCompletionDateInput(response);
+                break;
+            }
+            catch (err) {
+                await updateEmbed(`❌ ${err?.message ?? "Invalid date."}`);
+            }
+        }
+        let playtime = null;
+        while (true) {
+            const response = await wizardPrompt("Final playtime in hours? (e.g., 42.5, or `skip`)");
+            if (response === null)
+                return;
+            if (/^skip$/i.test(response)) {
+                playtime = null;
+                break;
+            }
+            const num = Number(response);
+            if (Number.isNaN(num) || num < 0) {
+                await updateEmbed("❌ Playtime must be a non-negative number.");
+                continue;
+            }
+            playtime = num;
+            break;
+        }
+        let note = null;
+        while (true) {
+            const response = await wizardPrompt("Optional note? Type it, or reply `skip` to leave blank.");
+            if (response === null)
+                return;
+            if (/^skip$/i.test(response)) {
+                note = null;
+                break;
+            }
+            if (response.length > MAX_COMPLETION_NOTE_LEN) {
+                await updateEmbed(`❌ Note must be ${MAX_COMPLETION_NOTE_LEN} characters or fewer.`);
+                continue;
+            }
+            note = response;
+            break;
+        }
+        try {
+            await Member.addCompletion({
+                userId: interaction.user.id,
+                gameId,
+                completionType: completionType ?? "Main Story",
+                completedAt,
+                finalPlaytimeHours: playtime,
+                note,
+            });
+            await Member.removeNowPlaying(interaction.user.id, gameId).catch(() => { });
+            await updateEmbed(`✅ Added completion for **${gameTitle}**.`);
+        }
+        catch (err) {
+            await updateEmbed(`❌ Failed to add completion: ${err?.message ?? String(err)}`);
+        }
+    }
+    getWizardBaseEmbed(interaction, fallbackTitle) {
+        const existing = interaction.message?.embeds?.[0];
+        if (existing) {
+            return EmbedBuilder.from(existing);
+        }
+        return new EmbedBuilder().setTitle(fallbackTitle).setColor(0x0099ff);
+    }
+    buildWizardEmbed(base, log) {
+        const embed = EmbedBuilder.from(base);
+        const baseDesc = base.data.description ?? "";
+        const divider = baseDesc ? "\n\n" : "";
+        const combined = `${baseDesc}${divider}${log}`.trim();
+        embed.setDescription(combined.slice(0, 4096));
+        return embed;
+    }
     // Helper to process release dates
     async processReleaseDates(gameId, releaseDates, platforms) {
         if (!releaseDates || !Array.isArray(releaseDates)) {
@@ -673,11 +925,12 @@ let GameDb = class GameDb {
             return;
         }
         const response = this.buildSearchResponse(sessionId, session, page);
+        const actionRow = this.buildGameProfileActionRow(gameId);
         try {
             await interaction.editReply({
                 embeds: profile.embeds,
                 files: profile.files,
-                components: response.components,
+                components: [actionRow, ...response.components],
                 content: null,
             });
         }
@@ -833,6 +1086,9 @@ __decorate([
         type: ApplicationCommandOptionType.String,
     }))
 ], GameDb.prototype, "view", null);
+__decorate([
+    ButtonComponent({ id: /^gamedb-action:(nowplaying|completion):\d+$/ })
+], GameDb.prototype, "handleGameDbAction", null);
 __decorate([
     Slash({ description: "Search for a game", name: "search" }),
     __param(0, SlashOption({
