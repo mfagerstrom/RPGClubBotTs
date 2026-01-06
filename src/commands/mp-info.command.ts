@@ -9,7 +9,7 @@ import {
 } from "discord.js";
 import { Discord, SelectMenuComponent, Slash, SlashOption } from "discordx";
 import Member, { type IMemberPlatformRecord } from "../classes/Member.js";
-import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 import { buildProfileViewPayload } from "./profile.command.js";
 
 const MAX_OPTIONS = 25;
@@ -182,8 +182,11 @@ export class MultiplayerInfoCommand {
       });
       return;
     }
-
-    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+    try {
+      await interaction.deferUpdate();
+    } catch {
+      // ignore
+    }
 
     try {
       const user = await interaction.client.users.fetch(userId);
@@ -206,9 +209,12 @@ export class MultiplayerInfoCommand {
         return;
       }
 
-      await safeReply(interaction, {
+      const components = interaction.message.components ?? [];
+      const content = interaction.message.content ?? null;
+      await safeUpdate(interaction, {
         ...result.payload,
-        flags: MessageFlags.Ephemeral,
+        components,
+        content,
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
