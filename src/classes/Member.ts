@@ -85,6 +85,7 @@ export interface IMemberNickHistory {
 }
 
 export interface IMemberNowPlayingEntry {
+  gameId: number;
   title: string;
   threadId: string | null;
   note: string | null;
@@ -157,15 +158,17 @@ export default class Member {
 
   static async getNowPlaying(
     userId: string,
-  ): Promise<{ title: string; threadId: string | null; note: string | null }[]> {
+  ): Promise<IMemberNowPlayingEntry[]> {
     const connection = await getOraclePool().getConnection();
     try {
       const res = await connection.execute<{
+        GAME_ID: number;
         TITLE: string;
         THREAD_ID: string | null;
         NOTE: string | null;
       }>(
-        `SELECT g.TITLE,
+        `SELECT g.GAME_ID,
+                g.TITLE,
                 COALESCE(
                   (
                     SELECT MIN(tgl.THREAD_ID)
@@ -189,6 +192,7 @@ export default class Member {
       );
       return (res.rows ?? [])
         .map((r) => ({
+          gameId: Number(r.GAME_ID),
           title: r.TITLE,
           threadId: r.THREAD_ID ?? null,
           note: r.NOTE ?? null,
@@ -206,6 +210,7 @@ export default class Member {
         USER_ID: string;
         USERNAME: string | null;
         GLOBAL_NAME: string | null;
+        GAME_ID: number;
         TITLE: string;
         THREAD_ID: string | null;
         NOTE: string | null;
@@ -213,6 +218,7 @@ export default class Member {
         `SELECT u.USER_ID,
                 ru.USERNAME,
                 ru.GLOBAL_NAME,
+                g.GAME_ID,
                 g.TITLE,
                 COALESCE(
                   (
@@ -256,6 +262,7 @@ export default class Member {
 
         if (record.entries.length < MAX_NOW_PLAYING) {
           record.entries.push({
+            gameId: Number(row.GAME_ID),
             title: row.TITLE,
             threadId: row.THREAD_ID ?? null,
             note: row.NOTE ?? null,

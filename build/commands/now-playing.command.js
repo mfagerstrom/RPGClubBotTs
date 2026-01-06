@@ -31,23 +31,6 @@ function formatEntry(entry, guildId) {
     }
     return entry.title;
 }
-function chunkLines(lines, maxLength = 3800) {
-    const chunks = [];
-    let current = "";
-    for (const line of lines) {
-        const next = current.length ? `${current}\n${line}` : line;
-        if (next.length > maxLength && current.length > 0) {
-            chunks.push(current);
-            current = line;
-            continue;
-        }
-        current = next;
-    }
-    if (current.length) {
-        chunks.push(current);
-    }
-    return chunks;
-}
 function buildGameDbThumbAttachment() {
     return new AttachmentBuilder(gameDbThumbBuffer, { name: GAME_DB_THUMB_NAME });
 }
@@ -549,12 +532,12 @@ let NowPlayingCommand = class NowPlayingCommand {
         let hasLinks = false;
         let hasUnlinked = false;
         const lines = [];
-        entries.forEach((entry, idx) => {
+        entries.forEach((entry) => {
             if (entry.threadId)
                 hasLinks = true;
             else
                 hasUnlinked = true;
-            lines.push(`${idx + 1}. ${formatEntry(entry, interaction.guildId)}`);
+            lines.push(formatEntry(entry, interaction.guildId));
             if (entry.note) {
                 lines.push(`> ${entry.note}`);
             }
@@ -576,10 +559,42 @@ let NowPlayingCommand = class NowPlayingCommand {
         })
             .setFooter({ text: footerParts.join("\n") });
         applyGameDbThumbnail(embed);
+        const files = await this.buildNowPlayingAttachments(entries);
         await safeReply(interaction, {
             embeds: [embed],
-            files: [buildGameDbThumbAttachment()],
+            files,
             flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+        });
+    }
+    async handleNowPlayingAllSelect(interaction) {
+        const selectedUserId = interaction.values?.[0];
+        if (!selectedUserId)
+            return;
+        const entries = await Member.getNowPlaying(selectedUserId);
+        const target = (await interaction.client.users.fetch(selectedUserId).catch(() => null)) ??
+            interaction.user;
+        const lists = await Member.getAllNowPlaying();
+        const selectRow = lists.length
+            ? this.buildNowPlayingMemberSelect(lists, selectedUserId)
+            : null;
+        if (!entries.length) {
+            const embed = new EmbedBuilder()
+                .setTitle("Now Playing - Everyone")
+                .setDescription(`No Now Playing entries found for <@${selectedUserId}>.`);
+            applyGameDbThumbnail(embed);
+            await interaction.update({
+                embeds: [embed],
+                components: selectRow ? [selectRow] : [],
+                files: [buildGameDbThumbAttachment()],
+            });
+            return;
+        }
+        const { embed } = this.buildSingleNowPlayingEmbed(target, entries, interaction.guildId);
+        const files = await this.buildNowPlayingAttachments(entries);
+        await interaction.update({
+            embeds: [embed],
+            components: selectRow ? [selectRow] : [],
+            files,
         });
     }
     async showEveryone(interaction, ephemeral) {
@@ -591,22 +606,42 @@ let NowPlayingCommand = class NowPlayingCommand {
             });
             return;
         }
+        const sortedLists = [...lists].sort((a, b) => {
+            const nameA = (a.globalName ?? a.username ?? a.userId).toLowerCase();
+            const nameB = (b.globalName ?? b.username ?? b.userId).toLowerCase();
+            return nameA.localeCompare(nameB);
+        });
+        const lines = sortedLists.map((record) => {
+            const displayName = record.globalName ?? record.username ?? record.userId;
+            const count = record.entries.length;
+            const suffix = count === 1 ? "game" : "games";
+            return `**${displayName}**: ${count} ${suffix}`;
+        });
+        const embed = new EmbedBuilder()
+            .setTitle("Now Playing - Everyone")
+            .setDescription(lines.join("\n"));
+        applyGameDbThumbnail(embed);
+        const selectRow = this.buildNowPlayingMemberSelect(sortedLists);
+        await safeReply(interaction, {
+            embeds: [embed],
+            components: [selectRow],
+            files: [buildGameDbThumbAttachment()],
+            flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+        });
+    }
+    buildSingleNowPlayingEmbed(target, entries, guildId) {
         let hasLinks = false;
         let hasUnlinked = false;
-        const lines = lists.map((record, idx) => {
-            const displayName = record.globalName ?? record.username ?? `Member ${idx + 1}`;
-            const gameLines = [];
-            record.entries.forEach((entry) => {
-                if (entry.threadId)
-                    hasLinks = true;
-                else
-                    hasUnlinked = true;
-                gameLines.push(formatEntry(entry, interaction.guildId));
-                if (entry.note) {
-                    gameLines.push(`> ${entry.note}`);
-                }
-            });
-            return `${idx + 1}. <@${record.userId}> (${displayName})\n${gameLines.join("\n")}`;
+        const lines = [];
+        entries.forEach((entry) => {
+            if (entry.threadId)
+                hasLinks = true;
+            else
+                hasUnlinked = true;
+            lines.push(formatEntry(entry, guildId));
+            if (entry.note) {
+                lines.push(`> ${entry.note}`);
+            }
         });
         const footerParts = [];
         if (hasLinks) {
@@ -615,25 +650,52 @@ let NowPlayingCommand = class NowPlayingCommand {
         if (hasUnlinked) {
             footerParts.push("For unlinked games, feel free to add a new thread or link one to the game if it already exists.");
         }
-        const footerText = footerParts.join("\n");
-        const chunks = chunkLines(lines);
-        const embeds = chunks.slice(0, 10).map((chunk, idx) => {
-            const embed = new EmbedBuilder()
-                .setTitle(idx === 0 ? "Now Playing - Everyone" : "Now Playing (continued)")
-                .setDescription(chunk)
-                .setFooter(footerText ? { text: footerText } : null);
-            applyGameDbThumbnail(embed);
-            return embed;
+        const displayName = target.displayName ?? target.username ?? "User";
+        const embed = new EmbedBuilder()
+            .setTitle(`${displayName}'s Now Playing List`)
+            .setDescription(lines.join("\n"))
+            .setAuthor({
+            name: displayName,
+            iconURL: target.displayAvatarURL({ size: 64, forceStatic: false }),
+        })
+            .setFooter({ text: footerParts.join("\n") });
+        applyGameDbThumbnail(embed);
+        return { embed };
+    }
+    async buildNowPlayingAttachments(entries) {
+        const files = [buildGameDbThumbAttachment()];
+        const seen = new Set();
+        for (const entry of entries) {
+            if (!entry.gameId || seen.has(entry.gameId))
+                continue;
+            seen.add(entry.gameId);
+            const game = await Game.getGameById(entry.gameId);
+            if (game?.imageData) {
+                files.push(new AttachmentBuilder(game.imageData, { name: `now_playing_${entry.gameId}.png` }));
+            }
+        }
+        return files;
+    }
+    buildNowPlayingMemberSelect(lists, selectedUserId) {
+        const sorted = [...lists].sort((a, b) => {
+            const nameA = (a.globalName ?? a.username ?? a.userId).toLowerCase();
+            const nameB = (b.globalName ?? b.username ?? b.userId).toLowerCase();
+            return nameA.localeCompare(nameB);
         });
-        const truncated = chunks.length > embeds.length;
-        await safeReply(interaction, {
-            content: truncated
-                ? "Showing the first set of results (truncated to Discord embed limits)."
-                : undefined,
-            embeds,
-            files: [buildGameDbThumbAttachment()],
-            flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+        const options = sorted.slice(0, 25).map((record) => {
+            const displayName = record.globalName ?? record.username ?? record.userId;
+            return {
+                label: displayName.slice(0, 100),
+                value: record.userId,
+                description: `${record.entries.length} ${record.entries.length === 1 ? "game" : "games"}`,
+                default: record.userId === selectedUserId,
+            };
         });
+        const select = new StringSelectMenuBuilder()
+            .setCustomId("nowplaying-all-select")
+            .setPlaceholder("View a member's Now Playing list")
+            .addOptions(options);
+        return new ActionRowBuilder().addComponents(select);
     }
     async startNowPlayingIgdbImport(interaction, session) {
         try {
@@ -797,6 +859,9 @@ __decorate([
 __decorate([
     ButtonComponent({ id: /^np-remove:[^:]+:\d+$/ })
 ], NowPlayingCommand.prototype, "handleRemoveNowPlayingButton", null);
+__decorate([
+    SelectMenuComponent({ id: "nowplaying-all-select" })
+], NowPlayingCommand.prototype, "handleNowPlayingAllSelect", null);
 NowPlayingCommand = __decorate([
     Discord(),
     SlashGroup({ description: "Show now playing data", name: "now-playing" }),

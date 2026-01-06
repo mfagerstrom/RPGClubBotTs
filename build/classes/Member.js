@@ -43,7 +43,8 @@ export default class Member {
     static async getNowPlaying(userId) {
         const connection = await getOraclePool().getConnection();
         try {
-            const res = await connection.execute(`SELECT g.TITLE,
+            const res = await connection.execute(`SELECT g.GAME_ID,
+                g.TITLE,
                 COALESCE(
                   (
                     SELECT MIN(tgl.THREAD_ID)
@@ -64,6 +65,7 @@ export default class Member {
           ORDER BY u.ADDED_AT DESC, u.ENTRY_ID DESC`, { userId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
             return (res.rows ?? [])
                 .map((r) => ({
+                gameId: Number(r.GAME_ID),
                 title: r.TITLE,
                 threadId: r.THREAD_ID ?? null,
                 note: r.NOTE ?? null,
@@ -80,6 +82,7 @@ export default class Member {
             const res = await connection.execute(`SELECT u.USER_ID,
                 ru.USERNAME,
                 ru.GLOBAL_NAME,
+                g.GAME_ID,
                 g.TITLE,
                 COALESCE(
                   (
@@ -118,6 +121,7 @@ export default class Member {
                 }
                 if (record.entries.length < MAX_NOW_PLAYING) {
                     record.entries.push({
+                        gameId: Number(row.GAME_ID),
                         title: row.TITLE,
                         threadId: row.THREAD_ID ?? null,
                         note: row.NOTE ?? null,
@@ -378,7 +382,10 @@ export default class Member {
         const safeOffset = Math.max(offset, 0);
         const clauses = ["c.USER_ID = :userId"];
         const binds = { userId, limit: safeLimit, offset: safeOffset };
-        if (year) {
+        if (year === "unknown") {
+            clauses.push("c.COMPLETED_AT IS NULL");
+        }
+        else if (typeof year === "number") {
             clauses.push("EXTRACT(YEAR FROM c.COMPLETED_AT) = :year");
             binds.year = year;
         }
@@ -495,7 +502,10 @@ export default class Member {
         const connection = await getOraclePool().getConnection();
         const clauses = ["c.USER_ID = :userId"];
         const binds = { userId };
-        if (year) {
+        if (year === "unknown") {
+            clauses.push("c.COMPLETED_AT IS NULL");
+        }
+        else if (typeof year === "number") {
             clauses.push("EXTRACT(YEAR FROM c.COMPLETED_AT) = :year");
             binds.year = year;
         }

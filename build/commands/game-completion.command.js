@@ -94,15 +94,33 @@ let GameCompletionCommands = class GameCompletionCommands {
             announce,
         });
     }
-    async completionList(showAll, year, query, member, showInChat, interaction) {
+    async completionList(showAll, yearRaw, query, member, showInChat, interaction) {
         const ephemeral = !showInChat;
         await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         if (showAll) {
             await this.renderCompletionLeaderboard(interaction, ephemeral);
             return;
         }
+        let yearFilter = null;
+        if (yearRaw) {
+            const trimmed = yearRaw.trim();
+            if (trimmed.toLowerCase() === "unknown") {
+                yearFilter = "unknown";
+            }
+            else {
+                const parsed = Number(trimmed);
+                if (!Number.isInteger(parsed) || parsed <= 0) {
+                    await safeReply(interaction, {
+                        content: "Year must be a valid integer (e.g., 2024) or 'unknown'.",
+                        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+                    });
+                    return;
+                }
+                yearFilter = parsed;
+            }
+        }
         const targetUserId = member ? member.id : interaction.user.id;
-        await this.renderCompletionPage(interaction, targetUserId, 0, year ?? null, ephemeral, query);
+        await this.renderCompletionPage(interaction, targetUserId, 0, yearFilter, ephemeral, query);
     }
     async completionEdit(query, year, interaction) {
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
@@ -879,7 +897,7 @@ let GameCompletionCommands = class GameCompletionCommands {
         const page = Number(interaction.values[0]);
         if (Number.isNaN(page))
             return;
-        const year = yearRaw ? Number(yearRaw) : null;
+        const year = this.parseCompletionYearFilter(yearRaw);
         const ephemeral = interaction.message?.flags?.has(MessageFlags.Ephemeral) ?? true;
         try {
             await interaction.deferUpdate();
@@ -888,7 +906,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             // ignore
         }
         if (mode === "list") {
-            await this.renderCompletionPage(interaction, ownerId, page, Number.isNaN(year ?? NaN) ? null : year, ephemeral, query);
+            await this.renderCompletionPage(interaction, ownerId, page, year, ephemeral, query);
         }
         else {
             await this.renderSelectionPage(interaction, ownerId, page, mode, year, query);
@@ -913,7 +931,7 @@ let GameCompletionCommands = class GameCompletionCommands {
         if (Number.isNaN(page))
             return;
         const nextPage = dir === "next" ? page + 1 : Math.max(page - 1, 0);
-        const year = yearRaw ? Number(yearRaw) : null;
+        const year = this.parseCompletionYearFilter(yearRaw);
         const ephemeral = interaction.message?.flags?.has(MessageFlags.Ephemeral) ?? true;
         try {
             await interaction.deferUpdate();
@@ -922,7 +940,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             // ignore
         }
         if (mode === "list") {
-            await this.renderCompletionPage(interaction, ownerId, nextPage, Number.isNaN(year ?? NaN) ? null : year, ephemeral, query);
+            await this.renderCompletionPage(interaction, ownerId, nextPage, year, ephemeral, query);
         }
         else {
             await this.renderSelectionPage(interaction, ownerId, nextPage, mode, year, query);
@@ -969,6 +987,17 @@ let GameCompletionCommands = class GameCompletionCommands {
         const sessionId = `comp-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
         completionAddSessions.set(sessionId, ctx);
         return sessionId;
+    }
+    parseCompletionYearFilter(value) {
+        if (!value)
+            return null;
+        const trimmed = value.trim();
+        if (!trimmed)
+            return null;
+        if (trimmed.toLowerCase() === "unknown")
+            return "unknown";
+        const parsed = Number(trimmed);
+        return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
     }
     async fetchCsv(url) {
         try {
@@ -1297,7 +1326,6 @@ let GameCompletionCommands = class GameCompletionCommands {
         if (!interaction.deferred && !interaction.replied) {
             await interaction.deferUpdate().catch(() => { });
         }
-        const ephemeral = this.isInteractionEphemeral(interaction);
         let searchTerm = item.gameTitle;
         while (true) {
             await interaction.editReply({
@@ -1543,13 +1571,20 @@ let GameCompletionCommands = class GameCompletionCommands {
             title: query,
         });
         allCompletions.sort((a, b) => {
-            const dateA = a.completedAt ? a.completedAt.getTime() : 0;
-            const dateB = b.completedAt ? b.completedAt.getTime() : 0;
-            const yearA = a.completedAt ? a.completedAt.getFullYear() : 0;
-            const yearB = b.completedAt ? b.completedAt.getFullYear() : 0;
+            const yearA = a.completedAt ? a.completedAt.getFullYear() : null;
+            const yearB = b.completedAt ? b.completedAt.getFullYear() : null;
+            if (yearA == null && yearB == null) {
+                return a.title.localeCompare(b.title);
+            }
+            if (yearA == null)
+                return 1;
+            if (yearB == null)
+                return -1;
             if (yearA !== yearB) {
                 return yearB - yearA;
             }
+            const dateA = a.completedAt ? a.completedAt.getTime() : 0;
+            const dateB = b.completedAt ? b.completedAt.getTime() : 0;
             return dateA - dateB;
         });
         if (!allCompletions.length)
@@ -1571,16 +1606,17 @@ let GameCompletionCommands = class GameCompletionCommands {
             const yearIdx = yearIndices.get(c.completionId);
             const idxLabelRaw = `${yearIdx}.`;
             const idxLabel = idxLabelRaw.padStart(maxIndexLabelLength, " ");
-            const formattedDate = c.completedAt ? formatTableDate(c.completedAt) : "Unknown";
-            const dateLabel = formattedDate.padStart(dateWidth, " ");
+            const dateLabel = c.completedAt
+                ? formatTableDate(c.completedAt).padStart(dateWidth, " ")
+                : "";
             const typeAbbrev = c.completionType === "Main Story"
                 ? "M"
                 : c.completionType === "Main Story + Side Content"
                     ? "M+S"
                     : "C";
             const idxBlock = `\`${idxLabel}\``;
-            const dateBlock = `\`${dateLabel}\``;
-            const line = `${idxBlock} ${dateBlock} **${c.title}** (${typeAbbrev})`;
+            const dateBlock = dateLabel ? `\`${dateLabel}\`` : "";
+            const line = `${idxBlock} ${dateBlock} **${c.title}** (${typeAbbrev})`.replace(/\s{2,}/g, " ");
             acc[yr].push(line);
             if (c.note) {
                 acc[yr].push(`> ${c.note}`);
@@ -1665,6 +1701,13 @@ let GameCompletionCommands = class GameCompletionCommands {
             : await interaction.client.users.fetch(userId).catch(() => interaction.user);
         const result = await this.buildCompletionEmbed(userId, page, year, user, query);
         if (!result) {
+            if (year === "unknown") {
+                await safeReply(interaction, {
+                    content: "You have no recorded completions with unknown dates.",
+                    flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+                });
+                return;
+            }
             await safeReply(interaction, {
                 content: year
                     ? `You have no recorded completions for ${year}.`
@@ -1674,7 +1717,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             return;
         }
         const { embed, attachment, totalPages, safePage } = result;
-        const yearPart = year ? String(year) : "";
+        const yearPart = year == null ? "" : String(year);
         const queryPart = query ? `:${query.slice(0, 50)}` : "";
         const components = [];
         if (totalPages > 1) {
@@ -1772,20 +1815,21 @@ let GameCompletionCommands = class GameCompletionCommands {
                     default: i === safePage,
                 });
             }
+            const yearPart = year == null ? "" : String(year);
             const pageSelect = new StringSelectMenuBuilder()
-                .setCustomId(`comp-page-select:${userId}:${year ?? ""}:${mode}${queryPart}`)
+                .setCustomId(`comp-page-select:${userId}:${yearPart}:${mode}${queryPart}`)
                 .setPlaceholder(`Page ${safePage + 1} of ${totalPages}`)
                 .addOptions(options);
             components.push(new ActionRowBuilder().addComponents(pageSelect));
             const prevDisabled = safePage <= 0;
             const nextDisabled = safePage >= totalPages - 1;
             const prev = new ButtonBuilder()
-                .setCustomId(`comp-${mode}-page:${userId}:${year ?? ""}:${safePage}:prev${queryPart}`)
+                .setCustomId(`comp-${mode}-page:${userId}:${yearPart}:${safePage}:prev${queryPart}`)
                 .setLabel("Previous")
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(prevDisabled);
             const next = new ButtonBuilder()
-                .setCustomId(`comp-${mode}-page:${userId}:${year ?? ""}:${safePage}:next${queryPart}`)
+                .setCustomId(`comp-${mode}-page:${userId}:${yearPart}:${safePage}:next${queryPart}`)
                 .setLabel("Next")
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(nextDisabled);
@@ -2067,10 +2111,10 @@ __decorate([
         type: ApplicationCommandOptionType.Boolean,
     })),
     __param(1, SlashOption({
-        description: "Filter to a specific year (optional)",
+        description: "Filter by year or 'unknown' (optional)",
         name: "year",
         required: false,
-        type: ApplicationCommandOptionType.Integer,
+        type: ApplicationCommandOptionType.String,
     })),
     __param(2, SlashOption({
         description: "Filter by title (optional)",
