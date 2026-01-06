@@ -13,6 +13,7 @@ import Member from "../classes/Member.js";
 import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 import { buildProfileViewPayload } from "./profile.command.js";
 const MAX_OPTIONS = 25;
+const GUILD_FETCH_CHUNK_SIZE = 100;
 function hasAnyPlatform(record, filters) {
     if (filters.steam && record.steamUrl)
         return true;
@@ -36,6 +37,35 @@ function formatPlatforms(record, filters) {
         platforms.push("Switch");
     return platforms.join(", ");
 }
+function chunkIds(ids, size) {
+    const chunks = [];
+    for (let i = 0; i < ids.length; i += size) {
+        chunks.push(ids.slice(i, i + size));
+    }
+    return chunks;
+}
+async function filterActiveGuildMembers(members, guild) {
+    if (!guild || members.length === 0)
+        return members;
+    const ids = members.map((member) => member.userId);
+    const chunks = chunkIds(ids, GUILD_FETCH_CHUNK_SIZE);
+    const present = new Set();
+    for (const chunk of chunks) {
+        try {
+            const fetched = await guild.members.fetch({ user: chunk });
+            fetched.forEach((member) => present.add(member.id));
+        }
+        catch {
+            // ignore fetch errors and fall back to cached entries
+            chunk.forEach((id) => {
+                if (guild.members.cache.has(id)) {
+                    present.add(id);
+                }
+            });
+        }
+    }
+    return members.filter((member) => present.has(member.userId));
+}
 function buildSummaryEmbed(members, filters) {
     const lines = members.map((member, idx) => {
         const platforms = formatPlatforms(member, filters);
@@ -45,7 +75,8 @@ function buildSummaryEmbed(members, filters) {
         .setTitle("Member Multiplayer Info")
         .setDescription(lines.join("\n") || "No member platform data found.")
         .setFooter({
-        text: "Want to list your multiplayer info? Use /profile edit\n\nSelect a member below to view a profile.",
+        text: "Want to list your multiplayer info? Use /profile edit\n\n" +
+            "Select a member below to view a profile.",
     });
     const options = members.slice(0, MAX_OPTIONS).map((member) => {
         const name = member.globalName ?? member.username ?? "Unknown member";
@@ -96,14 +127,15 @@ let MultiplayerInfoCommand = class MultiplayerInfoCommand {
         }
         const members = await Member.getMembersWithPlatforms();
         const filtered = members.filter((member) => hasAnyPlatform(member, filters));
-        if (!filtered.length) {
+        const activeMembers = await filterActiveGuildMembers(filtered, interaction.guild);
+        if (!activeMembers.length) {
             await safeReply(interaction, {
                 content: "No members match the selected platforms.",
                 flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
         }
-        const { embed, components, note } = buildSummaryEmbed(filtered, filters);
+        const { embed, components, note } = buildSummaryEmbed(activeMembers, filters);
         await safeReply(interaction, {
             content: note,
             embeds: [embed],
