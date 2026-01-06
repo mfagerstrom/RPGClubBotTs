@@ -34,14 +34,18 @@ function formatDate(value) {
 }
 function formatTodoLines(items) {
     const lines = [];
+    const labelLengths = items.map((item) => `[${item.todoId}]`.length);
+    const maxLabelLength = labelLengths.length
+        ? Math.max(...labelLengths)
+        : 0;
     for (const item of items) {
-        const status = item.isCompleted ? "Completed" : "Open";
-        lines.push(`- **#${item.todoId}** ${item.title} (${status})`);
+        const statusSuffix = item.isCompleted ? " (Completed)" : "";
+        const labelRaw = `[${item.todoId}]`;
+        const labelPadded = labelRaw.padStart(maxLabelLength, " ");
+        const labelBlock = `\`${labelPadded}\``;
+        lines.push(`**${labelBlock}** ${item.title}${statusSuffix}`);
         if (item.details) {
             lines.push(`> ${item.details}`);
-        }
-        if (item.isCompleted) {
-            lines.push(`> Completed: ${formatDate(item.completedAt)}`);
         }
     }
     return lines;
@@ -70,10 +74,13 @@ function buildTodoListEmbed(items, includeCompleted) {
     const description = buildTodoDescription(items, includeCompleted);
     const openCount = items.filter((item) => !item.isCompleted).length;
     const completedCount = items.filter((item) => item.isCompleted).length;
-    const title = includeCompleted ? "Bot TODOs" : "Open Bot TODOs";
-    const footerText = `${openCount} open | ${completedCount} completed`;
+    const title = includeCompleted ? "Bot Development TODOs" : "Open Bot Development TODOs";
+    const footerText = completedCount > 0
+        ? `${completedCount} completed`
+        : `${openCount} open`;
     const embed = new EmbedBuilder()
         .setTitle(title)
+        .setColor(0x3498db)
         .setDescription(description)
         .setFooter({ text: footerText });
     applyGameDbThumbnail(embed);

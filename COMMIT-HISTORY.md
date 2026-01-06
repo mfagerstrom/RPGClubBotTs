@@ -1,3 +1,9 @@
+2026-01-05 - Commit ID: 42bb3e6 - todo 62: Allow /gamedb view to search all
+2026-01-05 - Commit ID: b027f5d - feat: Add "Add to Now Playing" and "Add Completion" buttons below gamedb view embed
+2026-01-05 - Commit ID: e1baf67 - fix: improved embeds for /now-playing list
+2026-01-02 - Commit ID: cedf3d4 - fix: display corrections for unknown date completions
+2026-01-02 - Commit ID: 8175573 - feat: implemented completionator game completion import from csv file
+2026-01-02 - Commit ID: 9e70575 - wip: completionator.com completion csv import
 2026-01-02 - Commit ID: c867cf5 - fix: tweaked ui for /profile view's now-playing notes
 2026-01-02 - Commit ID: 6b86c6f - feat: added optional notes for game completions
 2026-01-02 - Commit ID: f43bab5 - feat: added /suggestion command
