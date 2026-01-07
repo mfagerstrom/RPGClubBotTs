@@ -194,7 +194,19 @@ export async function countTodoSummary() {
                   WHEN IS_COMPLETED = 0 AND TODO_CATEGORY = 'Defects' THEN 1
                   ELSE 0
                 END
-              ) AS OPEN_DEFECTS
+              ) AS OPEN_DEFECTS,
+              SUM(
+                CASE
+                  WHEN IS_COMPLETED = 0 AND TODO_CATEGORY = 'Blocked' THEN 1
+                  ELSE 0
+                END
+              ) AS OPEN_BLOCKED,
+              SUM(
+                CASE
+                  WHEN IS_COMPLETED = 0 AND TODO_CATEGORY = 'Refactoring' THEN 1
+                  ELSE 0
+                END
+              ) AS OPEN_REFACTORING
          FROM RPG_CLUB_TODOS`, {}, { outFormat: oracledb.OUT_FORMAT_OBJECT });
         const row = result.rows?.[0];
         return {
@@ -204,6 +216,8 @@ export async function countTodoSummary() {
                 newFeatures: Number(row?.OPEN_NEW_FEATURES ?? 0),
                 improvements: Number(row?.OPEN_IMPROVEMENTS ?? 0),
                 defects: Number(row?.OPEN_DEFECTS ?? 0),
+                blocked: Number(row?.OPEN_BLOCKED ?? 0),
+                refactoring: Number(row?.OPEN_REFACTORING ?? 0),
             },
         };
     }

@@ -43,7 +43,7 @@ const MAX_LIST_ITEMS: number = 100;
 const MAX_TODO_DESCRIPTION: number = 3800;
 const MAX_SUGGESTION_OPTIONS: number = 25;
 const DEFAULT_TODO_CATEGORY = "Improvements";
-const TODO_CATEGORIES = ["New Features", "Improvements", "Defects"] as const;
+const TODO_CATEGORIES = ["New Features", "Improvements", "Defects", "Blocked", "Refactoring"] as const;
 const TODO_SIZES = ["XS", "S", "M", "L", "XL"] as const;
 
 type TodoCategory = (typeof TODO_CATEGORIES)[number];
@@ -61,6 +61,8 @@ const TODO_TAB_DEFINITIONS: Array<{ id: TodoFilter; label: string }> = [
   { id: "New Features", label: "New Features" },
   { id: "Improvements", label: "Improvements" },
   { id: "Defects", label: "Defects" },
+  { id: "Blocked", label: "Blocked" },
+  { id: "Refactoring", label: "Refactoring" },
   { id: "suggestions", label: "Suggestions" },
   { id: "completed", label: "Completed" },
 ];
@@ -70,6 +72,8 @@ const TODO_TAB_OPTIONS = TODO_TAB_DEFINITIONS.map((tab) => tab.label) as [
   "New Features",
   "Improvements",
   "Defects",
+  "Blocked",
+  "Refactoring",
   "Suggestions",
   "Completed",
 ];
@@ -79,6 +83,8 @@ const TODO_TAB_LABEL_TO_FILTER: Record<(typeof TODO_TAB_OPTIONS)[number], TodoFi
   "New Features": "New Features",
   Improvements: "Improvements",
   Defects: "Defects",
+  Blocked: "Blocked",
+  Refactoring: "Refactoring",
   Suggestions: "suggestions",
   Completed: "completed",
 };
@@ -353,7 +359,7 @@ function buildAllTodoFooterText(
   summary: {
     open: number;
     completed: number;
-    openByCategory: { newFeatures: number; improvements: number; defects: number };
+    openByCategory: { newFeatures: number; improvements: number; defects: number; blocked: number; refactoring: number };
   },
   suggestionCount: number,
 ): string {
@@ -362,6 +368,8 @@ function buildAllTodoFooterText(
     `${summary.openByCategory.newFeatures} New Features`,
     `${summary.openByCategory.improvements} Improvements`,
     `${summary.openByCategory.defects} Defects`,
+    `${summary.openByCategory.blocked} Blocked`,
+    `${summary.openByCategory.refactoring} Refactoring`,
     `${suggestionCount} Suggestions`,
     `${summary.completed} Completed`,
   ].join(" | ");
@@ -780,6 +788,14 @@ export class TodoCommand {
       type: ApplicationCommandOptionType.String,
     })
     category: TodoCategory,
+    @SlashChoice(...TODO_SIZES)
+    @SlashOption({
+      description: "Effort size (XS/S/M/L/XL)",
+      name: "size",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    size: TodoSize,
     @SlashOption({
       description: "Optional details for the TODO",
       name: "details",
@@ -787,14 +803,6 @@ export class TodoCommand {
       type: ApplicationCommandOptionType.String,
     })
     details: string | undefined,
-    @SlashChoice(...TODO_SIZES)
-    @SlashOption({
-      description: "Optional effort size (XS/S/M/L/XL)",
-      name: "size",
-      required: false,
-      type: ApplicationCommandOptionType.String,
-    })
-    size: TodoSize | undefined,
     @SlashOption({
       description: "Show in chat (public) instead of ephemeral",
       name: "showinchat",
@@ -828,7 +836,7 @@ export class TodoCommand {
     }
 
     const trimmedDetails = details?.trim();
-    const finalSize = size ?? null;
+    const finalSize = size;
     const todo = await createTodo(
       trimmedTitle,
       trimmedDetails ?? null,
@@ -1023,7 +1031,7 @@ export class TodoCommand {
   }
 
   @SelectMenuComponent({
-    id: /^todo-tab:(all|New Features|Improvements|Defects|suggestions|completed):\d+:(?:any|[A-Z,]+)$/,
+    id: /^todo-tab:(all|New Features|Improvements|Defects|Blocked|Refactoring|suggestions|completed):\d+:(?:any|[A-Z,]+)$/,
   })
   async handleTodoTab(interaction: StringSelectMenuInteraction): Promise<void> {
     const [, , ownerId, sizeRaw] = interaction.customId.split(":");
@@ -1090,7 +1098,7 @@ export class TodoCommand {
   }
 
   @SelectMenuComponent({
-    id: /^todo-size:(all|New Features|Improvements|Defects|suggestions|completed):\d+:(?:any|[A-Z,]+)$/,
+    id: /^todo-size:(all|New Features|Improvements|Defects|Blocked|Refactoring|suggestions|completed):\d+:(?:any|[A-Z,]+)$/,
   })
   async handleTodoSize(interaction: StringSelectMenuInteraction): Promise<void> {
     const [, filterRaw, ownerId] = interaction.customId.split(":");
@@ -1147,7 +1155,7 @@ export class TodoCommand {
   }
 
   @SelectMenuComponent({
-    id: /^todo-complete:(all|New Features|Improvements|Defects|suggestions|completed):\d+:(?:any|[A-Z,]+)$/,
+    id: /^todo-complete:(all|New Features|Improvements|Defects|Blocked|Refactoring|suggestions|completed):\d+:(?:any|[A-Z,]+)$/,
   })
   async handleTodoComplete(interaction: StringSelectMenuInteraction): Promise<void> {
     const [, filterRaw, ownerId, sizeRaw] = interaction.customId.split(":");

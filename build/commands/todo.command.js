@@ -17,13 +17,15 @@ const MAX_LIST_ITEMS = 100;
 const MAX_TODO_DESCRIPTION = 3800;
 const MAX_SUGGESTION_OPTIONS = 25;
 const DEFAULT_TODO_CATEGORY = "Improvements";
-const TODO_CATEGORIES = ["New Features", "Improvements", "Defects"];
+const TODO_CATEGORIES = ["New Features", "Improvements", "Defects", "Blocked", "Refactoring"];
 const TODO_SIZES = ["XS", "S", "M", "L", "XL"];
 const TODO_TAB_DEFINITIONS = [
     { id: "all", label: "All Open" },
     { id: "New Features", label: "New Features" },
     { id: "Improvements", label: "Improvements" },
     { id: "Defects", label: "Defects" },
+    { id: "Blocked", label: "Blocked" },
+    { id: "Refactoring", label: "Refactoring" },
     { id: "suggestions", label: "Suggestions" },
     { id: "completed", label: "Completed" },
 ];
@@ -33,6 +35,8 @@ const TODO_TAB_LABEL_TO_FILTER = {
     "New Features": "New Features",
     Improvements: "Improvements",
     Defects: "Defects",
+    Blocked: "Blocked",
+    Refactoring: "Refactoring",
     Suggestions: "suggestions",
     Completed: "completed",
 };
@@ -265,6 +269,8 @@ function buildAllTodoFooterText(summary, suggestionCount) {
         `${summary.openByCategory.newFeatures} New Features`,
         `${summary.openByCategory.improvements} Improvements`,
         `${summary.openByCategory.defects} Defects`,
+        `${summary.openByCategory.blocked} Blocked`,
+        `${summary.openByCategory.refactoring} Refactoring`,
         `${suggestionCount} Suggestions`,
         `${summary.completed} Completed`,
     ].join(" | ");
@@ -537,7 +543,7 @@ let TodoCommand = class TodoCommand {
             flags: MessageFlags.Ephemeral,
         });
     }
-    async add(title, category, details, size, showInChat, interaction) {
+    async add(title, category, size, details, showInChat, interaction) {
         const isPublic = Boolean(showInChat);
         await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
         const ok = await isSuperAdmin(interaction);
@@ -559,7 +565,7 @@ let TodoCommand = class TodoCommand {
             return;
         }
         const trimmedDetails = details?.trim();
-        const finalSize = size ?? null;
+        const finalSize = size;
         const todo = await createTodo(trimmedTitle, trimmedDetails ?? null, category, finalSize, interaction.user.id);
         await safeReply(interaction, {
             embeds: [buildTodoActionEmbed("Added", todo)],
@@ -854,16 +860,16 @@ __decorate([
         required: true,
         type: ApplicationCommandOptionType.String,
     })),
+    __param(2, SlashChoice(...TODO_SIZES)),
     __param(2, SlashOption({
-        description: "Optional details for the TODO",
-        name: "details",
-        required: false,
+        description: "Effort size (XS/S/M/L/XL)",
+        name: "size",
+        required: true,
         type: ApplicationCommandOptionType.String,
     })),
-    __param(3, SlashChoice(...TODO_SIZES)),
     __param(3, SlashOption({
-        description: "Optional effort size (XS/S/M/L/XL)",
-        name: "size",
+        description: "Optional details for the TODO",
+        name: "details",
         required: false,
         type: ApplicationCommandOptionType.String,
     })),
@@ -947,17 +953,17 @@ __decorate([
 ], TodoCommand.prototype, "complete", null);
 __decorate([
     SelectMenuComponent({
-        id: /^todo-tab:(all|New Features|Improvements|Defects|suggestions|completed):\d+:(?:any|[A-Z,]+)$/,
+        id: /^todo-tab:(all|New Features|Improvements|Defects|Blocked|Refactoring|suggestions|completed):\d+:(?:any|[A-Z,]+)$/,
     })
 ], TodoCommand.prototype, "handleTodoTab", null);
 __decorate([
     SelectMenuComponent({
-        id: /^todo-size:(all|New Features|Improvements|Defects|suggestions|completed):\d+:(?:any|[A-Z,]+)$/,
+        id: /^todo-size:(all|New Features|Improvements|Defects|Blocked|Refactoring|suggestions|completed):\d+:(?:any|[A-Z,]+)$/,
     })
 ], TodoCommand.prototype, "handleTodoSize", null);
 __decorate([
     SelectMenuComponent({
-        id: /^todo-complete:(all|New Features|Improvements|Defects|suggestions|completed):\d+:(?:any|[A-Z,]+)$/,
+        id: /^todo-complete:(all|New Features|Improvements|Defects|Blocked|Refactoring|suggestions|completed):\d+:(?:any|[A-Z,]+)$/,
     })
 ], TodoCommand.prototype, "handleTodoComplete", null);
 TodoCommand = __decorate([

@@ -279,7 +279,7 @@ export async function countTodos(): Promise<{ open: number; completed: number }>
 export async function countTodoSummary(): Promise<{
   open: number;
   completed: number;
-  openByCategory: { newFeatures: number; improvements: number; defects: number };
+  openByCategory: { newFeatures: number; improvements: number; defects: number; blocked: number; refactoring: number };
 }> {
   const connection = await getOraclePool().getConnection();
   try {
@@ -289,6 +289,8 @@ export async function countTodoSummary(): Promise<{
       OPEN_NEW_FEATURES: number | null;
       OPEN_IMPROVEMENTS: number | null;
       OPEN_DEFECTS: number | null;
+      OPEN_BLOCKED: number | null;
+      OPEN_REFACTORING: number | null;
     }>(
       `SELECT SUM(CASE WHEN IS_COMPLETED = 1 THEN 0 ELSE 1 END) AS OPEN_COUNT,
               SUM(CASE WHEN IS_COMPLETED = 1 THEN 1 ELSE 0 END) AS COMPLETED_COUNT,
@@ -309,7 +311,19 @@ export async function countTodoSummary(): Promise<{
                   WHEN IS_COMPLETED = 0 AND TODO_CATEGORY = 'Defects' THEN 1
                   ELSE 0
                 END
-              ) AS OPEN_DEFECTS
+              ) AS OPEN_DEFECTS,
+              SUM(
+                CASE
+                  WHEN IS_COMPLETED = 0 AND TODO_CATEGORY = 'Blocked' THEN 1
+                  ELSE 0
+                END
+              ) AS OPEN_BLOCKED,
+              SUM(
+                CASE
+                  WHEN IS_COMPLETED = 0 AND TODO_CATEGORY = 'Refactoring' THEN 1
+                  ELSE 0
+                END
+              ) AS OPEN_REFACTORING
          FROM RPG_CLUB_TODOS`,
       {},
       { outFormat: oracledb.OUT_FORMAT_OBJECT },
@@ -322,6 +336,8 @@ export async function countTodoSummary(): Promise<{
         newFeatures: Number(row?.OPEN_NEW_FEATURES ?? 0),
         improvements: Number(row?.OPEN_IMPROVEMENTS ?? 0),
         defects: Number(row?.OPEN_DEFECTS ?? 0),
+        blocked: Number(row?.OPEN_BLOCKED ?? 0),
+        refactoring: Number(row?.OPEN_REFACTORING ?? 0),
       },
     };
   } finally {

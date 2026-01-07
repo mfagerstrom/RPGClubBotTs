@@ -16,6 +16,7 @@ import type { CommandInteraction, User } from "discord.js";
 import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption } from "discordx";
 import { DateTime } from "luxon";
 import { AnyRepliable, safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
+import { bot } from "../RPGClubBotTS.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
 import Gotm, {
   type IGotmEntry,
@@ -58,7 +59,8 @@ type AdminHelpTopicId =
   | "delete-nr-gotm-noms"
   | "set-nextvote"
   | "voting-setup"
-  | "nextround-setup";
+  | "nextround-setup"
+  | "sync";
 
 type AdminHelpTopic = {
   id: AdminHelpTopicId;
@@ -70,6 +72,13 @@ type AdminHelpTopic = {
 };
 
 export const ADMIN_HELP_TOPICS: AdminHelpTopic[] = [
+  {
+    id: "sync",
+    label: "/admin sync",
+    summary: "Refresh slash command registrations with Discord.",
+    syntax: "Syntax: /admin sync",
+    notes: "Use after updating command choices or definitions.",
+  },
   {
     id: "nextround-setup",
     label: "/admin nextround-setup",
@@ -211,6 +220,33 @@ export function buildAdminHelpResponse(
 @SlashGroup({ description: "Admin Commands", name: "admin" })
 @SlashGroup("admin")
 export class Admin {
+  @Slash({
+    description: "Synchronize application commands with Discord",
+    name: "sync",
+  })
+  async sync(interaction: CommandInteraction): Promise<void> {
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const okToUseCommand: boolean = await isAdmin(interaction);
+    if (!okToUseCommand) {
+      return;
+    }
+
+    try {
+      await bot.initApplicationCommands();
+      await safeReply(interaction, {
+        content: "✅ Commands synchronized with Discord.",
+        flags: MessageFlags.Ephemeral,
+      });
+    } catch (err: any) {
+      const msg: string = err?.message ?? String(err);
+      await safeReply(interaction, {
+        content: `Failed to sync commands: ${msg}`,
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+  }
+
   @Slash({
     description: "Votes are typically held the last Friday of the month",
     name: "set-nextvote",

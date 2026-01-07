@@ -925,7 +925,10 @@ export default class Member {
     }
   }
 
-  static async getCompletionLeaderboard(limit: number = 25): Promise<{
+  static async getCompletionLeaderboard(
+    limit: number = 25,
+    title?: string,
+  ): Promise<{
     userId: string;
     username: string | null;
     globalName: string | null;
@@ -933,6 +936,12 @@ export default class Member {
   }[]> {
     const connection = await getOraclePool().getConnection();
     const safeLimit = Math.min(Math.max(limit, 1), 100);
+    const clauses: string[] = ["u.SERVER_LEFT_AT IS NULL"];
+    const binds: Record<string, any> = { limit: safeLimit };
+    if (title) {
+      clauses.push("UPPER(g.TITLE) LIKE '%' || UPPER(:title) || '%'");
+      binds.title = title;
+    }
 
     try {
       const res = await connection.execute<{
@@ -945,12 +954,13 @@ export default class Member {
         SELECT c.USER_ID, u.USERNAME, u.GLOBAL_NAME, COUNT(*) AS CNT
           FROM USER_GAME_COMPLETIONS c
           JOIN RPG_CLUB_USERS u ON u.USER_ID = c.USER_ID
-         WHERE u.SERVER_LEFT_AT IS NULL
+          JOIN GAMEDB_GAMES g ON g.GAME_ID = c.GAMEDB_GAME_ID
+         WHERE ${clauses.join(" AND ")}
          GROUP BY c.USER_ID, u.USERNAME, u.GLOBAL_NAME
          ORDER BY CNT DESC
          FETCH FIRST :limit ROWS ONLY
         `,
-        { limit: safeLimit },
+        binds,
         { outFormat: oracledb.OUT_FORMAT_OBJECT },
       );
 

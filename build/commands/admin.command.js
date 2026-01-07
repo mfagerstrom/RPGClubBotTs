@@ -11,6 +11,7 @@ import { ActionRowBuilder, ApplicationCommandOptionType, ButtonBuilder, ButtonSt
 import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption } from "discordx";
 import { DateTime } from "luxon";
 import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
+import { bot } from "../RPGClubBotTS.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
 import Gotm, { updateGotmGameFieldInDatabase, insertGotmRoundInDatabase, } from "../classes/Gotm.js";
 import NrGotm, { updateNrGotmGameFieldInDatabase, insertNrGotmRoundInDatabase, } from "../classes/NrGotm.js";
@@ -21,6 +22,13 @@ import { getUpcomingNominationWindow } from "../functions/NominationWindow.js";
 import { deleteNominationForUser, getNominationForUser, listNominationsForRound, } from "../classes/Nomination.js";
 import { getThreadsByGameId, setThreadGameLink } from "../classes/Thread.js";
 export const ADMIN_HELP_TOPICS = [
+    {
+        id: "sync",
+        label: "/admin sync",
+        summary: "Refresh slash command registrations with Discord.",
+        syntax: "Syntax: /admin sync",
+        notes: "Use after updating command choices or definitions.",
+    },
     {
         id: "nextround-setup",
         label: "/admin nextround-setup",
@@ -136,6 +144,27 @@ export function buildAdminHelpResponse(activeTopicId) {
     };
 }
 let Admin = class Admin {
+    async sync(interaction) {
+        await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+        const okToUseCommand = await isAdmin(interaction);
+        if (!okToUseCommand) {
+            return;
+        }
+        try {
+            await bot.initApplicationCommands();
+            await safeReply(interaction, {
+                content: "✅ Commands synchronized with Discord.",
+                flags: MessageFlags.Ephemeral,
+            });
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            await safeReply(interaction, {
+                content: `Failed to sync commands: ${msg}`,
+                flags: MessageFlags.Ephemeral,
+            });
+        }
+    }
     async setNextVote(dateText, interaction) {
         // Run publicly; avoid default ephemeral deferral for admin commands
         await safeDeferReply(interaction, { ephemeral: false });
@@ -1098,6 +1127,12 @@ let Admin = class Admin {
         });
     }
 };
+__decorate([
+    Slash({
+        description: "Synchronize application commands with Discord",
+        name: "sync",
+    })
+], Admin.prototype, "sync", null);
 __decorate([
     Slash({
         description: "Votes are typically held the last Friday of the month",

@@ -98,7 +98,7 @@ let GameCompletionCommands = class GameCompletionCommands {
         const ephemeral = !showInChat;
         await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
         if (showAll) {
-            await this.renderCompletionLeaderboard(interaction, ephemeral);
+            await this.renderCompletionLeaderboard(interaction, ephemeral, query);
             return;
         }
         let yearFilter = null;
@@ -996,11 +996,13 @@ let GameCompletionCommands = class GameCompletionCommands {
             await this.renderSelectionPage(interaction, ownerId, nextPage, mode, year, query);
         }
     }
-    async renderCompletionLeaderboard(interaction, ephemeral) {
-        const leaderboard = await Member.getCompletionLeaderboard(25);
+    async renderCompletionLeaderboard(interaction, ephemeral, query) {
+        const leaderboard = await Member.getCompletionLeaderboard(25, query);
         if (!leaderboard.length) {
             await safeReply(interaction, {
-                content: "No completions recorded yet.",
+                content: query
+                    ? `No completions found matching "${query}".`
+                    : "No completions recorded yet.",
                 flags: ephemeral ? MessageFlags.Ephemeral : undefined,
             });
             return;
@@ -1013,13 +1015,17 @@ let GameCompletionCommands = class GameCompletionCommands {
         const embed = new EmbedBuilder()
             .setTitle("Game Completion Leaderboard")
             .setDescription(lines.join("\n"));
+        const trimmedQuery = query?.trim();
+        if (trimmedQuery) {
+            embed.setFooter({ text: `Filter: "${trimmedQuery}"` });
+        }
         const options = leaderboard.map((m) => ({
             label: (m.globalName ?? m.username ?? m.userId).slice(0, 100),
             value: m.userId,
             description: `${m.count} ${m.count === 1 ? "completion" : "completions"}`,
         }));
         const select = new StringSelectMenuBuilder()
-            .setCustomId("comp-leaderboard-select")
+            .setCustomId(`comp-leaderboard-select${trimmedQuery ? `:${trimmedQuery.slice(0, 50)}` : ""}`)
             .setPlaceholder("View completions for a member")
             .addOptions(options);
         await safeReply(interaction, {
@@ -1029,9 +1035,11 @@ let GameCompletionCommands = class GameCompletionCommands {
         });
     }
     async handleCompletionLeaderboardSelect(interaction) {
+        const parts = interaction.customId.split(":");
+        const query = parts.slice(1).join(":") || undefined;
         const userId = interaction.values[0];
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        await this.renderCompletionPage(interaction, userId, 0, null, true);
+        await this.renderCompletionPage(interaction, userId, 0, null, true, query);
     }
     createCompletionSession(ctx) {
         const sessionId = `comp-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
@@ -2333,7 +2341,7 @@ __decorate([
     ButtonComponent({ id: /^comp-(list|edit|delete)-page:[^:]+:[^:]*:\d+:(prev|next)(?::.*)?$/ })
 ], GameCompletionCommands.prototype, "handleCompletionPaging", null);
 __decorate([
-    SelectMenuComponent({ id: "comp-leaderboard-select" })
+    SelectMenuComponent({ id: /^comp-leaderboard-select(?::.*)?$/ })
 ], GameCompletionCommands.prototype, "handleCompletionLeaderboardSelect", null);
 GameCompletionCommands = __decorate([
     Discord(),
