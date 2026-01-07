@@ -10,8 +10,6 @@ import {
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
 } from "discord.js";
-import { readFileSync } from "fs";
-import path from "path";
 import {
   Discord,
   SelectMenuComponent,
@@ -32,24 +30,6 @@ export const COMPLETION_TYPES = [
   "Main Story + Side Content",
   "Completionist",
 ] as const;
-
-const GAME_DB_THUMB_NAME = "gameDB.png";
-const GAME_DB_THUMB_PATH = path.join(
-  process.cwd(),
-  "src",
-  "assets",
-  "images",
-  GAME_DB_THUMB_NAME,
-);
-const gameDbThumbBuffer = readFileSync(GAME_DB_THUMB_PATH);
-
-export function buildGameDbThumbAttachment(): AttachmentBuilder {
-  return new AttachmentBuilder(gameDbThumbBuffer, { name: GAME_DB_THUMB_NAME });
-}
-
-export function applyGameDbThumbnail(embed: EmbedBuilder): EmbedBuilder {
-  return embed.setThumbnail(`attachment://${GAME_DB_THUMB_NAME}`);
-}
 
 export type CompletionType = (typeof COMPLETION_TYPES)[number];
 

@@ -1,5 +1,5 @@
 import { EmbedBuilder, MessageFlags, } from "discord.js";
-import { applyGameDbThumbnail, buildGameDbThumbAttachment, formatPlaytimeHours, formatTableDate, } from "../commands/profile.command.js";
+import { formatPlaytimeHours, formatTableDate, } from "../commands/profile.command.js";
 import Game from "../classes/Game.js";
 import Member from "../classes/Member.js";
 const ANNOUNCEMENT_CHANNEL_ID = "360819470836695042";
@@ -71,7 +71,6 @@ export async function saveCompletion(interaction, userId, gameId, completionType
                     })
                         .setDescription(desc)
                         .setColor(0x00ff00);
-                    applyGameDbThumbnail(embed);
                     if (isFirst) {
                         embed.addFields({
                             name: "First Completion!",
@@ -80,7 +79,6 @@ export async function saveCompletion(interaction, userId, gameId, completionType
                     }
                     await channel.send({
                         embeds: [embed],
-                        files: [buildGameDbThumbAttachment()],
                     });
                 }
             }

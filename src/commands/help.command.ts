@@ -943,10 +943,10 @@ export function buildMainHelpResponse(): {
         `${formatCommandLine("round", "See the current round and winners.")}\n` +
         `${formatCommandLine("nextvote", "Check when the next vote happens.")}\n\n` +
         "**Members**\n" +
-        `${formatCommandLine("profile", "View and edit member profiles and Now Playing.")}\n` +
+        `${formatCommandLine("profile", "View and edit member profiles.")}\n` +
         `${formatCommandLine("mp-info", "Find who has shared multiplayer info.")}\n\n` +
         "**GameDB**\n" +
-        `${formatCommandLine("gamedb", "Search/import games, view details, and audit.")}\n` +
+        `${formatCommandLine("gamedb", "Search for games and view their details.")}\n` +
         `${formatCommandLine("now-playing", "Show Now Playing lists and thread links.")}\n` +
         `${formatCommandLine("game-completion", "Log and manage your completed games.")}\n\n` +
         "**Utilities**\n" +

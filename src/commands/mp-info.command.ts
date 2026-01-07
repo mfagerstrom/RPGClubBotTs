@@ -97,7 +97,6 @@ function buildSummaryEmbed(
         "Want to list your multiplayer info? Use /profile edit\n\n" +
         "Select a member below to view a profile.",
     });
-
   const options = members.slice(0, MAX_OPTIONS).map((member) => {
     const name = member.globalName ?? member.username ?? "Unknown member";
     const platforms = formatPlatforms(member, filters) || "Platforms not listed";

@@ -17,7 +17,7 @@ import Game from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
 import { createImportSession, insertImportItems, getActiveImportForUser, getImportById, getImportItemById, setImportStatus, getNextPendingItem, updateImportItem, updateImportIndex, countImportItems, } from "../classes/CompletionatorImport.js";
 import { createIgdbSession, } from "../services/IgdbSelectService.js";
-import { COMPLETION_TYPES, COMPLETION_PAGE_SIZE, formatDiscordTimestamp, formatPlaytimeHours, parseCompletionDateInput, formatTableDate, buildGameDbThumbAttachment, applyGameDbThumbnail, } from "./profile.command.js";
+import { COMPLETION_TYPES, COMPLETION_PAGE_SIZE, formatDiscordTimestamp, formatPlaytimeHours, parseCompletionDateInput, formatTableDate, } from "./profile.command.js";
 import { saveCompletion } from "../functions/CompletionHelpers.js";
 const completionAddSessions = new Map();
 const COMPLETIONATOR_SKIP_SENTINEL = "skip";
@@ -569,10 +569,8 @@ let GameCompletionCommands = class GameCompletionCommands {
                 .setTitle(`Completionator Import #${session.importId}`)
                 .setDescription(`Status: ${session.status}`)
                 .addFields({ name: "Pending", value: String(stats.pending), inline: true }, { name: "Imported", value: String(stats.imported), inline: true }, { name: "Updated", value: String(stats.updated), inline: true }, { name: "Skipped", value: String(stats.skipped), inline: true }, { name: "Errors", value: String(stats.error), inline: true });
-            applyGameDbThumbnail(embed);
             await safeReply(interaction, {
                 embeds: [embed],
-                files: [buildGameDbThumbAttachment()],
                 flags: MessageFlags.Ephemeral,
             });
             return;
@@ -1123,7 +1121,6 @@ let GameCompletionCommands = class GameCompletionCommands {
             value: item.completedAt ? formatTableDate(item.completedAt) : "Unknown",
             inline: true,
         });
-        applyGameDbThumbnail(embed);
         return embed;
     }
     async renderCompletionatorItem(interaction, session, item, ephemeral) {
@@ -1136,7 +1133,6 @@ let GameCompletionCommands = class GameCompletionCommands {
             const rows = this.buildCompletionatorNoMatchRows(interaction.user.id, session.importId, item.itemId);
             await this.respondToImportInteraction(interaction, {
                 embeds: [actionEmbed],
-                files: [buildGameDbThumbAttachment()],
                 components: rows,
                 content,
             }, ephemeral);
@@ -1160,7 +1156,6 @@ let GameCompletionCommands = class GameCompletionCommands {
             await this.respondToImportInteraction(interaction, {
                 content: `GameDB id ${gameId} was not found. Choose another option below.`,
                 embeds: [actionEmbed],
-                files: [buildGameDbThumbAttachment()],
                 components: rows,
             }, ephemeral);
             return;
@@ -1184,7 +1179,6 @@ let GameCompletionCommands = class GameCompletionCommands {
                 .setStyle(ButtonStyle.Secondary));
             await this.respondToImportInteraction(interaction, {
                 embeds: [embed],
-                files: [buildGameDbThumbAttachment()],
                 components: [buttons],
                 content: "",
             }, ephemeral);
@@ -1230,7 +1224,6 @@ let GameCompletionCommands = class GameCompletionCommands {
             .setStyle(ButtonStyle.Secondary));
         await this.respondToImportInteraction(interaction, {
             embeds: [embed],
-            files: [buildGameDbThumbAttachment()],
             components: [
                 new ActionRowBuilder().addComponents(updateSelect),
                 buttons,
@@ -1280,7 +1273,6 @@ let GameCompletionCommands = class GameCompletionCommands {
                 `${item.completedAt ? formatTableDate(item.completedAt) : "Unknown"} — ` +
                 `${item.playtimeHours ?? "Unknown"} hrs`,
         }, { name: "Action", value: "Select fields to update", inline: false });
-        applyGameDbThumbnail(embed);
         return embed;
     }
     buildCompletionUpdateOptions(existing, item) {
@@ -1454,7 +1446,6 @@ let GameCompletionCommands = class GameCompletionCommands {
             .setStyle(ButtonStyle.Secondary);
         await this.respondToImportInteraction(interaction, {
             embeds: [embed],
-            files: [buildGameDbThumbAttachment()],
             components: [
                 new ActionRowBuilder().addComponents(select),
                 new ActionRowBuilder().addComponents(pauseButton, skipButton),
@@ -1637,7 +1628,6 @@ let GameCompletionCommands = class GameCompletionCommands {
             name: authorName,
             iconURL: authorIcon ?? undefined,
         });
-        applyGameDbThumbnail(embed);
         const sortedYears = Object.keys(grouped).sort((a, b) => {
             if (a === "Unknown")
                 return 1;
@@ -1688,7 +1678,6 @@ let GameCompletionCommands = class GameCompletionCommands {
         embed.setFooter({ text: footerLines.join("\n") });
         return {
             embed,
-            attachment: buildGameDbThumbAttachment(),
             total,
             totalPages,
             safePage,
@@ -1716,7 +1705,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             });
             return;
         }
-        const { embed, attachment, totalPages, safePage } = result;
+        const { embed, totalPages, safePage } = result;
         const yearPart = year == null ? "" : String(year);
         const queryPart = query ? `:${query.slice(0, 50)}` : "";
         const components = [];
@@ -1761,7 +1750,6 @@ let GameCompletionCommands = class GameCompletionCommands {
         }
         await safeReply(interaction, {
             embeds: [embed],
-            files: [attachment],
             components,
             flags: ephemeral ? MessageFlags.Ephemeral : undefined,
         });
@@ -1783,7 +1771,7 @@ let GameCompletionCommands = class GameCompletionCommands {
             }
             return;
         }
-        const { embed, attachment, totalPages, safePage, pageCompletions } = result;
+        const { embed, totalPages, safePage, pageCompletions } = result;
         const selectOptions = pageCompletions.map((c) => ({
             label: c.title.slice(0, 100),
             value: String(c.completionId),
@@ -1839,16 +1827,15 @@ let GameCompletionCommands = class GameCompletionCommands {
         }
         if (interaction.isMessageComponent()) {
             if (interaction.deferred || interaction.replied) {
-                await interaction.editReply({ embeds: [embed], files: [attachment], components });
+                await interaction.editReply({ embeds: [embed], components });
             }
             else {
-                await interaction.update({ embeds: [embed], files: [attachment], components });
+                await interaction.update({ embeds: [embed], components });
             }
         }
         else {
             await safeReply(interaction, {
                 embeds: [embed],
-                files: [attachment],
                 components,
                 flags: MessageFlags.Ephemeral,
             });

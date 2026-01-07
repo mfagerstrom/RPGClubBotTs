@@ -8,8 +8,6 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
 import { ApplicationCommandOptionType, EmbedBuilder, StringSelectMenuBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, escapeCodeBlock, MessageFlags, } from "discord.js";
-import { readFileSync } from "fs";
-import path from "path";
 import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption, } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
@@ -29,17 +27,8 @@ function isUnknownWebhookError(err) {
     const code = err?.code ?? err?.rawError?.code;
     return code === 10015;
 }
-const GAME_DB_THUMB_NAME = "gameDB.png";
-const GAME_DB_THUMB_PATH = path.join(process.cwd(), "src", "assets", "images", GAME_DB_THUMB_NAME);
-const gameDbThumbBuffer = readFileSync(GAME_DB_THUMB_PATH);
 const MAX_COMPLETION_NOTE_LEN = 500;
 const MAX_NOW_PLAYING_NOTE_LEN = 500;
-function buildGameDbThumbAttachment() {
-    return new AttachmentBuilder(gameDbThumbBuffer, { name: GAME_DB_THUMB_NAME });
-}
-function applyGameDbThumbnail(embed) {
-    return embed.setThumbnail(`attachment://${GAME_DB_THUMB_NAME}`);
-}
 let GameDb = class GameDb {
     async add(title, igdbId, bulkTitles, includeRaw, interaction) {
         await safeDeferReply(interaction);
@@ -303,8 +292,7 @@ let GameDb = class GameDb {
             .setTitle(`Added to GameDB: ${newGame.title}`)
             .setDescription(`GameDB ID: ${newGame.id}${igdbUrl ? `\nIGDB: ${igdbUrl}` : ""}`)
             .setColor(0x0099ff);
-        applyGameDbThumbnail(embed);
-        const attachments = [buildGameDbThumbAttachment()];
+        const attachments = [];
         if (imageData) {
             embed.setImage("attachment://cover.jpg");
             attachments.push(new AttachmentBuilder(imageData, { name: "cover.jpg" }));
@@ -312,7 +300,7 @@ let GameDb = class GameDb {
         await safeReply(interaction, {
             content: `Successfully added **${newGame.title}** (ID: ${newGame.id}) to the database!`,
             embeds: [embed],
-            files: attachments,
+            files: attachments.length ? attachments : undefined,
             __forceFollowUp: true,
         });
     }
@@ -368,7 +356,6 @@ let GameDb = class GameDb {
             if (game.igdbUrl) {
                 embed.setURL(game.igdbUrl);
             }
-            applyGameDbThumbnail(embed);
             // Keep the win/round info up top in the single embed
             if (associations.gotmWins.length) {
                 const lines = associations.gotmWins.map((win) => `Round ${win.round}`);
@@ -508,7 +495,7 @@ let GameDb = class GameDb {
                     inline: true,
                 });
             }
-            const files = [buildGameDbThumbAttachment()];
+            const files = [];
             if (game.imageData) {
                 files.push(new AttachmentBuilder(game.imageData, { name: "game_image.png" }));
             }
@@ -973,7 +960,6 @@ let GameDb = class GameDb {
         try {
             await interaction.editReply({
                 ...response,
-                files: response.files,
                 content: null,
             });
         }
@@ -996,7 +982,6 @@ let GameDb = class GameDb {
             .setFooter({
             text: `${session.results.length} results total`,
         });
-        applyGameDbThumbnail(embed);
         const selectCustomId = `gamedb-search-select:${sessionId}:${session.userId}:${safePage}`;
         const options = displayedResults.map((g) => ({
             label: g.title.substring(0, 100),
@@ -1028,7 +1013,6 @@ let GameDb = class GameDb {
         return {
             embeds: [embed],
             components,
-            files: [buildGameDbThumbAttachment()],
         };
     }
 };

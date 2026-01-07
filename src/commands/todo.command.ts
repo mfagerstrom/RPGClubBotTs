@@ -2,7 +2,6 @@ import type { CommandInteraction } from "discord.js";
 import {
   ActionRowBuilder,
   ApplicationCommandOptionType,
-  AttachmentBuilder,
   ButtonBuilder,
   ButtonInteraction,
   ButtonStyle,
@@ -19,8 +18,6 @@ import {
   SlashGroup,
   SlashOption,
 } from "discordx";
-import { readFileSync } from "fs";
-import path from "path";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import { isSuperAdmin } from "./superadmin.command.js";
 import {
@@ -41,24 +38,6 @@ import {
 const MAX_LIST_ITEMS: number = 100;
 const MAX_TODO_DESCRIPTION: number = 3800;
 const MAX_SUGGESTION_OPTIONS: number = 25;
-const GAME_DB_THUMB_NAME: string = "gameDB.png";
-const GAME_DB_THUMB_PATH: string = path.join(
-  process.cwd(),
-  "src",
-  "assets",
-  "images",
-  GAME_DB_THUMB_NAME,
-);
-const gameDbThumbBuffer: Buffer = readFileSync(GAME_DB_THUMB_PATH);
-
-function buildGameDbThumbAttachment(): AttachmentBuilder {
-  return new AttachmentBuilder(gameDbThumbBuffer, { name: GAME_DB_THUMB_NAME });
-}
-
-function applyGameDbThumbnail(embed: EmbedBuilder): EmbedBuilder {
-  return embed.setThumbnail(`attachment://${GAME_DB_THUMB_NAME}`);
-}
-
 function formatTodoLines(items: ITodoItem[]): string[] {
   const lines: string[] = [];
   const labelLengths: number[] = items.map((item) => `[${item.todoId}]`.length);
@@ -105,7 +84,7 @@ function buildTodoDescription(items: ITodoItem[], includeCompleted: boolean): st
 function buildTodoListEmbed(
   items: ITodoItem[],
   includeCompleted: boolean,
-): { embeds: EmbedBuilder[]; files: AttachmentBuilder[] } {
+): { embeds: EmbedBuilder[] } {
   const description: string = buildTodoDescription(items, includeCompleted);
   const openCount: number = items.filter((item) => !item.isCompleted).length;
   const completedCount: number = items.filter((item) => item.isCompleted).length;
@@ -119,10 +98,8 @@ function buildTodoListEmbed(
     .setColor(0x3498db)
     .setDescription(description)
     .setFooter({ text: footerText });
-  applyGameDbThumbnail(embed);
 
-  const files: AttachmentBuilder[] = [buildGameDbThumbAttachment()];
-  return { embeds: [embed], files };
+  return { embeds: [embed] };
 }
 
 function formatSuggestionLine(item: ISuggestionItem): string {
@@ -132,13 +109,12 @@ function formatSuggestionLine(item: ISuggestionItem): string {
 
 function buildSuggestionListEmbed(
   items: ISuggestionItem[],
-): { embeds: EmbedBuilder[]; files: AttachmentBuilder[] } {
+): { embeds: EmbedBuilder[] } {
   if (items.length === 0) {
     const emptyEmbed = new EmbedBuilder()
       .setTitle("Suggestions")
       .setDescription("No suggestions found.");
-    applyGameDbThumbnail(emptyEmbed);
-    return { embeds: [emptyEmbed], files: [buildGameDbThumbAttachment()] };
+    return { embeds: [emptyEmbed] };
   }
 
   const lines = items.map((item) => formatSuggestionLine(item));
@@ -147,9 +123,8 @@ function buildSuggestionListEmbed(
     .setTitle("Suggestions")
     .setDescription(description)
     .setFooter({ text: `${items.length} suggestion(s)` });
-  applyGameDbThumbnail(embed);
 
-  return { embeds: [embed], files: [buildGameDbThumbAttachment()] };
+  return { embeds: [embed] };
 }
 
 function buildSuggestionDetailEmbed(item: ISuggestionItem): EmbedBuilder {
@@ -168,7 +143,6 @@ function buildSuggestionDetailEmbed(item: ISuggestionItem): EmbedBuilder {
     embed.addFields({ name: "Details", value: item.details });
   }
 
-  applyGameDbThumbnail(embed);
   return embed;
 }
 
@@ -285,7 +259,6 @@ export class TodoCommand {
     await interaction.update({
       embeds: [embed],
       components: [buttons],
-      files: [buildGameDbThumbAttachment()],
     });
   }
 

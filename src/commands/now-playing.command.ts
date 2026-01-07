@@ -24,8 +24,6 @@ import {
   SelectMenuComponent,
   ButtonComponent,
 } from "discordx";
-import { readFileSync } from "fs";
-import path from "path";
 import Member, { type IMemberNowPlayingEntry } from "../classes/Member.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import Game from "../classes/Game.js";
@@ -43,15 +41,6 @@ import {
 
 const MAX_NOW_PLAYING = 10;
 const MAX_NOW_PLAYING_NOTE_LEN = 500;
-const GAME_DB_THUMB_NAME = "gameDB.png";
-const GAME_DB_THUMB_PATH = path.join(
-  process.cwd(),
-  "src",
-  "assets",
-  "images",
-  GAME_DB_THUMB_NAME,
-);
-const gameDbThumbBuffer = readFileSync(GAME_DB_THUMB_PATH);
 const nowPlayingAddSessions = new Map<
   string,
   { userId: string; query: string; note: string | null }
@@ -75,14 +64,6 @@ function formatEntry(
     return `[${entry.title}](https://discord.com/channels/${guildId}/${entry.threadId})`;
   }
   return entry.title;
-}
-
-function buildGameDbThumbAttachment(): AttachmentBuilder {
-  return new AttachmentBuilder(gameDbThumbBuffer, { name: GAME_DB_THUMB_NAME });
-}
-
-function applyGameDbThumbnail(embed: EmbedBuilder): EmbedBuilder {
-  return embed.setThumbnail(`attachment://${GAME_DB_THUMB_NAME}`);
 }
 
 async function promptForNote(
@@ -796,7 +777,6 @@ export class NowPlayingCommand {
         iconURL: target.displayAvatarURL({ size: 64, forceStatic: false }),
       })
       .setFooter({ text: footerParts.join("\n") });
-    applyGameDbThumbnail(embed);
 
     const files = await this.buildNowPlayingAttachments(entries, 6);
     await safeReply(interaction, {
@@ -824,11 +804,9 @@ export class NowPlayingCommand {
       const embed = new EmbedBuilder()
         .setTitle("Now Playing - Everyone")
         .setDescription(`No Now Playing entries found for <@${selectedUserId}>.`);
-      applyGameDbThumbnail(embed);
       await interaction.update({
         embeds: [embed],
         components: selectRow ? [selectRow] : [],
-        files: [buildGameDbThumbAttachment()],
       });
       return;
     }
@@ -871,14 +849,12 @@ export class NowPlayingCommand {
     const embed = new EmbedBuilder()
       .setTitle("Now Playing - Everyone")
       .setDescription(lines.join("\n"));
-    applyGameDbThumbnail(embed);
 
     const selectRow = this.buildNowPlayingMemberSelect(sortedLists);
 
     await safeReply(interaction, {
       embeds: [embed],
       components: [selectRow],
-      files: [buildGameDbThumbAttachment()],
       flags: ephemeral ? MessageFlags.Ephemeral : undefined,
     });
   }
@@ -920,7 +896,6 @@ export class NowPlayingCommand {
         iconURL: target.displayAvatarURL({ size: 64, forceStatic: false }),
       })
       .setFooter({ text: footerParts.join("\n") });
-    applyGameDbThumbnail(embed);
     return { embed };
   }
 
@@ -928,7 +903,7 @@ export class NowPlayingCommand {
     entries: IMemberNowPlayingEntry[],
     maxImages: number = Number.POSITIVE_INFINITY,
   ): Promise<AttachmentBuilder[]> {
-    const files: AttachmentBuilder[] = [buildGameDbThumbAttachment()];
+    const files: AttachmentBuilder[] = [];
     const seen = new Set<number>();
     let imageCount = 0;
     for (const entry of entries) {

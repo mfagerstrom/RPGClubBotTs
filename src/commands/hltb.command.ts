@@ -112,7 +112,10 @@ async function outputHltbResultsAsEmbed(
       .setFields(fields)
       .setImage(hltb_result.imageUrl);
 
-    await safeReply(interaction, { embeds: [hltbEmbed], flags: options.ephemeral ? MessageFlags.Ephemeral : undefined });
+    await safeReply(interaction, {
+      embeds: [hltbEmbed],
+      flags: options.ephemeral ? MessageFlags.Ephemeral : undefined,
+    });
   } else {
     await safeReply(interaction, {
       content: `Sorry, no results were found for "${hltbQuery}"`,

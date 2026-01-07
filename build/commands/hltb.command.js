@@ -104,7 +104,10 @@ async function outputHltbResultsAsEmbed(interaction, result, hltbQuery, options)
         })
             .setFields(fields)
             .setImage(hltb_result.imageUrl);
-        await safeReply(interaction, { embeds: [hltbEmbed], flags: options.ephemeral ? MessageFlags.Ephemeral : undefined });
+        await safeReply(interaction, {
+            embeds: [hltbEmbed],
+            flags: options.ephemeral ? MessageFlags.Ephemeral : undefined,
+        });
     }
     else {
         await safeReply(interaction, {

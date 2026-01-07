@@ -6,8 +6,6 @@ import {
 } from "discord.js";
 import {
   type CompletionType,
-  applyGameDbThumbnail,
-  buildGameDbThumbAttachment,
   formatPlaytimeHours,
   formatTableDate,
 } from "../commands/profile.command.js";
@@ -104,8 +102,6 @@ export async function saveCompletion(
             .setDescription(desc)
             .setColor(0x00ff00);
 
-          applyGameDbThumbnail(embed);
-
           if (isFirst) {
             embed.addFields({
               name: "First Completion!",
@@ -115,7 +111,6 @@ export async function saveCompletion(
 
           await (channel as any).send({
             embeds: [embed],
-            files: [buildGameDbThumbAttachment()],
           });
         }
       }

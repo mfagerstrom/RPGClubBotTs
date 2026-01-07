@@ -8,8 +8,6 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
 import { AttachmentBuilder, ApplicationCommandOptionType, EmbedBuilder, MessageFlags, PermissionsBitField, ActionRowBuilder, StringSelectMenuBuilder, } from "discord.js";
-import { readFileSync } from "fs";
-import path from "path";
 import { Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption, } from "discordx";
 import axios from "axios";
 import Member from "../classes/Member.js";
@@ -19,15 +17,6 @@ export const COMPLETION_TYPES = [
     "Main Story + Side Content",
     "Completionist",
 ];
-const GAME_DB_THUMB_NAME = "gameDB.png";
-const GAME_DB_THUMB_PATH = path.join(process.cwd(), "src", "assets", "images", GAME_DB_THUMB_NAME);
-const gameDbThumbBuffer = readFileSync(GAME_DB_THUMB_PATH);
-export function buildGameDbThumbAttachment() {
-    return new AttachmentBuilder(gameDbThumbBuffer, { name: GAME_DB_THUMB_NAME });
-}
-export function applyGameDbThumbnail(embed) {
-    return embed.setThumbnail(`attachment://${GAME_DB_THUMB_NAME}`);
-}
 export const COMPLETION_PAGE_SIZE = 20;
 function parseDateInput(value) {
     if (!value)

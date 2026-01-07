@@ -149,7 +149,7 @@ let NrGotmSearch = class NrGotmSearch {
                     await safeReply(interaction, payload);
                 }
                 else {
-                    await interaction.followUp(payload);
+                    await safeReply(interaction, { ...payload, __forceFollowUp: true });
                 }
             };
             if (embedAssets.length <= 10) {

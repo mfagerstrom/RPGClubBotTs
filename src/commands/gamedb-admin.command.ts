@@ -25,8 +25,6 @@ import { isAdmin } from "./admin.command.js";
 import Game, { IGame } from "../classes/Game.js";
 import { setThreadGameLink } from "../classes/Thread.js";
 import axios from "axios";
-import { readFileSync } from "fs";
-import path from "path";
 import { igdbService } from "../services/IgdbService.js";
 
 const AUDIT_PAGE_SIZE = 20;
@@ -40,19 +38,7 @@ const AUDIT_SESSIONS = new Map<
   }
 >();
 
-const GAME_DB_THUMB_NAME = "gameDB.png";
-const GAME_DB_THUMB_PATH = path.join(
-  process.cwd(),
-  "src",
-  "assets",
-  "images",
-  GAME_DB_THUMB_NAME,
-);
-const gameDbThumbBuffer = readFileSync(GAME_DB_THUMB_PATH);
 
-function buildGameDbThumbAttachment(): AttachmentBuilder {
-  return new AttachmentBuilder(gameDbThumbBuffer, { name: GAME_DB_THUMB_NAME });
-}
 
 @Discord()
 @SlashGroup({ description: "Game Database Commands", name: "gamedb" })
@@ -442,8 +428,7 @@ export class GameDbAdmin {
       .setDescription(`Game ID: ${game.id}\nIGDB ID: ${game.igdbId ?? "N/A"}`)
       .setColor(0xFFA500); // Orange for audit
 
-    const files: AttachmentBuilder[] = [buildGameDbThumbAttachment()];
-    embed.setThumbnail(`attachment://${GAME_DB_THUMB_NAME}`);
+    const files: AttachmentBuilder[] = [];
 
     let igdbImageAvailable = false;
     let igdbImageUrl = "";
@@ -520,7 +505,7 @@ export class GameDbAdmin {
     return {
         embeds: [embed],
         components: [actionRow],
-        files
+        files: files.length ? files : undefined,
     };
   }
 

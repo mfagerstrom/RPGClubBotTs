@@ -12,7 +12,10 @@ function normalizeOptions(options: any): any {
     return options;
   }
 
-  const { __forceFollowUp: _forceFollowUp, ...restOptions } = options as any;
+  const {
+    __forceFollowUp: _forceFollowUp,
+    ...restOptions
+  } = options as any;
   void _forceFollowUp;
 
   if ("ephemeral" in options) {

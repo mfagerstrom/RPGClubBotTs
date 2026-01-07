@@ -225,7 +225,7 @@ export class NrGotmSearch {
         if (first) {
           await safeReply(interaction, payload);
         } else {
-          await interaction.followUp(payload);
+          await safeReply(interaction, { ...payload, __forceFollowUp: true });
         }
       };
 
