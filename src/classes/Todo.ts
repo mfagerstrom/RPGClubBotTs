@@ -218,3 +218,26 @@ export async function completeTodo(todoId: number, completedBy: string | null): 
     await connection.close();
   }
 }
+
+export async function countTodos(): Promise<{ open: number; completed: number }> {
+  const connection = await getOraclePool().getConnection();
+  try {
+    const result = await connection.execute<{
+      OPEN_COUNT: number | null;
+      COMPLETED_COUNT: number | null;
+    }>(
+      `SELECT SUM(CASE WHEN IS_COMPLETED = 1 THEN 0 ELSE 1 END) AS OPEN_COUNT,
+              SUM(CASE WHEN IS_COMPLETED = 1 THEN 1 ELSE 0 END) AS COMPLETED_COUNT
+         FROM RPG_CLUB_TODOS`,
+      {},
+      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+    );
+    const row = result.rows?.[0];
+    return {
+      open: Number(row?.OPEN_COUNT ?? 0),
+      completed: Number(row?.COMPLETED_COUNT ?? 0),
+    };
+  } finally {
+    await connection.close();
+  }
+}

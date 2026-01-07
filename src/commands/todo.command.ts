@@ -23,6 +23,7 @@ import { isSuperAdmin } from "./superadmin.command.js";
 import {
   completeTodo,
   createTodo,
+  countTodos,
   deleteTodo,
   fetchTodoById,
   listTodos,
@@ -56,14 +57,6 @@ function formatTodoLines(items: ITodoItem[]): string[] {
     }
   }
   return lines;
-}
-
-function formatTodoResponse(action: string, todo: ITodoItem): string {
-  const lines: string[] = [`${action} TODO #${todo.todoId}: ${todo.title}`];
-  if (todo.details) {
-    lines.push(`Details: ${todo.details}`);
-  }
-  return lines.join("\n");
 }
 
 function buildTodoActionEmbed(action: string, todo: ITodoItem): EmbedBuilder {
@@ -102,14 +95,11 @@ function buildTodoDescription(items: ITodoItem[], includeCompleted: boolean): st
 function buildTodoListEmbed(
   items: ITodoItem[],
   includeCompleted: boolean,
+  counts: { open: number; completed: number },
 ): { embeds: EmbedBuilder[] } {
   const description: string = buildTodoDescription(items, includeCompleted);
-  const openCount: number = items.filter((item) => !item.isCompleted).length;
-  const completedCount: number = items.filter((item) => item.isCompleted).length;
   const title: string = includeCompleted ? "Bot Development TODOs" : "Open Bot Development TODOs";
-  const footerText: string = completedCount > 0
-    ? `${completedCount} completed`
-    : `${openCount} open`;
+  const footerText: string = `${counts.open} open | ${counts.completed} completed`;
 
   const embed: EmbedBuilder = new EmbedBuilder()
     .setTitle(title)
@@ -171,6 +161,13 @@ export class TodoCommand {
   @Slash({ description: "List bot development TODOs", name: "list" })
   async list(
     @SlashOption({
+      description: "TODO id to view details (optional)",
+      name: "id",
+      required: false,
+      type: ApplicationCommandOptionType.Integer,
+    })
+    todoId: number | undefined,
+    @SlashOption({
       description: "Include completed TODOs",
       name: "include_completed",
       required: false,
@@ -189,8 +186,26 @@ export class TodoCommand {
     const isPublic: boolean = Boolean(showInChat);
     await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
 
+    const counts = await countTodos();
+    if (todoId !== undefined) {
+      const todo = await fetchTodoById(todoId);
+      if (!todo) {
+        await safeReply(interaction, {
+          content: `TODO #${todoId} was not found.`,
+          flags: isPublic ? undefined : MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      const response = buildTodoListEmbed([todo], true, counts);
+      await safeReply(interaction, {
+        ...response,
+        flags: isPublic ? undefined : MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
     const todos: ITodoItem[] = await listTodos(Boolean(includeCompleted), MAX_LIST_ITEMS);
-    const response = buildTodoListEmbed(todos, Boolean(includeCompleted));
+    const response = buildTodoListEmbed(todos, Boolean(includeCompleted), counts);
     await safeReply(interaction, {
       ...response,
       flags: isPublic ? undefined : MessageFlags.Ephemeral,

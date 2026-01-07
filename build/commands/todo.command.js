@@ -11,7 +11,7 @@ import { ActionRowBuilder, ApplicationCommandOptionType, ButtonBuilder, ButtonSt
 import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption, } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import { isSuperAdmin } from "./superadmin.command.js";
-import { completeTodo, createTodo, deleteTodo, fetchTodoById, listTodos, updateTodo, } from "../classes/Todo.js";
+import { completeTodo, createTodo, countTodos, deleteTodo, fetchTodoById, listTodos, updateTodo, } from "../classes/Todo.js";
 import { deleteSuggestion, getSuggestionById, listSuggestions, } from "../classes/Suggestion.js";
 const MAX_LIST_ITEMS = 100;
 const MAX_TODO_DESCRIPTION = 3800;
@@ -33,13 +33,6 @@ function formatTodoLines(items) {
         }
     }
     return lines;
-}
-function formatTodoResponse(action, todo) {
-    const lines = [`${action} TODO #${todo.todoId}: ${todo.title}`];
-    if (todo.details) {
-        lines.push(`Details: ${todo.details}`);
-    }
-    return lines.join("\n");
 }
 function buildTodoActionEmbed(action, todo) {
     const title = `${action} TODO #${todo.todoId}`;
@@ -69,14 +62,10 @@ function buildTodoDescription(items, includeCompleted) {
     }
     return trimmedLines.join("\n");
 }
-function buildTodoListEmbed(items, includeCompleted) {
+function buildTodoListEmbed(items, includeCompleted, counts) {
     const description = buildTodoDescription(items, includeCompleted);
-    const openCount = items.filter((item) => !item.isCompleted).length;
-    const completedCount = items.filter((item) => item.isCompleted).length;
     const title = includeCompleted ? "Bot Development TODOs" : "Open Bot Development TODOs";
-    const footerText = completedCount > 0
-        ? `${completedCount} completed`
-        : `${openCount} open`;
+    const footerText = `${counts.open} open | ${counts.completed} completed`;
     const embed = new EmbedBuilder()
         .setTitle(title)
         .setColor(0x3498db)
@@ -116,11 +105,28 @@ function buildSuggestionDetailEmbed(item) {
     return embed;
 }
 let TodoCommand = class TodoCommand {
-    async list(includeCompleted, showInChat, interaction) {
+    async list(todoId, includeCompleted, showInChat, interaction) {
         const isPublic = Boolean(showInChat);
         await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
+        const counts = await countTodos();
+        if (todoId !== undefined) {
+            const todo = await fetchTodoById(todoId);
+            if (!todo) {
+                await safeReply(interaction, {
+                    content: `TODO #${todoId} was not found.`,
+                    flags: isPublic ? undefined : MessageFlags.Ephemeral,
+                });
+                return;
+            }
+            const response = buildTodoListEmbed([todo], true, counts);
+            await safeReply(interaction, {
+                ...response,
+                flags: isPublic ? undefined : MessageFlags.Ephemeral,
+            });
+            return;
+        }
         const todos = await listTodos(Boolean(includeCompleted), MAX_LIST_ITEMS);
-        const response = buildTodoListEmbed(todos, Boolean(includeCompleted));
+        const response = buildTodoListEmbed(todos, Boolean(includeCompleted), counts);
         await safeReply(interaction, {
             ...response,
             flags: isPublic ? undefined : MessageFlags.Ephemeral,
@@ -357,12 +363,18 @@ let TodoCommand = class TodoCommand {
 __decorate([
     Slash({ description: "List bot development TODOs", name: "list" }),
     __param(0, SlashOption({
+        description: "TODO id to view details (optional)",
+        name: "id",
+        required: false,
+        type: ApplicationCommandOptionType.Integer,
+    })),
+    __param(1, SlashOption({
         description: "Include completed TODOs",
         name: "include_completed",
         required: false,
         type: ApplicationCommandOptionType.Boolean,
     })),
-    __param(1, SlashOption({
+    __param(2, SlashOption({
         description: "Show in chat (public) instead of ephemeral",
         name: "showinchat",
         required: false,
