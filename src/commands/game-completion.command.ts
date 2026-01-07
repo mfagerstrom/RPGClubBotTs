@@ -573,7 +573,7 @@ export class GameCompletionCommands {
   }
 
   @ButtonComponent({
-    id: /^comp-import-action:\d+:\d+:\d+:(add|update|skip|pause|manual|igdb|igdb-manual|query)$/,
+    id: /^comp-import-action:\d+:\d+:\d+:(add|update|skip|pause|manual|igdb|igdb-manual|query|same-yes|same-no)$/,
   })
   async handleCompletionatorAction(interaction: ButtonInteraction): Promise<void> {
     const [, ownerId, importIdRaw, itemIdRaw, action] = interaction.customId.split(":");
@@ -606,6 +606,71 @@ export class GameCompletionCommands {
     }
 
     if (action === "add") {
+      const item = await getImportItemById(itemId);
+      if (!item || !item.gameDbGameId) {
+        await interaction.reply({
+          content: "Import item data is missing. Please resume the import.",
+          flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+        });
+        return;
+      }
+
+      const completionId = await Member.addCompletion({
+        userId: interaction.user.id,
+        gameId: item.gameDbGameId,
+        completionType: item.completionType ?? "Main Story",
+        completedAt: item.completedAt,
+        finalPlaytimeHours: item.playtimeHours,
+        note: null,
+      });
+      await Member.removeNowPlaying(interaction.user.id, item.gameDbGameId).catch(() => {});
+
+      await updateImportItem(item.itemId, {
+        status: "IMPORTED",
+        gameDbGameId: item.gameDbGameId,
+        completionId,
+      });
+      await this.processNextCompletionatorItem(interaction, session);
+      return;
+    }
+
+    if (action === "same-yes") {
+      const item = await getImportItemById(itemId);
+      if (!item || !item.completionId) {
+        await interaction.reply({
+          content: "Import item data is missing. Please resume the import.",
+          flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+        });
+        return;
+      }
+
+      const existing = await Member.getCompletion(item.completionId);
+      if (!existing) {
+        await interaction.reply({
+          content: "Completion not found.",
+          flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+        });
+        return;
+      }
+
+      const updates = this.buildCompletionUpdate(existing, item);
+      if (!updates) {
+        await updateImportItem(item.itemId, { status: "SKIPPED" });
+        await this.processNextCompletionatorItem(interaction, session, { ephemeral });
+        return;
+      }
+
+      await this.renderCompletionatorUpdateSelection(
+        interaction,
+        session,
+        item,
+        existing,
+        ephemeral,
+      );
+      return;
+    }
+
+    if (action === "same-no") {
       const item = await getImportItemById(itemId);
       if (!item || !item.gameDbGameId) {
         await interaction.reply({
@@ -1591,7 +1656,8 @@ export class GameCompletionCommands {
     item: ICompletionatorItem,
     ephemeral?: boolean,
   ): Promise<void> {
-    const results = await Game.searchGames(item.gameTitle);
+    const searchTitle = this.stripCompletionatorYear(item.gameTitle);
+    const results = await this.searchGameDbWithFallback(searchTitle);
     const embed = this.buildCompletionatorEmbed(session, item);
 
     if (!results.length) {
@@ -1721,13 +1787,55 @@ export class GameCompletionCommands {
       return;
     }
 
+    const shouldConfirmSame = this.shouldConfirmCompletionMatch(existing, item);
+    if (shouldConfirmSame) {
+      const confirmEmbed = this.buildCompletionSameCheckEmbed(session, item, existing);
+      const confirmButtons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(
+            `comp-import-action:${interaction.user.id}:${session.importId}:${item.itemId}:same-yes`,
+          )
+          .setLabel("Yes")
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(
+            `comp-import-action:${interaction.user.id}:${session.importId}:${item.itemId}:same-no`,
+          )
+          .setLabel("No")
+          .setStyle(ButtonStyle.Secondary),
+      );
+
+      await this.respondToImportInteraction(interaction, {
+        embeds: [confirmEmbed],
+        components: [confirmButtons],
+        content: "",
+      }, ephemeral);
+      return;
+    }
+
+    await this.renderCompletionatorUpdateSelection(
+      interaction,
+      session,
+      item,
+      existing,
+      ephemeral,
+    );
+  }
+
+  private async renderCompletionatorUpdateSelection(
+    interaction: CommandInteraction | ButtonInteraction | StringSelectMenuInteraction,
+    session: ICompletionatorImport,
+    item: ICompletionatorItem,
+    existing: Awaited<ReturnType<typeof Member.getCompletionByGameId>>,
+    ephemeral?: boolean,
+  ): Promise<void> {
     const embed = this.buildCompletionUpdateEmbed(session, item, existing);
     const updateOptions = this.buildCompletionUpdateOptions(existing, item);
     if (!updateOptions.length) {
       await updateImportItem(item.itemId, {
         status: "SKIPPED",
-        gameDbGameId: gameId,
-        completionId: existing.completionId,
+        gameDbGameId: item.gameDbGameId ?? null,
+        completionId: existing?.completionId ?? null,
       });
       await this.processNextCompletionatorItem(interaction, session, { ephemeral });
       return;
@@ -1765,6 +1873,48 @@ export class GameCompletionCommands {
       ],
       content: "",
     }, ephemeral);
+  }
+
+  private shouldConfirmCompletionMatch(
+    existing: Awaited<ReturnType<typeof Member.getCompletionByGameId>>,
+    item: ICompletionatorItem,
+  ): boolean {
+    if (!existing?.completedAt || !item.completedAt) {
+      return false;
+    }
+    return formatTableDate(existing.completedAt) !== formatTableDate(item.completedAt);
+  }
+
+  private buildCompletionSameCheckEmbed(
+    session: ICompletionatorImport,
+    item: ICompletionatorItem,
+    existing: Awaited<ReturnType<typeof Member.getCompletionByGameId>>,
+  ): EmbedBuilder {
+    const embed = new EmbedBuilder()
+      .setTitle(`Completionator Import #${session.importId}`)
+      .setDescription(`Is this the same completion for "${item.gameTitle}"?`)
+      .addFields(
+        {
+          name: "Current",
+          value:
+            `${existing?.completionType ?? "Unknown"} — ` +
+            `${existing?.completedAt ? formatTableDate(existing.completedAt) : "Unknown"} — ` +
+            `${existing?.finalPlaytimeHours ?? "Unknown"} hrs`,
+        },
+        {
+          name: "CSV",
+          value:
+            `${item.completionType ?? "Unknown"} — ` +
+            `${item.completedAt ? formatTableDate(item.completedAt) : "Unknown"} — ` +
+            `${item.playtimeHours ?? "Unknown"} hrs`,
+        },
+        {
+          name: "Action",
+          value: "Yes = update existing, No = add as new completion",
+          inline: false,
+        },
+      );
+    return embed;
   }
 
   private buildCompletionUpdate(
@@ -2018,7 +2168,8 @@ export class GameCompletionCommands {
         return;
       }
 
-      const results = await Game.searchGames(response);
+      const normalized = this.stripCompletionatorYear(response);
+      const results = await this.searchGameDbWithFallback(normalized);
       if (!results.length) {
         await this.editImportPrompt(
           interaction,
@@ -2040,6 +2191,41 @@ export class GameCompletionCommands {
       );
       return;
     }
+  }
+
+  private stripCompletionatorYear(title: string): string {
+    const trimmed: string = title.trim();
+    return trimmed.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  }
+
+  private async searchGameDbWithFallback(
+    rawTitle: string,
+  ): Promise<Awaited<ReturnType<typeof Game.searchGames>>> {
+    const primaryResults = await Game.searchGames(rawTitle);
+    if (primaryResults.length) {
+      return primaryResults;
+    }
+
+    const tokens = rawTitle
+      .split(/\s+/)
+      .map((token) => token.replace(/[^\p{L}\p{N}'-]/gu, ""))
+      .filter((token) => token.length > 1);
+    const uniqueTokens = Array.from(new Set(tokens));
+    if (!uniqueTokens.length) {
+      return [];
+    }
+
+    const resultMap = new Map<number, Awaited<ReturnType<typeof Game.searchGames>>[number]>();
+    for (const token of uniqueTokens) {
+      const matches = await Game.searchGames(token);
+      for (const match of matches) {
+        if (!resultMap.has(match.id)) {
+          resultMap.set(match.id, match);
+        }
+      }
+    }
+
+    return Array.from(resultMap.values());
   }
 
   private async renderCompletionatorGameDbResults(
