@@ -12,12 +12,15 @@ import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, Slash
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import Game from "../classes/Game.js";
+import { getThreadsByGameId, setThreadGameLink, upsertThreadRecord } from "../classes/Thread.js";
 import axios from "axios"; // For downloading image attachments
 import { igdbService } from "../services/IgdbService.js";
 import { createIgdbSession, } from "../services/IgdbSelectService.js";
 import Member from "../classes/Member.js";
 import { COMPLETION_TYPES, parseCompletionDateInput, } from "./profile.command.js";
 const GAME_SEARCH_PAGE_SIZE = 25;
+const NOW_PLAYING_FORUM_ID = "1059875931356938240";
+const NOW_PLAYING_SIDEGAME_TAG_ID = "1059912719366635611";
 const GAME_SEARCH_SESSIONS = new Map();
 function isUniqueConstraintError(err) {
     const msg = err?.message ?? "";
@@ -328,7 +331,9 @@ let GameDb = class GameDb {
         }
         const includeActions = !("isMessageComponent" in interaction) ||
             !interaction.isMessageComponent();
-        const components = includeActions ? [this.buildGameProfileActionRow(gameId)] : [];
+        const components = includeActions
+            ? [this.buildGameProfileActionRow(gameId, profile.hasThread)]
+            : [];
         await safeReply(interaction, {
             embeds: profile.embeds,
             files: profile.files,
@@ -348,6 +353,7 @@ let GameDb = class GameDb {
             const nowPlayingMembers = await Game.getNowPlayingMembers(gameId);
             const completions = await Game.getGameCompletions(gameId);
             const alternateVersions = await Game.getAlternateVersions(gameId);
+            const linkedThreads = await getThreadsByGameId(gameId);
             const platformMap = new Map(platforms.map((p) => [p.id, p.name]));
             const regionMap = new Map(regions.map((r) => [r.id, r.name]));
             const description = game.description || "No description available.";
@@ -370,6 +376,7 @@ let GameDb = class GameDb {
             const threadId = associations.gotmWins.find((w) => w.threadId)?.threadId ??
                 associations.nrGotmWins.find((w) => w.threadId)?.threadId ??
                 nowPlayingMembers.find((p) => p.threadId)?.threadId ??
+                linkedThreads[0] ??
                 null;
             if (threadId) {
                 const threadLabel = await this.buildThreadLink(threadId, interaction?.guildId ?? null, interaction?.client);
@@ -505,7 +512,7 @@ let GameDb = class GameDb {
             if (game.imageData) {
                 files.push(new AttachmentBuilder(game.imageData, { name: "game_image.png" }));
             }
-            return { embeds: [embed], files };
+            return { embeds: [embed], files, hasThread: Boolean(threadId) };
         }
         catch (error) {
             console.error("Failed to build game profile:", error);
@@ -552,7 +559,7 @@ let GameDb = class GameDb {
             return null;
         }
     }
-    buildGameProfileActionRow(gameId) {
+    buildGameProfileActionRow(gameId, hasThread) {
         const addNowPlaying = new ButtonBuilder()
             .setCustomId(`gamedb-action:nowplaying:${gameId}`)
             .setLabel("Add to Now Playing List")
@@ -561,7 +568,15 @@ let GameDb = class GameDb {
             .setCustomId(`gamedb-action:completion:${gameId}`)
             .setLabel("Add Completion")
             .setStyle(ButtonStyle.Success);
-        return new ActionRowBuilder().addComponents(addNowPlaying, addCompletion);
+        const actionRow = new ActionRowBuilder().addComponents(addNowPlaying, addCompletion);
+        if (!hasThread) {
+            const addThread = new ButtonBuilder()
+                .setCustomId(`gamedb-action:thread:${gameId}`)
+                .setLabel("Add Now Playing Thread")
+                .setStyle(ButtonStyle.Secondary);
+            actionRow.addComponents(addThread);
+        }
+        return actionRow;
     }
     async handleGameDbAction(interaction) {
         const [, action, gameIdRaw] = interaction.customId.split(":");
@@ -590,6 +605,10 @@ let GameDb = class GameDb {
         }
         if (action === "nowplaying") {
             await this.runNowPlayingWizard(interaction, gameId, game.title);
+            return;
+        }
+        if (action === "thread") {
+            await this.runNowPlayingThreadWizard(interaction, gameId, game.title);
             return;
         }
         await this.runCompletionWizard(interaction, gameId, game.title);
@@ -656,6 +675,104 @@ let GameDb = class GameDb {
         }
         catch (err) {
             await updateEmbed(`❌ Failed to add: ${err?.message ?? String(err)}`);
+        }
+    }
+    async runNowPlayingThreadWizard(interaction, gameId, gameTitle) {
+        const existingThreads = await getThreadsByGameId(gameId);
+        if (existingThreads.length) {
+            await interaction.followUp({
+                content: "A thread is already linked to this game.",
+            });
+            return;
+        }
+        const forum = (await interaction.guild?.channels.fetch(NOW_PLAYING_FORUM_ID));
+        if (!forum) {
+            await interaction.followUp({
+                content: "Now Playing forum channel was not found.",
+            });
+            return;
+        }
+        const threadTitle = gameTitle;
+        const memberDisplayName = interaction.member?.displayName ?? interaction.user.username ?? "User";
+        const game = await Game.getGameById(gameId);
+        const files = game?.imageData
+            ? [new AttachmentBuilder(game.imageData, { name: `gamedb_${gameId}.png` })]
+            : [];
+        const messagePayload = {
+            content: `Now Playing thread created by ${memberDisplayName}.`,
+            allowedMentions: { parse: [] },
+        };
+        if (files.length) {
+            messagePayload.files = files;
+        }
+        try {
+            const thread = await forum.threads.create({
+                name: threadTitle,
+                message: messagePayload,
+                appliedTags: [NOW_PLAYING_SIDEGAME_TAG_ID],
+            });
+            await upsertThreadRecord({
+                threadId: thread.id,
+                forumChannelId: thread.parentId ?? NOW_PLAYING_FORUM_ID,
+                threadName: thread.name ?? threadTitle,
+                isArchived: Boolean(thread.archived),
+                createdAt: thread.createdAt ?? new Date(),
+                lastSeenAt: null,
+                skipLinking: "Y",
+            });
+            await setThreadGameLink(thread.id, gameId);
+            await interaction.followUp({
+                content: `Created and linked <#${thread.id}>.`,
+            });
+            const nowPlayingMembers = await Game.getNowPlayingMembers(gameId);
+            const completions = await Game.getGameCompletions(gameId);
+            const mentionIds = new Set();
+            nowPlayingMembers.forEach((member) => mentionIds.add(member.userId));
+            completions.forEach((member) => mentionIds.add(member.userId));
+            if (mentionIds.size) {
+                const mentions = Array.from(mentionIds).map((id) => `<@${id}>`);
+                const lines = [];
+                let buffer = "";
+                for (const mention of mentions) {
+                    const next = buffer ? `${buffer} ${mention}` : mention;
+                    if (next.length > 1900) {
+                        lines.push(buffer);
+                        buffer = mention;
+                    }
+                    else {
+                        buffer = next;
+                    }
+                }
+                if (buffer)
+                    lines.push(buffer);
+                for (const line of lines) {
+                    await thread.send({ content: line });
+                }
+            }
+            const profile = await this.buildGameProfile(gameId, interaction);
+            if (profile) {
+                const actionRow = this.buildGameProfileActionRow(gameId, profile.hasThread);
+                const existingComponents = interaction.message?.components ?? [];
+                const updatedComponents = existingComponents.length
+                    ? existingComponents.map((row) => {
+                        if (!("components" in row))
+                            return row;
+                        const actionRowComponents = row.components;
+                        const hasGameDbAction = actionRowComponents.some((component) => component.customId?.startsWith("gamedb-action:"));
+                        return hasGameDbAction ? actionRow : row;
+                    })
+                    : [actionRow];
+                await interaction.editReply({
+                    embeds: profile.embeds,
+                    files: profile.files,
+                    components: updatedComponents,
+                }).catch(() => { });
+            }
+        }
+        catch (err) {
+            await interaction.followUp({
+                content: `Failed to create thread: ${err?.message ?? String(err)}`,
+            });
         }
     }
     async runCompletionWizard(interaction, gameId, gameTitle) {
@@ -933,7 +1050,7 @@ let GameDb = class GameDb {
             return;
         }
         const response = this.buildSearchResponse(sessionId, session, page);
-        const actionRow = this.buildGameProfileActionRow(gameId);
+        const actionRow = this.buildGameProfileActionRow(gameId, profile.hasThread);
         try {
             await interaction.editReply({
                 embeds: profile.embeds,
@@ -1092,7 +1209,7 @@ __decorate([
     }))
 ], GameDb.prototype, "view", null);
 __decorate([
-    ButtonComponent({ id: /^gamedb-action:(nowplaying|completion):\d+$/ })
+    ButtonComponent({ id: /^gamedb-action:(nowplaying|completion|thread):\d+$/ })
 ], GameDb.prototype, "handleGameDbAction", null);
 __decorate([
     Slash({ description: "Search for a game", name: "search" }),

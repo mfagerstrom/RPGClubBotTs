@@ -4,6 +4,7 @@ import Game from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
 import { createIgdbSession, } from "./IgdbSelectService.js";
 const NOW_PLAYING_FORUM_ID = "1059875931356938240";
+const NOW_PLAYING_SIDEGAME_TAG_ID = "1059912719366635611";
 const PROMPT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24h
 const promptCache = new Map();
 function hasIgdbConfig() {
@@ -37,6 +38,11 @@ function buildButtons(threadId) {
 async function promptThread(thread) {
     if (!hasIgdbConfig())
         return; // Don't prompt when IGDB is not configured
+    const isBotCreated = thread.ownerId && thread.ownerId === thread.client.user?.id;
+    const isSidegameTag = thread.appliedTags?.includes(NOW_PLAYING_SIDEGAME_TAG_ID) ?? false;
+    if (thread.parentId === NOW_PLAYING_FORUM_ID && isBotCreated && isSidegameTag) {
+        return;
+    }
     const info = await getThreadLinkInfo(thread.id).catch(() => ({
         skipLinking: false,
         gamedbGameIds: [],
