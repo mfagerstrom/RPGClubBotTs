@@ -119,7 +119,7 @@ export class GameCompletionCommands {
     })
     note: string | undefined,
     @SlashOption({
-      description: "Completion date (defaults to today)",
+      description: "Completion date (YYYY-MM-DD, today, or unknown)",
       name: "completion_date",
       required: false,
       type: ApplicationCommandOptionType.String,

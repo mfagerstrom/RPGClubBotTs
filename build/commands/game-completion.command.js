@@ -2200,7 +2200,7 @@ __decorate([
         type: ApplicationCommandOptionType.String,
     })),
     __param(4, SlashOption({
-        description: "Completion date (defaults to today)",
+        description: "Completion date (YYYY-MM-DD, today, or unknown)",
         name: "completion_date",
         required: false,
         type: ApplicationCommandOptionType.String,

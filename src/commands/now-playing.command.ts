@@ -519,7 +519,7 @@ export class NowPlayingCommand {
 
     let completedAt: Date | null;
     try {
-      completedAt = parseCompletionDateInput(completionDate);
+      completedAt = parseCompletionDateInput(completionDate ?? "today");
     } catch (err: any) {
       await safeReply(interaction, {
         content: err?.message ?? "Invalid completion date.",

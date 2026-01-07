@@ -65,10 +65,19 @@ function clampLimit(limit: number | undefined, max: number): number {
 }
 
 export function parseCompletionDateInput(value: string | undefined): Date | null {
-  if (!value) return new Date();
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "today") {
+    return new Date();
+  }
+  if (normalized === "unknown" || normalized === "skip") {
+    return null;
+  }
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    throw new Error("Could not parse completion date. Use a format like 2025-12-11.");
+    throw new Error(
+      "Could not parse completion date. Use YYYY-MM-DD, or 'today'/'unknown'.",
+    );
   }
   return parsed;
 }

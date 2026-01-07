@@ -152,7 +152,7 @@ let SuperAdmin = class SuperAdmin {
         }
         let completedAt;
         try {
-            completedAt = parseCompletionDateInput(completionDate);
+            completedAt = parseCompletionDateInput(completionDate ?? "today");
         }
         catch (err) {
             await safeReply(interaction, {

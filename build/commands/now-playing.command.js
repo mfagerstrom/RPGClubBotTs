@@ -338,7 +338,7 @@ let NowPlayingCommand = class NowPlayingCommand {
         }
         let completedAt;
         try {
-            completedAt = parseCompletionDateInput(completionDate);
+            completedAt = parseCompletionDateInput(completionDate ?? "today");
         }
         catch (err) {
             await safeReply(interaction, {
