@@ -11,7 +11,7 @@ import { ActionRowBuilder, ApplicationCommandOptionType, ButtonBuilder, ButtonSt
 import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption, } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import { isSuperAdmin } from "./superadmin.command.js";
-import { completeTodo, createTodo, deleteTodo, listTodos, updateTodo, } from "../classes/Todo.js";
+import { completeTodo, createTodo, deleteTodo, fetchTodoById, listTodos, updateTodo, } from "../classes/Todo.js";
 import { deleteSuggestion, getSuggestionById, listSuggestions, } from "../classes/Suggestion.js";
 const MAX_LIST_ITEMS = 100;
 const MAX_TODO_DESCRIPTION = 3800;
@@ -33,6 +33,21 @@ function formatTodoLines(items) {
         }
     }
     return lines;
+}
+function formatTodoResponse(action, todo) {
+    const lines = [`${action} TODO #${todo.todoId}: ${todo.title}`];
+    if (todo.details) {
+        lines.push(`Details: ${todo.details}`);
+    }
+    return lines.join("\n");
+}
+function buildTodoActionEmbed(action, todo) {
+    const title = `${action} TODO #${todo.todoId}`;
+    const description = formatTodoLines([todo]).join("\n");
+    return new EmbedBuilder()
+        .setTitle(title)
+        .setColor(0x3498db)
+        .setDescription(description);
 }
 function buildTodoDescription(items, includeCompleted) {
     if (items.length === 0) {
@@ -261,7 +276,7 @@ let TodoCommand = class TodoCommand {
         const trimmedDetails = details?.trim();
         const todo = await createTodo(trimmedTitle, trimmedDetails ?? null, interaction.user.id);
         await safeReply(interaction, {
-            content: `Added TODO #${todo.todoId}: ${todo.title}`,
+            embeds: [buildTodoActionEmbed("Added", todo)],
             flags: isPublic ? undefined : MessageFlags.Ephemeral,
         });
     }
@@ -289,8 +304,14 @@ let TodoCommand = class TodoCommand {
         const trimmedDetails = details === undefined ? undefined : details.trim();
         const finalDetails = trimmedDetails === "" ? null : trimmedDetails;
         const updated = await updateTodo(todoId, trimmedTitle, finalDetails);
+        const updatedTodo = updated ? await fetchTodoById(todoId) : null;
         await safeReply(interaction, {
-            content: updated ? `Updated TODO #${todoId}.` : `TODO #${todoId} was not found.`,
+            content: updatedTodo
+                ? undefined
+                : updated
+                    ? `Updated TODO #${todoId}.`
+                    : `TODO #${todoId} was not found.`,
+            embeds: updatedTodo ? [buildTodoActionEmbed("Updated", updatedTodo)] : undefined,
             flags: isPublic ? undefined : MessageFlags.Ephemeral,
         });
     }
@@ -300,9 +321,15 @@ let TodoCommand = class TodoCommand {
         const ok = await isSuperAdmin(interaction);
         if (!ok)
             return;
+        const existing = await fetchTodoById(todoId);
         const removed = await deleteTodo(todoId);
         await safeReply(interaction, {
-            content: removed ? `Deleted TODO #${todoId}.` : `TODO #${todoId} was not found.`,
+            content: removed
+                ? existing
+                    ? undefined
+                    : `Deleted TODO #${todoId}.`
+                : `TODO #${todoId} was not found.`,
+            embeds: removed && existing ? [buildTodoActionEmbed("Deleted", existing)] : undefined,
             flags: isPublic ? undefined : MessageFlags.Ephemeral,
         });
     }
@@ -312,11 +339,17 @@ let TodoCommand = class TodoCommand {
         const ok = await isSuperAdmin(interaction);
         if (!ok)
             return;
+        const existing = await fetchTodoById(todoId);
         const completed = await completeTodo(todoId, interaction.user.id);
         await safeReply(interaction, {
             content: completed
-                ? `Marked TODO #${todoId} as completed.`
+                ? existing
+                    ? undefined
+                    : `Marked TODO #${todoId} as completed.`
                 : `TODO #${todoId} was not found or already completed.`,
+            embeds: completed && existing
+                ? [buildTodoActionEmbed("Completed", existing)]
+                : undefined,
             flags: isPublic ? undefined : MessageFlags.Ephemeral,
         });
     }

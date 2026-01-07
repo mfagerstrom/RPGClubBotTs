@@ -16,7 +16,7 @@ function mapTodoRow(row) {
         isCompleted: (row.IS_COMPLETED ?? 0) === 1,
     };
 }
-async function fetchTodoById(todoId, existingConnection) {
+export async function fetchTodoById(todoId, existingConnection) {
     const connection = existingConnection ?? (await getOraclePool().getConnection());
     try {
         const result = await connection.execute(`SELECT TODO_ID,

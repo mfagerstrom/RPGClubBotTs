@@ -41,7 +41,7 @@ function mapTodoRow(row: {
   };
 }
 
-async function fetchTodoById(
+export async function fetchTodoById(
   todoId: number,
   existingConnection?: oracledb.Connection,
 ): Promise<ITodoItem | null> {
