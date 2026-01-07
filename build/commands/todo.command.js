@@ -35,6 +35,7 @@ const TODO_TAB_LABEL_TO_FILTER = {
     Suggestions: "suggestions",
     Completed: "completed",
 };
+const latestTodoListByChannel = new Map();
 function buildTodoTabComponents(active, ownerId) {
     const buttons = TODO_TAB_DEFINITIONS.map((tab) => new ButtonBuilder()
         .setCustomId(`todo-tab:${tab.id}:${ownerId}`)
@@ -46,6 +47,48 @@ function buildTodoTabComponents(active, ownerId) {
         rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
     }
     return rows;
+}
+function trackTodoListState(channelId, messageId, filter, ownerId) {
+    if (!channelId || !messageId)
+        return;
+    latestTodoListByChannel.set(channelId, { messageId, filter, ownerId });
+}
+async function refreshLatestTodoList(channelId, client) {
+    if (!channelId)
+        return;
+    const state = latestTodoListByChannel.get(channelId);
+    if (!state)
+        return;
+    try {
+        const channel = await client.channels.fetch(channelId);
+        if (!channel || !channel.isTextBased())
+            return;
+        const message = await channel.messages.fetch(state.messageId);
+        const summary = await countTodoSummary();
+        const suggestionCount = await countSuggestions();
+        const footerText = buildAllTodoFooterText(summary, suggestionCount);
+        if (state.filter === "suggestions") {
+            const suggestions = await listSuggestions(MAX_SUGGESTION_OPTIONS);
+            const embed = buildSuggestionTabEmbed(suggestions, footerText);
+            await message.edit({
+                embeds: [embed],
+                components: buildTodoTabComponents("suggestions", state.ownerId),
+            });
+            return;
+        }
+        const includeDetails = state.filter !== "all" && state.filter !== "completed";
+        const todos = state.filter === "completed"
+            ? (await listTodos(true, MAX_LIST_ITEMS)).filter((item) => item.isCompleted)
+            : await listTodos(false, MAX_LIST_ITEMS);
+        const response = buildTodoListEmbed(todos, state.filter === "completed", footerText, state.filter, includeDetails);
+        await message.edit({
+            ...response,
+            components: buildTodoTabComponents(state.filter, state.ownerId),
+        });
+    }
+    catch {
+        latestTodoListByChannel.delete(channelId);
+    }
 }
 function formatTodoLines(items, includeDetails) {
     const lines = [];
@@ -194,11 +237,15 @@ let TodoCommand = class TodoCommand {
         if (filter === "suggestions") {
             const suggestions = await listSuggestions(MAX_SUGGESTION_OPTIONS);
             const embed = buildSuggestionTabEmbed(suggestions, footerText);
-            await safeReply(interaction, {
+            const reply = await safeReply(interaction, {
                 embeds: [embed],
                 components: buildTodoTabComponents("suggestions", interaction.user.id),
                 flags: isPublic ? undefined : MessageFlags.Ephemeral,
             });
+            if (isPublic) {
+                const replyMessage = reply ?? await interaction.fetchReply();
+                trackTodoListState(interaction.channelId, replyMessage?.id, "suggestions", interaction.user.id);
+            }
             return;
         }
         const includeDetails = filter !== "all" && filter !== "completed";
@@ -206,11 +253,15 @@ let TodoCommand = class TodoCommand {
             ? (await listTodos(true, MAX_LIST_ITEMS)).filter((item) => item.isCompleted)
             : await listTodos(false, MAX_LIST_ITEMS);
         const response = buildTodoListEmbed(todos, filter === "completed", footerText, filter, includeDetails);
-        await safeReply(interaction, {
+        const reply = await safeReply(interaction, {
             ...response,
             components: buildTodoTabComponents(filter, interaction.user.id),
             flags: isPublic ? undefined : MessageFlags.Ephemeral,
         });
+        if (isPublic) {
+            const replyMessage = reply ?? await interaction.fetchReply();
+            trackTodoListState(interaction.channelId, replyMessage?.id, filter, interaction.user.id);
+        }
     }
     async reviewSuggestions(interaction) {
         await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
@@ -314,6 +365,7 @@ let TodoCommand = class TodoCommand {
             components: [],
             files: [],
         });
+        await refreshLatestTodoList(interaction.channelId, interaction.client);
     }
     async handleSuggestionDecline(interaction) {
         const [, ownerId, suggestionIdRaw] = interaction.customId.split(":");
@@ -365,6 +417,7 @@ let TodoCommand = class TodoCommand {
             embeds: [buildTodoActionEmbed("Added", todo)],
             flags: isPublic ? undefined : MessageFlags.Ephemeral,
         });
+        await refreshLatestTodoList(interaction.channelId, interaction.client);
     }
     async edit(todoId, title, details, category, showInChat, interaction) {
         const isPublic = Boolean(showInChat);
@@ -400,6 +453,9 @@ let TodoCommand = class TodoCommand {
             embeds: updatedTodo ? [buildTodoActionEmbed("Updated", updatedTodo)] : undefined,
             flags: isPublic ? undefined : MessageFlags.Ephemeral,
         });
+        if (updated) {
+            await refreshLatestTodoList(interaction.channelId, interaction.client);
+        }
     }
     async delete(todoId, showInChat, interaction) {
         const isPublic = Boolean(showInChat);
@@ -418,6 +474,9 @@ let TodoCommand = class TodoCommand {
             embeds: removed && existing ? [buildTodoActionEmbed("Deleted", existing)] : undefined,
             flags: isPublic ? undefined : MessageFlags.Ephemeral,
         });
+        if (removed) {
+            await refreshLatestTodoList(interaction.channelId, interaction.client);
+        }
     }
     async complete(todoId, showInChat, interaction) {
         const isPublic = Boolean(showInChat);
@@ -438,6 +497,9 @@ let TodoCommand = class TodoCommand {
                 : undefined,
             flags: isPublic ? undefined : MessageFlags.Ephemeral,
         });
+        if (completed) {
+            await refreshLatestTodoList(interaction.channelId, interaction.client);
+        }
     }
     async handleTodoTab(interaction) {
         const [filter, ownerId] = interaction.customId.split(":").slice(1);
@@ -458,6 +520,7 @@ let TodoCommand = class TodoCommand {
                 embeds: [embed],
                 components: buildTodoTabComponents("suggestions", ownerId),
             });
+            trackTodoListState(interaction.channelId, interaction.message?.id, "suggestions", ownerId);
             return;
         }
         const includeDetails = filter !== "all" && filter !== "completed";
@@ -469,6 +532,7 @@ let TodoCommand = class TodoCommand {
             ...response,
             components: buildTodoTabComponents(filter, ownerId),
         });
+        trackTodoListState(interaction.channelId, interaction.message?.id, filter, ownerId);
     }
 };
 __decorate([
