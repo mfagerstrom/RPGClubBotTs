@@ -134,8 +134,9 @@ function buildSuggestionTabEmbed(items, footerText) {
         .setFooter({ text: footerText });
 }
 function buildTodoActionEmbed(action, todo) {
-    const title = `${action} TODO #${todo.todoId}`;
-    const description = formatTodoLines([todo], true).join("\n");
+    const title = `${action} TODO #${todo.todoId} (${todo.todoCategory})`;
+    const line = formatTodoLines([todo], false).join("\n");
+    const description = todo.details ? `${line}\n> ${todo.details}` : line;
     return new EmbedBuilder()
         .setTitle(title)
         .setColor(0x3498db)
