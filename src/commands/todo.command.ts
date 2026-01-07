@@ -19,12 +19,12 @@ import {
   SlashGroup,
   SlashOption,
 } from "discordx";
-import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
 import { isSuperAdmin } from "./superadmin.command.js";
 import {
   completeTodo,
   createTodo,
-  countTodos,
+  countTodoSummary,
   deleteTodo,
   fetchTodoById,
   listTodos,
@@ -32,6 +32,7 @@ import {
   type ITodoItem,
 } from "../classes/Todo.js";
 import {
+  countSuggestions,
   deleteSuggestion,
   getSuggestionById,
   listSuggestions,
@@ -45,7 +46,55 @@ const DEFAULT_TODO_CATEGORY = "Improvements";
 const TODO_CATEGORIES = ["New Features", "Improvements", "Defects"] as const;
 
 type TodoCategory = (typeof TODO_CATEGORIES)[number];
-function formatTodoLines(items: ITodoItem[]): string[] {
+type TodoFilter = "all" | "completed" | "suggestions" | TodoCategory;
+
+const TODO_TAB_DEFINITIONS: Array<{ id: TodoFilter; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "New Features", label: "New Features" },
+  { id: "Improvements", label: "Improvements" },
+  { id: "Defects", label: "Defects" },
+  { id: "suggestions", label: "Suggestions" },
+  { id: "completed", label: "Completed" },
+];
+
+const TODO_TAB_OPTIONS = TODO_TAB_DEFINITIONS.map((tab) => tab.label) as [
+  "All",
+  "New Features",
+  "Improvements",
+  "Defects",
+  "Suggestions",
+  "Completed",
+];
+
+const TODO_TAB_LABEL_TO_FILTER: Record<(typeof TODO_TAB_OPTIONS)[number], TodoFilter> = {
+  All: "all",
+  "New Features": "New Features",
+  Improvements: "Improvements",
+  Defects: "Defects",
+  Suggestions: "suggestions",
+  Completed: "completed",
+};
+
+function buildTodoTabComponents(
+  active: TodoFilter,
+  ownerId: string,
+): ActionRowBuilder<ButtonBuilder>[] {
+  const buttons = TODO_TAB_DEFINITIONS.map((tab) =>
+    new ButtonBuilder()
+      .setCustomId(`todo-tab:${tab.id}:${ownerId}`)
+      .setLabel(tab.label)
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(tab.id === active),
+  );
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let i = 0; i < buttons.length; i += 5) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(buttons.slice(i, i + 5)),
+    );
+  }
+  return rows;
+}
+function formatTodoLines(items: ITodoItem[], includeDetails: boolean): string[] {
   const lines: string[] = [];
   const labelLengths: number[] = items.map((item) => `[${item.todoId}]`.length);
   const maxLabelLength: number = labelLengths.length
@@ -57,9 +106,28 @@ function formatTodoLines(items: ITodoItem[]): string[] {
     const labelPadded: string = labelRaw.padStart(maxLabelLength, " ");
     const labelBlock: string = `\`${labelPadded}\``;
     lines.push(`**${labelBlock}** ${item.title}${statusSuffix}`);
-    if (item.todoCategory) {
-      lines.push(`> Category: ${item.todoCategory}`);
+    if (includeDetails && item.details) {
+      lines.push(`> ${item.details}`);
     }
+  }
+  return lines;
+}
+
+function buildCategoryTodoLines(
+  items: ITodoItem[],
+  category: TodoCategory,
+  includeDetails: boolean,
+): string[] {
+  const categoryItems = items.filter((item) => item.todoCategory === category);
+  if (!categoryItems.length) return [];
+  return [`**${category}**`, ...formatTodoLines(categoryItems, includeDetails), ""];
+}
+
+function buildSuggestionLines(items: ISuggestionItem[]): string[] {
+  if (!items.length) return ["No suggestions found."];
+  const lines: string[] = [];
+  for (const item of items) {
+    lines.push(`**[#${item.suggestionId}]** ${item.title}`);
     if (item.details) {
       lines.push(`> ${item.details}`);
     }
@@ -67,21 +135,63 @@ function formatTodoLines(items: ITodoItem[]): string[] {
   return lines;
 }
 
+function buildSuggestionTabEmbed(items: ISuggestionItem[], footerText: string): EmbedBuilder {
+  return new EmbedBuilder()
+    .setTitle("Suggestions")
+    .setColor(0x3498db)
+    .setDescription(buildSuggestionLines(items).join("\n"))
+    .setFooter({ text: footerText });
+}
+
 function buildTodoActionEmbed(action: string, todo: ITodoItem): EmbedBuilder {
   const title = `${action} TODO #${todo.todoId}`;
-  const description = formatTodoLines([todo]).join("\n");
+  const description = formatTodoLines([todo], true).join("\n");
   return new EmbedBuilder()
     .setTitle(title)
     .setColor(0x3498db)
     .setDescription(description);
 }
 
-function buildTodoDescription(items: ITodoItem[], includeCompleted: boolean): string {
+function buildAllTodoFooterText(
+  summary: {
+    open: number;
+    completed: number;
+    openByCategory: { newFeatures: number; improvements: number; defects: number };
+  },
+  suggestionCount: number,
+): string {
+  return [
+    `${summary.open} open TODOs`,
+    `${summary.openByCategory.newFeatures} New Features`,
+    `${summary.openByCategory.improvements} Improvements`,
+    `${summary.openByCategory.defects} Defects`,
+    `${suggestionCount} Suggestions`,
+    `${summary.completed} Completed`,
+  ].join(" | ");
+}
+
+function buildTodoDescription(
+  items: ITodoItem[],
+  includeCompleted: boolean,
+  filter: TodoFilter,
+  includeDetails: boolean,
+): string {
   if (items.length === 0) {
     return includeCompleted ? "No TODO items found." : "No open TODO items found.";
   }
 
-  const lines: string[] = formatTodoLines(items);
+  const lines: string[] = [];
+  if (filter === "all" || filter === "completed") {
+    for (const category of TODO_CATEGORIES) {
+      lines.push(...buildCategoryTodoLines(items, category, includeDetails));
+    }
+  } else if (filter !== "suggestions") {
+    lines.push(...buildCategoryTodoLines(items, filter, includeDetails));
+  }
+
+  if (lines.length === 0) {
+    return includeCompleted ? "No TODO items found." : "No open TODO items found.";
+  }
   const trimmedLines: string[] = [];
   let currentLength: number = 0;
 
@@ -97,17 +207,27 @@ function buildTodoDescription(items: ITodoItem[], includeCompleted: boolean): st
     currentLength = nextLength;
   }
 
+  while (trimmedLines.length && trimmedLines[trimmedLines.length - 1] === "") {
+    trimmedLines.pop();
+  }
+
   return trimmedLines.join("\n");
 }
 
 function buildTodoListEmbed(
   items: ITodoItem[],
   includeCompleted: boolean,
-  counts: { open: number; completed: number },
+  footerText: string,
+  filter: TodoFilter,
+  includeDetails: boolean,
 ): { embeds: EmbedBuilder[] } {
-  const description: string = buildTodoDescription(items, includeCompleted);
-  const title: string = includeCompleted ? "Bot Development TODOs" : "Open Bot Development TODOs";
-  const footerText: string = `${counts.open} open | ${counts.completed} completed`;
+  const description: string = buildTodoDescription(
+    items,
+    includeCompleted,
+    filter,
+    includeDetails,
+  );
+  const title: string = "Bot Development TODOs";
 
   const embed: EmbedBuilder = new EmbedBuilder()
     .setTitle(title)
@@ -168,20 +288,14 @@ function buildSuggestionDetailEmbed(item: ISuggestionItem): EmbedBuilder {
 export class TodoCommand {
   @Slash({ description: "List bot development TODOs", name: "list" })
   async list(
+    @SlashChoice(...TODO_TAB_OPTIONS)
     @SlashOption({
-      description: "TODO id to view details (optional)",
-      name: "id",
+      description: "Starting view (optional)",
+      name: "mode",
       required: false,
-      type: ApplicationCommandOptionType.Integer,
+      type: ApplicationCommandOptionType.String,
     })
-    todoId: number | undefined,
-    @SlashOption({
-      description: "Include completed TODOs",
-      name: "include_completed",
-      required: false,
-      type: ApplicationCommandOptionType.Boolean,
-    })
-    includeCompleted: boolean | undefined,
+    mode: (typeof TODO_TAB_OPTIONS)[number] | undefined,
     @SlashOption({
       description: "Show in chat (public) instead of ephemeral",
       name: "showinchat",
@@ -194,28 +308,36 @@ export class TodoCommand {
     const isPublic: boolean = Boolean(showInChat);
     await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
 
-    const counts = await countTodos();
-    if (todoId !== undefined) {
-      const todo = await fetchTodoById(todoId);
-      if (!todo) {
-        await safeReply(interaction, {
-          content: `TODO #${todoId} was not found.`,
-          flags: isPublic ? undefined : MessageFlags.Ephemeral,
-        });
-        return;
-      }
-      const response = buildTodoListEmbed([todo], true, counts);
+    const summary = await countTodoSummary();
+    const suggestionCount = await countSuggestions();
+    const filter = mode ? TODO_TAB_LABEL_TO_FILTER[mode] : "all";
+    const footerText = buildAllTodoFooterText(summary, suggestionCount);
+
+    if (filter === "suggestions") {
+      const suggestions = await listSuggestions(MAX_SUGGESTION_OPTIONS);
+      const embed = buildSuggestionTabEmbed(suggestions, footerText);
       await safeReply(interaction, {
-        ...response,
+        embeds: [embed],
+        components: buildTodoTabComponents("suggestions", interaction.user.id),
         flags: isPublic ? undefined : MessageFlags.Ephemeral,
       });
       return;
     }
 
-    const todos: ITodoItem[] = await listTodos(Boolean(includeCompleted), MAX_LIST_ITEMS);
-    const response = buildTodoListEmbed(todos, Boolean(includeCompleted), counts);
+    const includeDetails = filter !== "all" && filter !== "completed";
+    const todos = filter === "completed"
+      ? (await listTodos(true, MAX_LIST_ITEMS)).filter((item) => item.isCompleted)
+      : await listTodos(false, MAX_LIST_ITEMS);
+    const response = buildTodoListEmbed(
+      todos,
+      filter === "completed",
+      footerText,
+      filter,
+      includeDetails,
+    );
     await safeReply(interaction, {
       ...response,
+      components: buildTodoTabComponents(filter, interaction.user.id),
       flags: isPublic ? undefined : MessageFlags.Ephemeral,
     });
   }
@@ -597,6 +719,51 @@ export class TodoCommand {
         ? [buildTodoActionEmbed("Completed", existing)]
         : undefined,
       flags: isPublic ? undefined : MessageFlags.Ephemeral,
+    });
+  }
+
+  @ButtonComponent({
+    id: /^todo-tab:(all|New Features|Improvements|Defects|suggestions|completed):\d+$/,
+  })
+  async handleTodoTab(interaction: ButtonInteraction): Promise<void> {
+    const [filter, ownerId] = interaction.customId.split(":").slice(1);
+    if (interaction.user.id !== ownerId) {
+      await interaction.reply({
+        content: "This menu isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const summary = await countTodoSummary();
+    const suggestionCount = await countSuggestions();
+    const footerText = buildAllTodoFooterText(summary, suggestionCount);
+
+    if (filter === "suggestions") {
+      const suggestions = await listSuggestions(MAX_SUGGESTION_OPTIONS);
+      const embed = buildSuggestionTabEmbed(suggestions, footerText);
+      await safeUpdate(interaction, {
+        embeds: [embed],
+        components: buildTodoTabComponents("suggestions", ownerId),
+      });
+      return;
+    }
+
+    const includeDetails = filter !== "all" && filter !== "completed";
+    const todos = filter === "completed"
+      ? (await listTodos(true, MAX_LIST_ITEMS)).filter((item) => item.isCompleted)
+      : await listTodos(false, MAX_LIST_ITEMS);
+    const response = buildTodoListEmbed(
+      todos,
+      filter === "completed",
+      footerText,
+      filter as TodoFilter,
+      includeDetails,
+    );
+
+    await safeUpdate(interaction, {
+      ...response,
+      components: buildTodoTabComponents(filter as TodoFilter, ownerId),
     });
   }
 }

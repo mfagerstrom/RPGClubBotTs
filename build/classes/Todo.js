@@ -161,3 +161,42 @@ export async function countTodos() {
         await connection.close();
     }
 }
+export async function countTodoSummary() {
+    const connection = await getOraclePool().getConnection();
+    try {
+        const result = await connection.execute(`SELECT SUM(CASE WHEN IS_COMPLETED = 1 THEN 0 ELSE 1 END) AS OPEN_COUNT,
+              SUM(CASE WHEN IS_COMPLETED = 1 THEN 1 ELSE 0 END) AS COMPLETED_COUNT,
+              SUM(
+                CASE
+                  WHEN IS_COMPLETED = 0 AND TODO_CATEGORY = 'New Features' THEN 1
+                  ELSE 0
+                END
+              ) AS OPEN_NEW_FEATURES,
+              SUM(
+                CASE
+                  WHEN IS_COMPLETED = 0 AND TODO_CATEGORY = 'Improvements' THEN 1
+                  ELSE 0
+                END
+              ) AS OPEN_IMPROVEMENTS,
+              SUM(
+                CASE
+                  WHEN IS_COMPLETED = 0 AND TODO_CATEGORY = 'Defects' THEN 1
+                  ELSE 0
+                END
+              ) AS OPEN_DEFECTS
+         FROM RPG_CLUB_TODOS`, {}, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const row = result.rows?.[0];
+        return {
+            open: Number(row?.OPEN_COUNT ?? 0),
+            completed: Number(row?.COMPLETED_COUNT ?? 0),
+            openByCategory: {
+                newFeatures: Number(row?.OPEN_NEW_FEATURES ?? 0),
+                improvements: Number(row?.OPEN_IMPROVEMENTS ?? 0),
+                defects: Number(row?.OPEN_DEFECTS ?? 0),
+            },
+        };
+    }
+    finally {
+        await connection.close();
+    }
+}

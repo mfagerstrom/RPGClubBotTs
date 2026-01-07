@@ -57,6 +57,17 @@ export async function listSuggestions(limit = 50) {
         await connection.close();
     }
 }
+export async function countSuggestions() {
+    const connection = await getOraclePool().getConnection();
+    try {
+        const result = await connection.execute("SELECT COUNT(*) AS TOTAL FROM RPG_CLUB_SUGGESTIONS", {}, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const row = result.rows?.[0];
+        return Number(row?.TOTAL ?? 0);
+    }
+    finally {
+        await connection.close();
+    }
+}
 export async function getSuggestionById(suggestionId, existingConnection) {
     const connection = existingConnection ?? (await getOraclePool().getConnection());
     try {

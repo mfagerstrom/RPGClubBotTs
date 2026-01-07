@@ -95,6 +95,21 @@ export async function listSuggestions(limit: number = 50): Promise<ISuggestionIt
   }
 }
 
+export async function countSuggestions(): Promise<number> {
+  const connection = await getOraclePool().getConnection();
+  try {
+    const result = await connection.execute<{ TOTAL: number | null }>(
+      "SELECT COUNT(*) AS TOTAL FROM RPG_CLUB_SUGGESTIONS",
+      {},
+      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+    );
+    const row = result.rows?.[0];
+    return Number(row?.TOTAL ?? 0);
+  } finally {
+    await connection.close();
+  }
+}
+
 export async function getSuggestionById(
   suggestionId: number,
   existingConnection?: oracledb.Connection,
