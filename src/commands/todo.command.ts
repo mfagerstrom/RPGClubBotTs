@@ -108,19 +108,75 @@ function trackTodoListState(
   latestTodoListByChannel.set(channelId, { messageId, filter, ownerId });
 }
 
+function parseTodoListStateFromMessage(message: any): TodoListState | null {
+  const components = message?.components ?? [];
+  let activeFilter: TodoFilter | null = null;
+  let ownerId: string | null = null;
+
+  for (const row of components) {
+    const rowComponents = row?.components ?? [];
+    for (const component of rowComponents) {
+      const customId = component?.customId;
+      if (typeof customId !== "string") continue;
+      if (!customId.startsWith("todo-tab:")) continue;
+      const [, filterRaw, ownerRaw] = customId.split(":");
+      if (!filterRaw || !ownerRaw) continue;
+      if (component.disabled) {
+        activeFilter = filterRaw as TodoFilter;
+      }
+      ownerId = ownerRaw;
+    }
+  }
+
+  if (!activeFilter || !ownerId || !message?.id) return null;
+  return { messageId: message.id, filter: activeFilter, ownerId };
+}
+
+async function findLatestTodoListState(
+  channel: any,
+): Promise<TodoListState | null> {
+  if (!channel?.messages?.fetch) return null;
+  const messages = await channel.messages.fetch({ limit: 50 });
+  for (const message of messages.values()) {
+    if (!message?.author?.bot) continue;
+    const state = parseTodoListStateFromMessage(message);
+    if (state) return state;
+  }
+  return null;
+}
+
 async function refreshLatestTodoList(
   channelId: string | null,
   client: Client,
 ): Promise<void> {
   if (!channelId) return;
-  const state = latestTodoListByChannel.get(channelId);
-  if (!state) return;
-
   try {
     const channel = await client.channels.fetch(channelId);
     if (!channel || !channel.isTextBased()) return;
 
-    const message = await channel.messages.fetch(state.messageId);
+    let state = latestTodoListByChannel.get(channelId);
+    if (!state) {
+      const recovered = await findLatestTodoListState(channel);
+      if (!recovered) return;
+      latestTodoListByChannel.set(channelId, recovered);
+      state = recovered;
+    }
+
+    let message = await channel.messages.fetch(state.messageId).catch(() => null);
+    if (!message) {
+      const recovered = await findLatestTodoListState(channel);
+      if (!recovered) {
+        latestTodoListByChannel.delete(channelId);
+        return;
+      }
+      latestTodoListByChannel.set(channelId, recovered);
+      state = recovered;
+      message = await channel.messages.fetch(state.messageId).catch(() => null);
+      if (!message) {
+        latestTodoListByChannel.delete(channelId);
+        return;
+      }
+    }
     const summary = await countTodoSummary();
     const suggestionCount = await countSuggestions();
     const footerText = buildAllTodoFooterText(summary, suggestionCount);
