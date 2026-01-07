@@ -54,13 +54,6 @@ const HELP_TOPICS = [
         parameters: "title (required) — game name and optional details. showinchat (optional) — set true to share in channel.",
     },
     {
-        id: "coverart",
-        label: "/coverart",
-        summary: "Find cover art for a game using Google/HLTB data.",
-        syntax: "Syntax: /coverart title:<string> [showinchat:<boolean>]",
-        parameters: "title (required) — game name and optional details. showinchat (optional) — set true to share in channel.",
-    },
-    {
         id: "mp-info",
         label: "/mp-info",
         summary: "See who’s shared their multiplayer info (Steam/XBL/PSN/Switch) with quick profile buttons.",
@@ -144,7 +137,7 @@ const HELP_TOPICS = [
         syntax: "Syntax: /todo add title:<string> [details:<string>] [showinchat:<boolean>] | " +
             "/todo edit id:<int> [title:<string>] [details:<string>] [showinchat:<boolean>] | " +
             "/todo delete id:<int> [showinchat:<boolean>] | /todo complete id:<int> " +
-            "[showinchat:<boolean>] | /todo list [include_completed:<boolean>] " +
+            "[showinchat:<boolean>] | /todo list [mode:<string>] " +
             "[showinchat:<boolean>] | /todo review-suggestions",
     },
     {
@@ -173,7 +166,7 @@ const HELP_CATEGORIES = [
     {
         id: "utilities",
         name: "Utilities",
-        topicIds: ["hltb", "coverart", "remindme", "suggestion"],
+        topicIds: ["hltb", "remindme", "suggestion"],
     },
     {
         id: "server-admin",
@@ -679,7 +672,6 @@ export function buildMainHelpResponse() {
         `${formatCommandLine("game-completion", "Log and manage your completed games.")}\n\n` +
         "**Utilities**\n" +
         `${formatCommandLine("hltb", "Look up HowLongToBeat playtimes.")}\n` +
-        `${formatCommandLine("coverart", "Grab cover art for a game.")}\n` +
         `${formatCommandLine("remindme", "Set personal reminders with snooze.")}\n` +
         `${formatCommandLine("suggestion", "Submit a bot suggestion.")}\n\n` +
         "**Server Administration**\n" +
