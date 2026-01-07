@@ -44,10 +44,17 @@ const MAX_TODO_DESCRIPTION: number = 3800;
 const MAX_SUGGESTION_OPTIONS: number = 25;
 const DEFAULT_TODO_CATEGORY = "Improvements";
 const TODO_CATEGORIES = ["New Features", "Improvements", "Defects"] as const;
+const TODO_SIZES = ["XS", "S", "M", "L", "XL"] as const;
 
 type TodoCategory = (typeof TODO_CATEGORIES)[number];
+type TodoSize = (typeof TODO_SIZES)[number];
 type TodoFilter = "all" | "completed" | "suggestions" | TodoCategory;
-type TodoListState = { messageId: string; filter: TodoFilter; ownerId: string };
+type TodoListState = {
+  messageId: string;
+  filter: TodoFilter;
+  ownerId: string;
+  size: TodoSize | null;
+};
 
 const TODO_TAB_DEFINITIONS: Array<{ id: TodoFilter; label: string }> = [
   { id: "all", label: "All Open" },
@@ -81,10 +88,12 @@ const latestTodoListByChannel = new Map<string, TodoListState>();
 function buildTodoTabComponents(
   active: TodoFilter,
   ownerId: string,
+  size: TodoSize | null,
 ): ActionRowBuilder<ButtonBuilder>[] {
+  const sizeToken: string = size ?? "any";
   const buttons = TODO_TAB_DEFINITIONS.map((tab) =>
     new ButtonBuilder()
-      .setCustomId(`todo-tab:${tab.id}:${ownerId}`)
+      .setCustomId(`todo-tab:${tab.id}:${ownerId}:${sizeToken}`)
       .setLabel(tab.label)
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(tab.id === active),
@@ -103,15 +112,17 @@ function trackTodoListState(
   messageId: string | undefined,
   filter: TodoFilter,
   ownerId: string,
+  size: TodoSize | null,
 ): void {
   if (!channelId || !messageId) return;
-  latestTodoListByChannel.set(channelId, { messageId, filter, ownerId });
+  latestTodoListByChannel.set(channelId, { messageId, filter, ownerId, size });
 }
 
 function parseTodoListStateFromMessage(message: any): TodoListState | null {
   const components = message?.components ?? [];
   let activeFilter: TodoFilter | null = null;
   let ownerId: string | null = null;
+  let size: TodoSize | null = null;
 
   for (const row of components) {
     const rowComponents = row?.components ?? [];
@@ -119,17 +130,20 @@ function parseTodoListStateFromMessage(message: any): TodoListState | null {
       const customId = component?.customId;
       if (typeof customId !== "string") continue;
       if (!customId.startsWith("todo-tab:")) continue;
-      const [, filterRaw, ownerRaw] = customId.split(":");
+      const [, filterRaw, ownerRaw, sizeRaw] = customId.split(":");
       if (!filterRaw || !ownerRaw) continue;
       if (component.disabled) {
         activeFilter = filterRaw as TodoFilter;
       }
       ownerId = ownerRaw;
+      if (sizeRaw && TODO_SIZES.includes(sizeRaw as TodoSize)) {
+        size = sizeRaw as TodoSize;
+      }
     }
   }
 
   if (!activeFilter || !ownerId || !message?.id) return null;
-  return { messageId: message.id, filter: activeFilter, ownerId };
+  return { messageId: message.id, filter: activeFilter, ownerId, size };
 }
 
 async function findLatestTodoListState(
@@ -186,7 +200,7 @@ async function refreshLatestTodoList(
       const embed = buildSuggestionTabEmbed(suggestions, footerText);
       await message.edit({
         embeds: [embed],
-        components: buildTodoTabComponents("suggestions", state.ownerId),
+        components: buildTodoTabComponents("suggestions", state.ownerId, state.size),
       });
       return;
     }
@@ -195,8 +209,11 @@ async function refreshLatestTodoList(
     const todos = state.filter === "completed"
       ? (await listTodos(true, MAX_LIST_ITEMS)).filter((item) => item.isCompleted)
       : await listTodos(false, MAX_LIST_ITEMS);
+    const filteredTodos = state.size
+      ? todos.filter((item) => item.todoSize === state.size)
+      : todos;
     const response = buildTodoListEmbed(
-      todos,
+      filteredTodos,
       state.filter === "completed",
       footerText,
       state.filter,
@@ -205,7 +222,7 @@ async function refreshLatestTodoList(
 
     await message.edit({
       ...response,
-      components: buildTodoTabComponents(state.filter, state.ownerId),
+      components: buildTodoTabComponents(state.filter, state.ownerId, state.size),
     });
   } catch {
     latestTodoListByChannel.delete(channelId);
@@ -217,12 +234,23 @@ function formatTodoLines(items: ITodoItem[], includeDetails: boolean): string[] 
   const maxLabelLength: number = labelLengths.length
     ? Math.max(...labelLengths)
     : 0;
+  const sizeLabelMap: Record<string, string> = {
+    XS: "[XS]",
+    S: "[S]",
+    M: "[M]",
+    L: "[L]",
+    XL: "[XL]",
+  };
   for (const item of items) {
     const statusSuffix: string = item.isCompleted ? " (Completed)" : "";
+    const sizeLabel: string | null = item.todoSize
+      ? (sizeLabelMap[item.todoSize] ?? null)
+      : null;
+    const sizeSuffix: string = sizeLabel ? ` ${sizeLabel}` : "";
     const labelRaw: string = `[${item.todoId}]`;
     const labelPadded: string = labelRaw.padStart(maxLabelLength, " ");
     const labelBlock: string = `\`${labelPadded}\``;
-    lines.push(`**${labelBlock}** ${item.title}${statusSuffix}`);
+    lines.push(`**${labelBlock}** ${item.title}${statusSuffix}${sizeSuffix}`);
     if (includeDetails && item.details) {
       lines.push(`> ${item.details}`);
     }
@@ -414,6 +442,14 @@ export class TodoCommand {
       type: ApplicationCommandOptionType.String,
     })
     mode: (typeof TODO_TAB_OPTIONS)[number] | undefined,
+    @SlashChoice(...TODO_SIZES)
+    @SlashOption({
+      description: "Filter by effort size (optional)",
+      name: "size",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    size: TodoSize | undefined,
     @SlashOption({
       description: "Show in chat (public) instead of ephemeral",
       name: "showinchat",
@@ -426,6 +462,14 @@ export class TodoCommand {
     const isPublic: boolean = Boolean(showInChat);
     await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
 
+    if (size && !TODO_SIZES.includes(size)) {
+      await safeReply(interaction, {
+        content: "Invalid size. Use XS, S, M, L, or XL.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
     const summary = await countTodoSummary();
     const suggestionCount = await countSuggestions();
     const filter = mode ? TODO_TAB_LABEL_TO_FILTER[mode] : "all";
@@ -436,7 +480,7 @@ export class TodoCommand {
       const embed = buildSuggestionTabEmbed(suggestions, footerText);
       const reply = await safeReply(interaction, {
         embeds: [embed],
-        components: buildTodoTabComponents("suggestions", interaction.user.id),
+        components: buildTodoTabComponents("suggestions", interaction.user.id, size ?? null),
         flags: isPublic ? undefined : MessageFlags.Ephemeral,
       });
       if (isPublic) {
@@ -446,6 +490,7 @@ export class TodoCommand {
           replyMessage?.id,
           "suggestions",
           interaction.user.id,
+          size ?? null,
         );
       }
       return;
@@ -455,8 +500,11 @@ export class TodoCommand {
     const todos = filter === "completed"
       ? (await listTodos(true, MAX_LIST_ITEMS)).filter((item) => item.isCompleted)
       : await listTodos(false, MAX_LIST_ITEMS);
+    const filteredTodos = size
+      ? todos.filter((item) => item.todoSize === size)
+      : todos;
     const response = buildTodoListEmbed(
-      todos,
+      filteredTodos,
       filter === "completed",
       footerText,
       filter,
@@ -464,12 +512,12 @@ export class TodoCommand {
     );
     const reply = await safeReply(interaction, {
       ...response,
-      components: buildTodoTabComponents(filter, interaction.user.id),
+      components: buildTodoTabComponents(filter, interaction.user.id, size ?? null),
       flags: isPublic ? undefined : MessageFlags.Ephemeral,
     });
     if (isPublic) {
       const replyMessage = reply ?? await interaction.fetchReply();
-      trackTodoListState(interaction.channelId, replyMessage?.id, filter, interaction.user.id);
+      trackTodoListState(interaction.channelId, replyMessage?.id, filter, interaction.user.id, size ?? null);
     }
   }
 
@@ -592,6 +640,7 @@ export class TodoCommand {
       suggestion.title,
       suggestion.details ?? null,
       DEFAULT_TODO_CATEGORY,
+      null,
       suggestion.createdBy,
     );
     await deleteSuggestion(suggestionId);
@@ -663,6 +712,14 @@ export class TodoCommand {
       type: ApplicationCommandOptionType.String,
     })
     details: string | undefined,
+    @SlashChoice(...TODO_SIZES)
+    @SlashOption({
+      description: "Optional effort size (XS/S/M/L/XL)",
+      name: "size",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    size: TodoSize | undefined,
     @SlashOption({
       description: "Show in chat (public) instead of ephemeral",
       name: "showinchat",
@@ -687,11 +744,21 @@ export class TodoCommand {
       return;
     }
 
+    if (size && !TODO_SIZES.includes(size)) {
+      await safeReply(interaction, {
+        content: "Invalid size. Use XS, S, M, L, or XL.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
     const trimmedDetails = details?.trim();
+    const finalSize = size ?? null;
     const todo = await createTodo(
       trimmedTitle,
       trimmedDetails ?? null,
       category,
+      finalSize,
       interaction.user.id,
     );
     await safeReply(interaction, {
@@ -732,6 +799,14 @@ export class TodoCommand {
       type: ApplicationCommandOptionType.String,
     })
     category: TodoCategory | undefined,
+    @SlashChoice(...TODO_SIZES)
+    @SlashOption({
+      description: "New effort size (optional, empty clears)",
+      name: "size",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    size: TodoSize | undefined,
     @SlashOption({
       description: "Show in chat (public) instead of ephemeral",
       name: "showinchat",
@@ -747,9 +822,9 @@ export class TodoCommand {
     const ok = await isSuperAdmin(interaction);
     if (!ok) return;
 
-    if (title === undefined && details === undefined && category === undefined) {
+    if (title === undefined && details === undefined && category === undefined && size === undefined) {
       await safeReply(interaction, {
-        content: "Provide a title, details, or category to update.",
+        content: "Provide a title, details, category, or size to update.",
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -764,9 +839,17 @@ export class TodoCommand {
       return;
     }
 
+    if (size && !TODO_SIZES.includes(size)) {
+      await safeReply(interaction, {
+        content: "Invalid size. Use XS, S, M, L, or XL.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
     const trimmedDetails = details === undefined ? undefined : details.trim();
     const finalDetails = trimmedDetails === "" ? null : trimmedDetails;
-    const updated = await updateTodo(todoId, trimmedTitle, finalDetails, category);
+    const updated = await updateTodo(todoId, trimmedTitle, finalDetails, category, size);
     const updatedTodo = updated ? await fetchTodoById(todoId) : null;
     await safeReply(interaction, {
       content: updatedTodo
@@ -865,10 +948,10 @@ export class TodoCommand {
   }
 
   @ButtonComponent({
-    id: /^todo-tab:(all|New Features|Improvements|Defects|suggestions|completed):\d+$/,
+    id: /^todo-tab:(all|New Features|Improvements|Defects|suggestions|completed):\d+:(XS|S|M|L|XL|any)$/,
   })
   async handleTodoTab(interaction: ButtonInteraction): Promise<void> {
-    const [filter, ownerId] = interaction.customId.split(":").slice(1);
+    const [filter, ownerId, sizeRaw] = interaction.customId.split(":").slice(1);
     if (interaction.user.id !== ownerId) {
       await interaction.reply({
         content: "This menu isn't for you.",
@@ -877,6 +960,9 @@ export class TodoCommand {
       return;
     }
 
+    const size = sizeRaw && TODO_SIZES.includes(sizeRaw as TodoSize)
+      ? (sizeRaw as TodoSize)
+      : null;
     const summary = await countTodoSummary();
     const suggestionCount = await countSuggestions();
     const footerText = buildAllTodoFooterText(summary, suggestionCount);
@@ -886,9 +972,9 @@ export class TodoCommand {
       const embed = buildSuggestionTabEmbed(suggestions, footerText);
       await safeUpdate(interaction, {
         embeds: [embed],
-        components: buildTodoTabComponents("suggestions", ownerId),
+        components: buildTodoTabComponents("suggestions", ownerId, size),
       });
-      trackTodoListState(interaction.channelId, interaction.message?.id, "suggestions", ownerId);
+      trackTodoListState(interaction.channelId, interaction.message?.id, "suggestions", ownerId, size);
       return;
     }
 
@@ -896,8 +982,11 @@ export class TodoCommand {
     const todos = filter === "completed"
       ? (await listTodos(true, MAX_LIST_ITEMS)).filter((item) => item.isCompleted)
       : await listTodos(false, MAX_LIST_ITEMS);
+    const filteredTodos = size
+      ? todos.filter((item) => item.todoSize === size)
+      : todos;
     const response = buildTodoListEmbed(
-      todos,
+      filteredTodos,
       filter === "completed",
       footerText,
       filter as TodoFilter,
@@ -906,13 +995,14 @@ export class TodoCommand {
 
     await safeUpdate(interaction, {
       ...response,
-      components: buildTodoTabComponents(filter as TodoFilter, ownerId),
+      components: buildTodoTabComponents(filter as TodoFilter, ownerId, size),
     });
     trackTodoListState(
       interaction.channelId,
       interaction.message?.id,
       filter as TodoFilter,
       ownerId,
+      size,
     );
   }
 }

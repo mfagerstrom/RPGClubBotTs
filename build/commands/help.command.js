@@ -137,7 +137,7 @@ const HELP_TOPICS = [
         syntax: "Syntax: /todo add title:<string> [details:<string>] [showinchat:<boolean>] | " +
             "/todo edit id:<int> [title:<string>] [details:<string>] [showinchat:<boolean>] | " +
             "/todo delete id:<int> [showinchat:<boolean>] | /todo complete id:<int> " +
-            "[showinchat:<boolean>] | /todo list [mode:<string>] " +
+            "[showinchat:<boolean>] | /todo list [mode:<string>] [size:<XS|S|M|L|XL>] " +
             "[showinchat:<boolean>] | /todo review-suggestions",
     },
     {

@@ -6,6 +6,7 @@ export interface ITodoItem {
   title: string;
   details: string | null;
   todoCategory: string | null;
+  todoSize: string | null;
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -23,6 +24,7 @@ function mapTodoRow(row: {
   TITLE: string;
   DETAILS: string | null;
   TODO_CATEGORY: string | null;
+  TODO_SIZE: string | null;
   CREATED_BY: string | null;
   CREATED_AT: Date | string;
   UPDATED_AT: Date | string;
@@ -35,6 +37,7 @@ function mapTodoRow(row: {
     title: row.TITLE,
     details: row.DETAILS ?? null,
     todoCategory: row.TODO_CATEGORY ?? null,
+    todoSize: row.TODO_SIZE ?? null,
     createdBy: row.CREATED_BY ?? null,
     createdAt: toDate(row.CREATED_AT),
     updatedAt: toDate(row.UPDATED_AT),
@@ -55,6 +58,7 @@ export async function fetchTodoById(
       TITLE: string;
       DETAILS: string | null;
       TODO_CATEGORY: string | null;
+      TODO_SIZE: string | null;
       CREATED_BY: string | null;
       CREATED_AT: Date | string;
       UPDATED_AT: Date | string;
@@ -66,6 +70,7 @@ export async function fetchTodoById(
               TITLE,
               DETAILS,
               TODO_CATEGORY,
+              TODO_SIZE,
               CREATED_BY,
               CREATED_AT,
               UPDATED_AT,
@@ -91,18 +96,20 @@ export async function createTodo(
   title: string,
   details: string | null,
   todoCategory: string | null,
+  todoSize: string | null,
   createdBy: string | null,
 ): Promise<ITodoItem> {
   const connection = await getOraclePool().getConnection();
   try {
     const result = await connection.execute(
-      `INSERT INTO RPG_CLUB_TODOS (TITLE, DETAILS, TODO_CATEGORY, CREATED_BY)
-       VALUES (:title, :details, :todoCategory, :createdBy)
+      `INSERT INTO RPG_CLUB_TODOS (TITLE, DETAILS, TODO_CATEGORY, TODO_SIZE, CREATED_BY)
+       VALUES (:title, :details, :todoCategory, :todoSize, :createdBy)
        RETURNING TODO_ID INTO :id`,
       {
         title,
         details,
         todoCategory,
+        todoSize,
         createdBy,
         id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
       },
@@ -135,6 +142,7 @@ export async function listTodos(
       TITLE: string;
       DETAILS: string | null;
       TODO_CATEGORY: string | null;
+      TODO_SIZE: string | null;
       CREATED_BY: string | null;
       CREATED_AT: Date | string;
       UPDATED_AT: Date | string;
@@ -146,6 +154,7 @@ export async function listTodos(
               TITLE,
               DETAILS,
               TODO_CATEGORY,
+              TODO_SIZE,
               CREATED_BY,
               CREATED_AT,
               UPDATED_AT,
@@ -171,12 +180,14 @@ export async function updateTodo(
   title: string | null | undefined,
   details: string | null | undefined,
   todoCategory: string | null | undefined,
+  todoSize: string | null | undefined,
 ): Promise<boolean> {
   const connection = await getOraclePool().getConnection();
   try {
     const titleProvided = title !== undefined ? 1 : 0;
     const detailsProvided = details !== undefined ? 1 : 0;
     const categoryProvided = todoCategory !== undefined ? 1 : 0;
+    const sizeProvided = todoSize !== undefined ? 1 : 0;
     const result = await connection.execute(
       `UPDATE RPG_CLUB_TODOS
           SET TITLE = CASE WHEN :titleProvided = 1 THEN :title ELSE TITLE END,
@@ -184,6 +195,10 @@ export async function updateTodo(
               TODO_CATEGORY = CASE
                 WHEN :categoryProvided = 1 THEN :todoCategory
                 ELSE TODO_CATEGORY
+              END,
+              TODO_SIZE = CASE
+                WHEN :sizeProvided = 1 THEN :todoSize
+                ELSE TODO_SIZE
               END
         WHERE TODO_ID = :id`,
       {
@@ -191,9 +206,11 @@ export async function updateTodo(
         title,
         details,
         todoCategory,
+        todoSize,
         titleProvided,
         detailsProvided,
         categoryProvided,
+        sizeProvided,
       },
       { autoCommit: true },
     );

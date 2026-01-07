@@ -9,6 +9,7 @@ function mapTodoRow(row) {
         title: row.TITLE,
         details: row.DETAILS ?? null,
         todoCategory: row.TODO_CATEGORY ?? null,
+        todoSize: row.TODO_SIZE ?? null,
         createdBy: row.CREATED_BY ?? null,
         createdAt: toDate(row.CREATED_AT),
         updatedAt: toDate(row.UPDATED_AT),
@@ -24,6 +25,7 @@ export async function fetchTodoById(todoId, existingConnection) {
               TITLE,
               DETAILS,
               TODO_CATEGORY,
+              TODO_SIZE,
               CREATED_BY,
               CREATED_AT,
               UPDATED_AT,
@@ -41,15 +43,16 @@ export async function fetchTodoById(todoId, existingConnection) {
         }
     }
 }
-export async function createTodo(title, details, todoCategory, createdBy) {
+export async function createTodo(title, details, todoCategory, todoSize, createdBy) {
     const connection = await getOraclePool().getConnection();
     try {
-        const result = await connection.execute(`INSERT INTO RPG_CLUB_TODOS (TITLE, DETAILS, TODO_CATEGORY, CREATED_BY)
-       VALUES (:title, :details, :todoCategory, :createdBy)
+        const result = await connection.execute(`INSERT INTO RPG_CLUB_TODOS (TITLE, DETAILS, TODO_CATEGORY, TODO_SIZE, CREATED_BY)
+       VALUES (:title, :details, :todoCategory, :todoSize, :createdBy)
        RETURNING TODO_ID INTO :id`, {
             title,
             details,
             todoCategory,
+            todoSize,
             createdBy,
             id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
         }, { autoCommit: true });
@@ -76,6 +79,7 @@ export async function listTodos(includeCompleted, limit = 100) {
               TITLE,
               DETAILS,
               TODO_CATEGORY,
+              TODO_SIZE,
               CREATED_BY,
               CREATED_AT,
               UPDATED_AT,
@@ -92,27 +96,34 @@ export async function listTodos(includeCompleted, limit = 100) {
         await connection.close();
     }
 }
-export async function updateTodo(todoId, title, details, todoCategory) {
+export async function updateTodo(todoId, title, details, todoCategory, todoSize) {
     const connection = await getOraclePool().getConnection();
     try {
         const titleProvided = title !== undefined ? 1 : 0;
         const detailsProvided = details !== undefined ? 1 : 0;
         const categoryProvided = todoCategory !== undefined ? 1 : 0;
+        const sizeProvided = todoSize !== undefined ? 1 : 0;
         const result = await connection.execute(`UPDATE RPG_CLUB_TODOS
           SET TITLE = CASE WHEN :titleProvided = 1 THEN :title ELSE TITLE END,
               DETAILS = CASE WHEN :detailsProvided = 1 THEN :details ELSE DETAILS END,
               TODO_CATEGORY = CASE
                 WHEN :categoryProvided = 1 THEN :todoCategory
                 ELSE TODO_CATEGORY
+              END,
+              TODO_SIZE = CASE
+                WHEN :sizeProvided = 1 THEN :todoSize
+                ELSE TODO_SIZE
               END
         WHERE TODO_ID = :id`, {
             id: todoId,
             title,
             details,
             todoCategory,
+            todoSize,
             titleProvided,
             detailsProvided,
             categoryProvided,
+            sizeProvided,
         }, { autoCommit: true });
         return (result.rowsAffected ?? 0) > 0;
     }
