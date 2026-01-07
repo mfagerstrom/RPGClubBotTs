@@ -347,6 +347,7 @@ let GameDb = class GameDb {
             const associations = await Game.getGameAssociations(gameId);
             const nowPlayingMembers = await Game.getNowPlayingMembers(gameId);
             const completions = await Game.getGameCompletions(gameId);
+            const alternateVersions = await Game.getAlternateVersions(gameId);
             const platformMap = new Map(platforms.map((p) => [p.id, p.name]));
             const regionMap = new Map(regions.map((r) => [r.id, r.name]));
             const description = game.description || "No description available.";
@@ -488,6 +489,11 @@ let GameDb = class GameDb {
             if (series) {
                 embed.addFields({ name: "Series / Collection", value: series, inline: true });
             }
+            if (alternateVersions.length) {
+                const lines = alternateVersions.map((alt) => `• **${alt.title}** (GameDB #${alt.id})`);
+                const value = this.buildListFieldValue(lines, 1024);
+                embed.addFields({ name: "Alternate Versions", value, inline: false });
+            }
             if (game.totalRating) {
                 embed.addFields({
                     name: "IGDB Rating",
@@ -514,6 +520,24 @@ let GameDb = class GameDb {
             chunks.push(text.slice(i, i + size));
         }
         return chunks;
+    }
+    buildListFieldValue(lines, maxLength) {
+        if (!lines.length)
+            return "None";
+        const output = [];
+        let currentLength = 0;
+        for (let i = 0; i < lines.length; i += 1) {
+            const line = lines[i];
+            const nextLength = currentLength + line.length + 1;
+            if (nextLength > maxLength) {
+                const remaining = lines.length - i;
+                output.push(`…and ${remaining} more`);
+                break;
+            }
+            output.push(line);
+            currentLength = nextLength;
+        }
+        return output.join("\n");
     }
     async buildThreadLink(threadId, guildId, client) {
         if (!client || !guildId) {

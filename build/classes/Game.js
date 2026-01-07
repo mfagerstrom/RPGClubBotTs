@@ -110,6 +110,89 @@ export default class Game {
             await connection.close();
         }
     }
+    static async getGamesByIds(ids) {
+        const uniqueIds = Array.from(new Set(ids.filter((id) => Number.isInteger(id) && id > 0)));
+        if (!uniqueIds.length)
+            return [];
+        const binds = {};
+        const placeholders = [];
+        uniqueIds.forEach((id, idx) => {
+            const key = `id${idx}`;
+            binds[key] = id;
+            placeholders.push(`:${key}`);
+        });
+        const pool = getOraclePool();
+        const connection = await pool.getConnection();
+        try {
+            const result = await connection.execute(`SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, IGDB_ID, SLUG, TOTAL_RATING,
+                IGDB_URL, CREATED_AT, UPDATED_AT
+           FROM GAMEDB_GAMES
+          WHERE GAME_ID IN (${placeholders.join(", ")})`, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+            return (result.rows ?? []).map((row) => mapGameRow(row));
+        }
+        finally {
+            await connection.close();
+        }
+    }
+    static async getAlternateVersions(gameId) {
+        if (!Number.isInteger(gameId) || gameId <= 0)
+            return [];
+        const pool = getOraclePool();
+        const connection = await pool.getConnection();
+        try {
+            const result = await connection.execute(`SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, IGDB_ID, SLUG, TOTAL_RATING,
+                IGDB_URL, CREATED_AT, UPDATED_AT
+           FROM GAMEDB_GAMES
+          WHERE GAME_ID IN (
+            SELECT CASE
+                     WHEN GAME_ID = :id THEN ALT_GAME_ID
+                     ELSE GAME_ID
+                   END
+              FROM GAMEDB_GAME_ALTERNATES
+             WHERE GAME_ID = :id OR ALT_GAME_ID = :id
+          )
+          ORDER BY UPPER(TITLE)`, { id: gameId }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+            return (result.rows ?? []).map((row) => mapGameRow(row));
+        }
+        finally {
+            await connection.close();
+        }
+    }
+    static async linkAlternateVersions(gameIds, createdBy) {
+        const uniqueIds = Array.from(new Set(gameIds.filter((id) => Number.isInteger(id) && id > 0))).sort((a, b) => a - b);
+        if (uniqueIds.length < 2) {
+            throw new Error("At least two GameDB ids are required to link versions.");
+        }
+        const pairs = [];
+        for (let i = 0; i < uniqueIds.length; i += 1) {
+            for (let j = i + 1; j < uniqueIds.length; j += 1) {
+                pairs.push({
+                    gameId: uniqueIds[i],
+                    altGameId: uniqueIds[j],
+                    createdBy,
+                });
+            }
+        }
+        const pool = getOraclePool();
+        const connection = await pool.getConnection();
+        try {
+            await connection.executeMany(`MERGE INTO GAMEDB_GAME_ALTERNATES t
+         USING (
+           SELECT :gameId AS GAME_ID,
+                  :altGameId AS ALT_GAME_ID,
+                  :createdBy AS CREATED_BY
+             FROM dual
+         ) s
+            ON (t.GAME_ID = s.GAME_ID AND t.ALT_GAME_ID = s.ALT_GAME_ID)
+         WHEN NOT MATCHED THEN
+           INSERT (GAME_ID, ALT_GAME_ID, CREATED_BY)
+           VALUES (s.GAME_ID, s.ALT_GAME_ID, s.CREATED_BY)`, pairs, { autoCommit: true });
+            return pairs.length;
+        }
+        finally {
+            await connection.close();
+        }
+    }
     static async getGameByIgdbId(igdbId) {
         const pool = getOraclePool();
         const connection = await pool.getConnection();

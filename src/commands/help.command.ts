@@ -105,7 +105,13 @@ type GameCompletionHelpTopic = {
   notes?: string;
 };
 
-type GameDbHelpTopicId = "add" | "search" | "view" | "audit" | "igdb_api_dump";
+type GameDbHelpTopicId =
+  | "add"
+  | "search"
+  | "view"
+  | "audit"
+  | "igdb_api_dump"
+  | "link-versions";
 
 type GameDbHelpTopic = {
   id: GameDbHelpTopicId;
@@ -882,6 +888,15 @@ const GAMEDB_HELP_TOPICS: GameDbHelpTopic[] = [
     notes:
       "Defaults to checking both images and threads if no filters are set. " +
       "Auto-accept pulls IGDB images for all missing ones.",
+  },
+  {
+    id: "link-versions",
+    label: "/gamedb link-versions",
+    summary: "Link alternate GameDB versions together (admin only).",
+    syntax: "Syntax: /gamedb link-versions game_ids:<string> [showinchat:<boolean>]",
+    notes:
+      "Provide a comma-separated list of GameDB ids to link (e.g. 12, 34, 56). " +
+      "Linked titles appear under Alternate Versions in /gamedb view.",
   },
 ];
 

@@ -42,6 +42,19 @@ Game metadata ingested from IGDB and stored for bot lookups. Schema created by
 | RELEASE_DATE | DATE | Yes | Release date for region/platform. |
 | NOTES | VARCHAR2(255) | Yes | Free-form notes. |
 
+## GAMEDB_GAME_ALTERNATES
+
+- Primary/unique constraints: composite primary key on `(GAME_ID, ALT_GAME_ID)` with
+  `CK_GAMEDB_GAME_ALTS_ORDER` enforcing `GAME_ID < ALT_GAME_ID`.
+- Indexes: primary key; foreign keys to `GAMEDB_GAMES`.
+
+| Column | Type | Nullable | Notes |
+| --- | --- | --- | --- |
+| GAME_ID | NUMBER | No | Base GameDB id (smaller id in the pair). |
+| ALT_GAME_ID | NUMBER | No | Alternate version GameDB id (larger id in the pair). |
+| CREATED_AT | TIMESTAMP | No | Defaults to `CURRENT_TIMESTAMP`. |
+| CREATED_BY | VARCHAR2(64) | Yes | Discord user id who linked the versions. |
+
 ## GAMEDB_PLATFORMS
 
 - Primary/unique constraints: `PLATFORM_ID` primary key; unique `PLATFORM_CODE`;

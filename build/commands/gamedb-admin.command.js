@@ -18,6 +18,11 @@ import axios from "axios";
 import { igdbService } from "../services/IgdbService.js";
 const AUDIT_PAGE_SIZE = 20;
 const AUDIT_SESSIONS = new Map();
+function parseGameIdList(raw) {
+    const matches = raw.split(/[^0-9]+/).filter(Boolean);
+    const ids = matches.map((part) => Number(part)).filter((id) => Number.isInteger(id) && id > 0);
+    return Array.from(new Set(ids));
+}
 let GameDbAdmin = class GameDbAdmin {
     async audit(missingImages, missingThreads, autoAcceptImages, showInChat, interaction) {
         const isPublic = !!showInChat;
@@ -65,6 +70,41 @@ let GameDbAdmin = class GameDbAdmin {
         const response = this.buildAuditListResponse(sessionId);
         await safeReply(interaction, {
             ...response,
+            flags: isPublic ? undefined : MessageFlags.Ephemeral,
+        });
+    }
+    async linkVersions(gameIdsRaw, showInChat, interaction) {
+        const isPublic = !!showInChat;
+        await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
+        if (!(await isAdmin(interaction)))
+            return;
+        const gameIds = parseGameIdList(gameIdsRaw);
+        if (gameIds.length < 2) {
+            await safeReply(interaction, {
+                content: "Provide at least two valid GameDB ids to link.",
+                flags: MessageFlags.Ephemeral,
+            });
+            return;
+        }
+        const games = await Game.getGamesByIds(gameIds);
+        const foundIds = new Set(games.map((game) => game.id));
+        const missingIds = gameIds.filter((id) => !foundIds.has(id));
+        if (missingIds.length) {
+            await safeReply(interaction, {
+                content: `Missing GameDB id(s): ${missingIds.join(", ")}.`,
+                flags: MessageFlags.Ephemeral,
+            });
+            return;
+        }
+        await Game.linkAlternateVersions(gameIds, interaction.user.id);
+        const lines = games
+            .sort((a, b) => a.title.localeCompare(b.title))
+            .map((game) => `• **${game.title}** (GameDB #${game.id})`);
+        const embed = new EmbedBuilder()
+            .setTitle("Linked Alternate Versions")
+            .setDescription(lines.join("\n"));
+        await safeReply(interaction, {
+            embeds: [embed],
             flags: isPublic ? undefined : MessageFlags.Ephemeral,
         });
     }
@@ -466,6 +506,21 @@ __decorate([
         type: ApplicationCommandOptionType.Boolean,
     }))
 ], GameDbAdmin.prototype, "audit", null);
+__decorate([
+    Slash({ description: "Link alternate GameDB versions (Admin only)", name: "link-versions" }),
+    __param(0, SlashOption({
+        description: "Comma-separated GameDB ids to link together",
+        name: "game_ids",
+        required: true,
+        type: ApplicationCommandOptionType.String,
+    })),
+    __param(1, SlashOption({
+        description: "Show in chat (public) instead of ephemeral",
+        name: "showinchat",
+        required: false,
+        type: ApplicationCommandOptionType.Boolean,
+    }))
+], GameDbAdmin.prototype, "linkVersions", null);
 __decorate([
     ButtonComponent({ id: /^audit-page:[^:]+:(next|prev)$/ })
 ], GameDbAdmin.prototype, "handleAuditPage", null);
