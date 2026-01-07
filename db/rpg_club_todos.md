@@ -15,6 +15,7 @@ Oracle table storing bot development TODO items managed by server owner commands
 | TODO_ID | NUMBER | No | Identity | Primary key. |
 | TITLE | VARCHAR2(200) | No | — | Short TODO title. |
 | DETAILS | VARCHAR2(2000) | Yes | — | Optional details/notes. |
+| TODO_CATEGORY | VARCHAR2(20) | No | Improvements | One of: New Features, Improvements, Defects. |
 | CREATED_BY | VARCHAR2(30) | Yes | — | Discord user id of creator. |
 | CREATED_AT | TIMESTAMP WITH TIME ZONE | No | SYSTIMESTAMP | Creation timestamp. |
 | UPDATED_AT | TIMESTAMP WITH TIME ZONE | No | SYSTIMESTAMP | Updated on edit. |

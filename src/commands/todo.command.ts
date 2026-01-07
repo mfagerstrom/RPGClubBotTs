@@ -15,6 +15,7 @@ import {
   Discord,
   SelectMenuComponent,
   Slash,
+  SlashChoice,
   SlashGroup,
   SlashOption,
 } from "discordx";
@@ -40,6 +41,10 @@ import {
 const MAX_LIST_ITEMS: number = 100;
 const MAX_TODO_DESCRIPTION: number = 3800;
 const MAX_SUGGESTION_OPTIONS: number = 25;
+const DEFAULT_TODO_CATEGORY = "Improvements";
+const TODO_CATEGORIES = ["New Features", "Improvements", "Defects"] as const;
+
+type TodoCategory = (typeof TODO_CATEGORIES)[number];
 function formatTodoLines(items: ITodoItem[]): string[] {
   const lines: string[] = [];
   const labelLengths: number[] = items.map((item) => `[${item.todoId}]`.length);
@@ -52,6 +57,9 @@ function formatTodoLines(items: ITodoItem[]): string[] {
     const labelPadded: string = labelRaw.padStart(maxLabelLength, " ");
     const labelBlock: string = `\`${labelPadded}\``;
     lines.push(`**${labelBlock}** ${item.title}${statusSuffix}`);
+    if (item.todoCategory) {
+      lines.push(`> Category: ${item.todoCategory}`);
+    }
     if (item.details) {
       lines.push(`> ${item.details}`);
     }
@@ -330,6 +338,7 @@ export class TodoCommand {
     const todo = await createTodo(
       suggestion.title,
       suggestion.details ?? null,
+      DEFAULT_TODO_CATEGORY,
       suggestion.createdBy,
     );
     await deleteSuggestion(suggestionId);
@@ -385,6 +394,14 @@ export class TodoCommand {
       type: ApplicationCommandOptionType.String,
     })
     title: string,
+    @SlashChoice(...TODO_CATEGORIES)
+    @SlashOption({
+      description: "TODO category",
+      name: "category",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    category: TodoCategory,
     @SlashOption({
       description: "Optional details for the TODO",
       name: "details",
@@ -417,7 +434,12 @@ export class TodoCommand {
     }
 
     const trimmedDetails = details?.trim();
-    const todo = await createTodo(trimmedTitle, trimmedDetails ?? null, interaction.user.id);
+    const todo = await createTodo(
+      trimmedTitle,
+      trimmedDetails ?? null,
+      category,
+      interaction.user.id,
+    );
     await safeReply(interaction, {
       embeds: [buildTodoActionEmbed("Added", todo)],
       flags: isPublic ? undefined : MessageFlags.Ephemeral,
@@ -447,6 +469,14 @@ export class TodoCommand {
       type: ApplicationCommandOptionType.String,
     })
     details: string | undefined,
+    @SlashChoice(...TODO_CATEGORIES)
+    @SlashOption({
+      description: "New category (optional)",
+      name: "category",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    category: TodoCategory | undefined,
     @SlashOption({
       description: "Show in chat (public) instead of ephemeral",
       name: "showinchat",
@@ -462,9 +492,9 @@ export class TodoCommand {
     const ok = await isSuperAdmin(interaction);
     if (!ok) return;
 
-    if (title === undefined && details === undefined) {
+    if (title === undefined && details === undefined && category === undefined) {
       await safeReply(interaction, {
-        content: "Provide a title or details to update.",
+        content: "Provide a title, details, or category to update.",
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -481,7 +511,7 @@ export class TodoCommand {
 
     const trimmedDetails = details === undefined ? undefined : details.trim();
     const finalDetails = trimmedDetails === "" ? null : trimmedDetails;
-    const updated = await updateTodo(todoId, trimmedTitle, finalDetails);
+    const updated = await updateTodo(todoId, trimmedTitle, finalDetails, category);
     const updatedTodo = updated ? await fetchTodoById(todoId) : null;
     await safeReply(interaction, {
       content: updatedTodo

@@ -8,7 +8,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
 import { ActionRowBuilder, ApplicationCommandOptionType, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, StringSelectMenuBuilder, } from "discord.js";
-import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption, } from "discordx";
+import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashChoice, SlashGroup, SlashOption, } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import { isSuperAdmin } from "./superadmin.command.js";
 import { completeTodo, createTodo, countTodos, deleteTodo, fetchTodoById, listTodos, updateTodo, } from "../classes/Todo.js";
@@ -16,6 +16,8 @@ import { deleteSuggestion, getSuggestionById, listSuggestions, } from "../classe
 const MAX_LIST_ITEMS = 100;
 const MAX_TODO_DESCRIPTION = 3800;
 const MAX_SUGGESTION_OPTIONS = 25;
+const DEFAULT_TODO_CATEGORY = "Improvements";
+const TODO_CATEGORIES = ["New Features", "Improvements", "Defects"];
 function formatTodoLines(items) {
     const lines = [];
     const labelLengths = items.map((item) => `[${item.todoId}]`.length);
@@ -28,6 +30,9 @@ function formatTodoLines(items) {
         const labelPadded = labelRaw.padStart(maxLabelLength, " ");
         const labelBlock = `\`${labelPadded}\``;
         lines.push(`**${labelBlock}** ${item.title}${statusSuffix}`);
+        if (item.todoCategory) {
+            lines.push(`> Category: ${item.todoCategory}`);
+        }
         if (item.details) {
             lines.push(`> ${item.details}`);
         }
@@ -226,7 +231,7 @@ let TodoCommand = class TodoCommand {
             });
             return;
         }
-        const todo = await createTodo(suggestion.title, suggestion.details ?? null, suggestion.createdBy);
+        const todo = await createTodo(suggestion.title, suggestion.details ?? null, DEFAULT_TODO_CATEGORY, suggestion.createdBy);
         await deleteSuggestion(suggestionId);
         await interaction.update({
             content: `Accepted suggestion #${suggestionId} and created TODO #${todo.todoId}.`,
@@ -265,7 +270,7 @@ let TodoCommand = class TodoCommand {
             files: [],
         });
     }
-    async add(title, details, showInChat, interaction) {
+    async add(title, category, details, showInChat, interaction) {
         const isPublic = Boolean(showInChat);
         await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
         const ok = await isSuperAdmin(interaction);
@@ -280,21 +285,21 @@ let TodoCommand = class TodoCommand {
             return;
         }
         const trimmedDetails = details?.trim();
-        const todo = await createTodo(trimmedTitle, trimmedDetails ?? null, interaction.user.id);
+        const todo = await createTodo(trimmedTitle, trimmedDetails ?? null, category, interaction.user.id);
         await safeReply(interaction, {
             embeds: [buildTodoActionEmbed("Added", todo)],
             flags: isPublic ? undefined : MessageFlags.Ephemeral,
         });
     }
-    async edit(todoId, title, details, showInChat, interaction) {
+    async edit(todoId, title, details, category, showInChat, interaction) {
         const isPublic = Boolean(showInChat);
         await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
         const ok = await isSuperAdmin(interaction);
         if (!ok)
             return;
-        if (title === undefined && details === undefined) {
+        if (title === undefined && details === undefined && category === undefined) {
             await safeReply(interaction, {
-                content: "Provide a title or details to update.",
+                content: "Provide a title, details, or category to update.",
                 flags: MessageFlags.Ephemeral,
             });
             return;
@@ -309,7 +314,7 @@ let TodoCommand = class TodoCommand {
         }
         const trimmedDetails = details === undefined ? undefined : details.trim();
         const finalDetails = trimmedDetails === "" ? null : trimmedDetails;
-        const updated = await updateTodo(todoId, trimmedTitle, finalDetails);
+        const updated = await updateTodo(todoId, trimmedTitle, finalDetails, category);
         const updatedTodo = updated ? await fetchTodoById(todoId) : null;
         await safeReply(interaction, {
             content: updatedTodo
@@ -401,13 +406,20 @@ __decorate([
         required: true,
         type: ApplicationCommandOptionType.String,
     })),
+    __param(1, SlashChoice(...TODO_CATEGORIES)),
     __param(1, SlashOption({
+        description: "TODO category",
+        name: "category",
+        required: true,
+        type: ApplicationCommandOptionType.String,
+    })),
+    __param(2, SlashOption({
         description: "Optional details for the TODO",
         name: "details",
         required: false,
         type: ApplicationCommandOptionType.String,
     })),
-    __param(2, SlashOption({
+    __param(3, SlashOption({
         description: "Show in chat (public) instead of ephemeral",
         name: "showinchat",
         required: false,
@@ -434,7 +446,14 @@ __decorate([
         required: false,
         type: ApplicationCommandOptionType.String,
     })),
+    __param(3, SlashChoice(...TODO_CATEGORIES)),
     __param(3, SlashOption({
+        description: "New category (optional)",
+        name: "category",
+        required: false,
+        type: ApplicationCommandOptionType.String,
+    })),
+    __param(4, SlashOption({
         description: "Show in chat (public) instead of ephemeral",
         name: "showinchat",
         required: false,
