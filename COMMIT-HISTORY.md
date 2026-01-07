@@ -1,3 +1,8 @@
+2026-01-07 - Commit ID: 63386b8 - fix: more todo improvements
+2026-01-07 - Commit ID: c801276 - fix: various /todo improvements
+2026-01-07 - Commit ID: 52e065a - todo 75:  /todo add tshirt size effort estimates for TODOs [M]
+2026-01-07 - Commit ID: 7d2250a - todo 102: Add Completion: give user option for unknown date
+2026-01-07 - Commit ID: 8eb8a60 - fix: multiple completionator csv import improvements, TODOs 41, 42, 96, 100, 101
 2026-01-05 - Commit ID: 42bb3e6 - todo 62: Allow /gamedb view to search all
 2026-01-05 - Commit ID: b027f5d - feat: Add "Add to Now Playing" and "Add Completion" buttons below gamedb view embed
 2026-01-05 - Commit ID: e1baf67 - fix: improved embeds for /now-playing list

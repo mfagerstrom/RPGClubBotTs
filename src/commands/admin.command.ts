@@ -11,6 +11,7 @@ import {
   type ButtonInteraction,
   type StringSelectMenuInteraction,
   type ForumChannel,
+  type Message,
 } from "discord.js";
 import type { CommandInteraction, User } from "discord.js";
 import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption } from "discordx";
@@ -699,9 +700,59 @@ export class Admin {
         await updateEmbed("❌ Error waiting for input.");
         return null;
       }
-    };
+      };
 
-    let allActions: WizardAction[] = [];
+      const wizardChoice = async (
+        question: string,
+        options: PromptChoiceOption[],
+      ): Promise<string | null> => {
+        await updateEmbed(`\nƒ?" **${question}**`);
+
+        const channel: any = interaction.channel;
+        const userId = interaction.user.id;
+
+        if (!channel || typeof channel.send !== "function") {
+          await updateEmbed("ƒ?O Cannot prompt for input in this channel.");
+          return null;
+        }
+
+        const promptId = `wiz-choice:${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+        const rows = buildChoiceRows(promptId, options);
+        const promptMessage: Message | null = await channel.send({
+          content: `<@${userId}> ${question}`,
+          components: rows,
+          allowedMentions: { users: [userId] },
+        }).catch(() => null);
+
+        if (!promptMessage) {
+          await updateEmbed("ƒ?O Failed to send prompt.");
+          return null;
+        }
+
+        try {
+          const selection = await promptMessage.awaitMessageComponent({
+            componentType: ComponentType.Button,
+            filter: (i) => i.user.id === userId && i.customId.startsWith(`${promptId}:`),
+            time: 120_000,
+          });
+          await selection.deferUpdate().catch(() => {});
+          const value = selection.customId.slice(promptId.length + 1);
+          const chosenLabel = options.find((opt) => opt.value === value)?.label ?? value;
+          await promptMessage.edit({ components: [] }).catch(() => {});
+          await updateEmbed(`> *${chosenLabel}*`);
+          if (value === "cancel") {
+            await updateEmbed("ƒ?O Cancelled by user.");
+            return null;
+          }
+          return value;
+        } catch {
+          await promptMessage.edit({ components: [] }).catch(() => {});
+          await updateEmbed("ƒ?O Timed out waiting for a selection.");
+          return null;
+        }
+      };
+
+      let allActions: WizardAction[] = [];
 
     while (true) {
       logHistory = "";
@@ -727,14 +778,15 @@ export class Admin {
       await wizardLog(`Auto-assigned label: **${monthYear}**`);
 
       // 2. GOTM
-      const gotmResult = await setupRoundGames(
-        "GOTM",
-        nextRound,
-        testMode,
-        wizardLog,
-        wizardPrompt,
-        interaction,
-      );
+        const gotmResult = await setupRoundGames(
+          "GOTM",
+          nextRound,
+          testMode,
+          wizardLog,
+          wizardPrompt,
+          wizardChoice,
+          interaction,
+        );
       if (!gotmResult) {
         await wizardLog("Aborted during GOTM setup.");
         return;
@@ -743,14 +795,15 @@ export class Admin {
       allActions.push(...gotmResult.actions);
 
       // 3. NR-GOTM
-      const nrGotmResult = await setupRoundGames(
-        "NR-GOTM",
-        nextRound,
-        testMode,
-        wizardLog,
-        wizardPrompt,
-        interaction,
-      );
+        const nrGotmResult = await setupRoundGames(
+          "NR-GOTM",
+          nextRound,
+          testMode,
+          wizardLog,
+          wizardPrompt,
+          wizardChoice,
+          interaction,
+        );
       if (!nrGotmResult) {
         await wizardLog("Aborted during NR-GOTM setup.");
         return;
@@ -787,14 +840,20 @@ export class Admin {
       const defaultDate = calculateNextVoteDate();
       const dateStr = defaultDate.toLocaleDateString("en-US");
 
-      const dateResp = await wizardPrompt(
-        `When should the *next* vote be? (Default: ${dateStr}). Type 'default' or a date (YYYY-MM-DD).`,
+      const dateChoice = await wizardChoice(
+        `When should the *next* vote be? (Default: ${dateStr})`,
+        addCancelOption([
+          { label: "Use Default", value: "default", style: ButtonStyle.Primary },
+          { label: "Enter Date", value: "date" },
+        ]),
       );
 
-      if (!dateResp) return;
+      if (!dateChoice) return;
 
       let finalDate = defaultDate;
-      if (dateResp.toLowerCase() !== "default") {
+      if (dateChoice === "date") {
+        const dateResp = await wizardPrompt("Enter the next vote date (YYYY-MM-DD).");
+        if (!dateResp) return;
         const parsed = new Date(dateResp);
         if (!Number.isNaN(parsed.getTime())) {
           finalDate = parsed;
@@ -918,9 +977,10 @@ export class Admin {
       return;
     }
 
-    const gameCountRaw = await promptUserForInput(
+    const gameCountRaw = await promptUserForChoice(
       interaction,
-      "How many games are in this GOTM round? (1-5). Type `cancel` to abort.",
+      "How many games are in this GOTM round?",
+      addCancelOption(buildNumberChoiceOptions(1, 5)),
     );
     if (gameCountRaw === null) {
       return;
@@ -1051,9 +1111,10 @@ export class Admin {
       return;
     }
 
-    const gameCountRaw = await promptUserForInput(
+    const gameCountRaw = await promptUserForChoice(
       interaction,
-      "How many games are in this NR-GOTM round? (1-5). Type `cancel` to abort.",
+      "How many games are in this NR-GOTM round?",
+      addCancelOption(buildNumberChoiceOptions(1, 5)),
     );
     if (gameCountRaw === null) {
       return;
@@ -1205,9 +1266,10 @@ export class Admin {
     let gameIndex = 0;
 
     if (totalGames > 1) {
-      const gameAnswer = await promptUserForInput(
+      const gameAnswer = await promptUserForChoice(
         interaction,
-        `Which game number (1-${totalGames}) do you want to edit? Type \`cancel\` to abort.`,
+        `Which game number (1-${totalGames}) do you want to edit?`,
+        addCancelOption(buildNumberChoiceOptions(1, totalGames)),
       );
       if (gameAnswer === null) {
         return;
@@ -1223,9 +1285,14 @@ export class Admin {
       gameIndex = idx - 1;
     }
 
-    const fieldAnswerRaw = await promptUserForInput(
+    const fieldAnswerRaw = await promptUserForChoice(
       interaction,
-      "Which field do you want to edit? Type one of: `gamedb`, `thread`, `reddit`. Type `cancel` to abort.",
+      "Which field do you want to edit?",
+      addCancelOption([
+        { label: "GameDB", value: "gamedb", style: ButtonStyle.Primary },
+        { label: "Thread", value: "thread" },
+        { label: "Reddit", value: "reddit" },
+      ]),
     );
     if (fieldAnswerRaw === null) {
       return;
@@ -1376,9 +1443,10 @@ export class Admin {
     let gameIndex = 0;
 
     if (totalGames > 1) {
-      const gameAnswer = await promptUserForInput(
+      const gameAnswer = await promptUserForChoice(
         interaction,
-        `Which game number (1-${totalGames}) do you want to edit? Type \`cancel\` to abort.`,
+        `Which game number (1-${totalGames}) do you want to edit?`,
+        addCancelOption(buildNumberChoiceOptions(1, totalGames)),
       );
       if (gameAnswer === null) {
         return;
@@ -1394,9 +1462,14 @@ export class Admin {
       gameIndex = idx - 1;
     }
 
-    const fieldAnswerRaw = await promptUserForInput(
+    const fieldAnswerRaw = await promptUserForChoice(
       interaction,
-      "Which field do you want to edit? Type one of: `gamedb`, `thread`, `reddit`. Type `cancel` to abort.",
+      "Which field do you want to edit?",
+      addCancelOption([
+        { label: "GameDB", value: "gamedb", style: ButtonStyle.Primary },
+        { label: "Thread", value: "thread" },
+        { label: "Reddit", value: "reddit" },
+      ]),
     );
     if (fieldAnswerRaw === null) {
       return;
@@ -1536,6 +1609,115 @@ export class Admin {
       embeds: [helpEmbed],
       components: response.components,
     });
+  }
+}
+
+type PromptChoiceOption = {
+  label: string;
+  value: string;
+  style?: ButtonStyle;
+};
+
+function buildChoiceRows(
+  customIdPrefix: string,
+  options: PromptChoiceOption[],
+): ActionRowBuilder<ButtonBuilder>[] {
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let i = 0; i < options.length; i += 5) {
+    const slice = options.slice(i, i + 5);
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      slice.map((opt) =>
+        new ButtonBuilder()
+          .setCustomId(`${customIdPrefix}:${opt.value}`)
+          .setLabel(opt.label)
+          .setStyle(opt.style ?? ButtonStyle.Secondary),
+      ),
+    );
+    rows.push(row);
+  }
+  return rows;
+}
+
+function buildNumberChoiceOptions(min: number, max: number): PromptChoiceOption[] {
+  const options: PromptChoiceOption[] = [];
+  for (let i = min; i <= max; i++) {
+    options.push({ label: String(i), value: String(i), style: ButtonStyle.Primary });
+  }
+  return options;
+}
+
+function addCancelOption(options: PromptChoiceOption[]): PromptChoiceOption[] {
+  return [...options, { label: "Cancel", value: "cancel", style: ButtonStyle.Danger }];
+}
+
+async function promptUserForChoice(
+  interaction: CommandInteraction,
+  question: string,
+  options: PromptChoiceOption[],
+  timeoutMs = 120_000,
+  cancelMessage = "Cancelled.",
+): Promise<string | null> {
+  const channel: any = interaction.channel;
+  const userId = interaction.user.id;
+
+  if (!channel || typeof channel.send !== "function") {
+    await safeReply(interaction, {
+      content: "Cannot prompt for additional input; this command must be used in a text channel.",
+    });
+    return null;
+  }
+
+  const promptId = `admin-choice:${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+  const rows = buildChoiceRows(promptId, options);
+  const content = `<@${userId}> ${question}`;
+
+  let promptMessage: Message | null = null;
+  try {
+    const reply = await safeReply(interaction, {
+      content,
+      components: rows,
+      __forceFollowUp: true,
+    });
+    if (reply && typeof (reply as Message).awaitMessageComponent === "function") {
+      promptMessage = reply as Message;
+    }
+  } catch {
+    // fall back to channel.send below
+  }
+
+  if (!promptMessage) {
+    promptMessage = await channel.send({
+      content,
+      components: rows,
+      allowedMentions: { users: [userId] },
+    }).catch(() => null);
+  }
+
+  if (!promptMessage) {
+    await safeReply(interaction, {
+      content: "Failed to send the prompt message.",
+    });
+    return null;
+  }
+
+  try {
+    const selection = await promptMessage.awaitMessageComponent({
+      componentType: ComponentType.Button,
+      filter: (i) => i.user.id === userId && i.customId.startsWith(`${promptId}:`),
+      time: timeoutMs,
+    });
+    await selection.deferUpdate().catch(() => {});
+    const value = selection.customId.slice(promptId.length + 1);
+    await promptMessage.edit({ components: [] }).catch(() => {});
+    if (value === "cancel") {
+      await safeReply(interaction, { content: cancelMessage });
+      return null;
+    }
+    return value;
+  } catch {
+    await promptMessage.edit({ components: [] }).catch(() => {});
+    await safeReply(interaction, { content: "Timed out waiting for a selection. Cancelled." });
+    return null;
   }
 }
 
@@ -1681,6 +1863,8 @@ async function setupRoundGames(
 
   prompt: (q: string) => Promise<string | null>,
 
+  promptChoice: (q: string, options: PromptChoiceOption[]) => Promise<string | null>,
+
   interaction: CommandInteraction,
 
 ): Promise<{
@@ -1790,13 +1974,15 @@ async function setupRoundGames(
 
               nom.gameTitle,
 
-              testMode,
+                testMode,
 
-              log,
+                log,
 
-              prompt,
+                prompt,
 
-              forumTagId,
+                promptChoice,
+
+                forumTagId,
 
             );
 
@@ -1826,7 +2012,10 @@ async function setupRoundGames(
 
   // Manual Mode
 
-  const countRaw = await prompt(`How many ${label} winners? (1-5). Type \`cancel\` to abort.`);
+  const countRaw = await promptChoice(
+    `How many ${label} winners?`,
+    addCancelOption(buildNumberChoiceOptions(1, 5)),
+  );
 
   if (!countRaw) return null;
 
@@ -1882,13 +2071,15 @@ async function setupRoundGames(
 
       game.title,
 
-      testMode,
+        testMode,
 
-      log,
+        log,
 
-      prompt,
+        prompt,
 
-      forumTagId,
+        promptChoice,
+
+        forumTagId,
 
     );
 
@@ -1933,6 +2124,8 @@ async function processWinnerGame(
 
 
   prompt: (q: string) => Promise<string | null>,
+
+  promptChoice: (q: string, options: PromptChoiceOption[]) => Promise<string | null>,
 
 
 
@@ -2032,15 +2225,14 @@ async function processWinnerGame(
 
 
 
-    const createResp = await prompt(
-
-
-
-      `No linked thread found for "${gameTitle}". Create one in Now Playing? (yes/no/id)`,
-
-
-
-    );
+      const createResp = await promptChoice(
+        `No linked thread found for "${gameTitle}". Create one in Now Playing?`,
+        addCancelOption([
+          { label: "Yes", value: "yes", style: ButtonStyle.Success },
+          { label: "No", value: "no" },
+          { label: "Enter ID", value: "id", style: ButtonStyle.Primary },
+        ]),
+      );
 
 
 
@@ -2140,58 +2332,26 @@ async function processWinnerGame(
 
 
 
-    } else if (createResp.toLowerCase() !== "no") {
-
-
-
-      if (/^\d+$/.test(createResp)) {
-
-
-
-        const manualId = createResp;
-
-
-
-        gameData.threadId = manualId;
-
-
-
-        actions.push({
-
-
-
-          description: `Link thread <#${manualId}> to "**${gameTitle}**"`,
-
-
-
-          execute: async () => {
-
-
-
-            if (!testMode) {
-
-
-
-              await setThreadGameLink(manualId, gamedbId);
-
-
-
-            }
-
-
-
-          },
-
-
-
-        });
-
-
-
+    } else if (createResp.toLowerCase() === "id") {
+      const manualId = await prompt(
+        `Enter the thread ID to link for "${gameTitle}" (or type \`cancel\`).`,
+      );
+      if (!manualId) return null;
+      if (!/^\d+$/.test(manualId)) {
+        await log("Invalid thread ID.");
+        return null;
       }
 
+      gameData.threadId = manualId;
 
-
+      actions.push({
+        description: `Link thread <#${manualId}> to "**${gameTitle}**"`,
+        execute: async () => {
+          if (!testMode) {
+            await setThreadGameLink(manualId, gamedbId);
+          }
+        },
+      });
     }
 
 

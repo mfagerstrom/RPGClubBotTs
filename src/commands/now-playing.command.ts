@@ -14,6 +14,7 @@ import {
   type ActionRow,
   type MessageActionRowComponent,
   type Message,
+  type ThreadChannel,
 } from "discord.js";
 import {
   Discord,
@@ -83,26 +84,36 @@ function sortNowPlayingEntries(
 async function promptForNote(
   interaction: CommandInteraction | StringSelectMenuInteraction,
   question: string,
+  preface: string | null,
   timeoutMs: number = 120_000,
 ): Promise<string | null> {
-  const channel: any = interaction.channel;
   const userId = interaction.user.id;
+  const context = await openPromptThread(interaction, "Now Playing note prompt");
+  if (!context) return null;
+  const { promptThread, createdThread } = context;
+  let promptMessage: Message | null = null;
 
-  if (!channel || typeof channel.awaitMessages !== "function") {
+  if (createdThread) {
     await safeReply(interaction, {
-      content: "Cannot prompt for additional input; use this command in a text channel.",
+      content: `Please reply in <#${promptThread.id}>.`,
       flags: MessageFlags.Ephemeral,
     });
-    return null;
   }
 
-  await safeReply(interaction, {
+  if (preface) {
+    await promptThread.send({
+      content: preface,
+      allowedMentions: { users: [userId] },
+    }).catch(() => {});
+  }
+
+  promptMessage = await promptThread.send({
     content: `<@${userId}> ${question}`,
-    flags: MessageFlags.Ephemeral,
+    allowedMentions: { users: [userId] },
   });
 
   try {
-    const collected = await channel.awaitMessages({
+    const collected = await promptThread.awaitMessages({
       filter: (m: any) => m.author?.id === userId,
       max: 1,
       time: timeoutMs,
@@ -152,6 +163,88 @@ async function promptForNote(
       flags: MessageFlags.Ephemeral,
     });
     return null;
+  } finally {
+    if (promptMessage && "delete" in promptMessage) {
+      await promptMessage.delete().catch(() => {});
+    }
+    await cleanupPromptThread(context);
+  }
+}
+
+async function openPromptThread(
+  interaction: CommandInteraction | StringSelectMenuInteraction,
+  label: string,
+): Promise<{
+  promptThread: ThreadChannel;
+  createdThread: boolean;
+  parentMessage: Message | null;
+} | null> {
+  const userId = interaction.user.id;
+  const channel: any = interaction.channel;
+  let promptThread: ThreadChannel | null = null;
+  let createdThread = false;
+  let parentMessage: Message | null = null;
+
+  if (!channel || typeof channel.send !== "function") {
+    await safeReply(interaction, {
+      content: "Cannot start a prompt thread in this channel.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return null;
+  }
+
+  try {
+    if ("isThread" in channel && typeof channel.isThread === "function" && channel.isThread()) {
+      promptThread = channel as ThreadChannel;
+    } else {
+      parentMessage = await channel.send({
+        content: `${label} for <@${userId}>.`,
+        allowedMentions: { users: [userId] },
+      });
+      if (!parentMessage || typeof parentMessage.startThread !== "function") {
+        await safeReply(interaction, {
+          content: "Thread creation is not supported in this channel.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return null;
+      }
+      const threadName = `Now Playing Note - ${interaction.user.username ?? interaction.user.id}`;
+      promptThread = await parentMessage.startThread({
+        name: threadName.slice(0, 100),
+        autoArchiveDuration: 60,
+      });
+      createdThread = true;
+    }
+  } catch (err: any) {
+    const msg = err?.message ?? String(err);
+    await safeReply(interaction, {
+      content: `Failed to start a thread for this prompt: ${msg}`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return null;
+  }
+
+  if (!promptThread || typeof promptThread.awaitMessages !== "function") {
+    await safeReply(interaction, {
+      content: "Cannot prompt for additional input in this channel.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return null;
+  }
+
+  return { promptThread, createdThread, parentMessage };
+}
+
+async function cleanupPromptThread(context: {
+  promptThread: ThreadChannel;
+  createdThread: boolean;
+  parentMessage: Message | null;
+}): Promise<void> {
+  if (context.createdThread && "delete" in context.promptThread) {
+    await context.promptThread.delete().catch(() => {});
+  }
+  if (context.parentMessage && "delete" in context.parentMessage) {
+    await context.parentMessage.delete().catch(() => {});
   }
 }
 
@@ -448,10 +541,19 @@ export class NowPlayingCommand {
       return;
     }
 
-    const options = current.map((entry) => ({
+    const entriesWithNotes = current.filter((entry) => Boolean(entry.note?.trim()));
+    if (!entriesWithNotes.length) {
+      await safeReply(interaction, {
+        content: "None of your Now Playing entries have notes to delete.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const options = entriesWithNotes.map((entry) => ({
       label: entry.title.slice(0, 100),
       value: String(entry.gameId),
-      description: entry.note ? entry.note.slice(0, 95) : "No note to delete",
+      description: entry.note ? entry.note.slice(0, 95) : "Note",
     }));
 
     const selectId = `nowplaying-delete-note-select:${interaction.user.id}`;
@@ -652,11 +754,17 @@ export class NowPlayingCommand {
       return;
     }
 
-    await interaction.deferUpdate().catch(() => {});
+    const currentEntries = await Member.getNowPlayingEntries(ownerId);
+    const currentEntry = currentEntries.find((entry) => entry.gameId === gameId);
+    const currentNote = currentEntry?.note ? currentEntry.note : "No note set.";
+    const preface = currentEntry
+      ? `Current note for **${currentEntry.title}**:\n> ${currentNote}`
+      : "Current entry not found.";
 
     const note = await promptForNote(
       interaction,
       "Enter a note for this Now Playing entry (or type `cancel`).",
+      preface,
     );
     if (!note) return;
 
@@ -687,13 +795,72 @@ export class NowPlayingCommand {
       return;
     }
 
-    await interaction.deferUpdate().catch(() => {});
+    const currentEntries = await Member.getNowPlayingEntries(ownerId);
+    const currentEntry = currentEntries.find((entry) => entry.gameId === gameId);
+    const currentNote = currentEntry?.note ? currentEntry.note : "No note set.";
+    if (!currentEntry) {
+      await safeReply(interaction, {
+        content: "Entry not found.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle(`Delete Note: ${currentEntry.title}`)
+      .setDescription(currentEntry.note ? `> ${currentNote}` : "No note set.");
+
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`nowplaying-delete-note-confirm:${ownerId}:${gameId}:yes`)
+        .setLabel("Delete Note")
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId(`nowplaying-delete-note-confirm:${ownerId}:${gameId}:no`)
+        .setLabel("Cancel")
+        .setStyle(ButtonStyle.Secondary),
+    );
+
+    await interaction.update({
+      content: "Confirm note deletion:",
+      embeds: [embed],
+      components: [row],
+    });
+  }
+
+  @ButtonComponent({ id: /^nowplaying-delete-note-confirm:\d+:\d+:(yes|no)$/ })
+  async handleDeleteNoteConfirm(interaction: ButtonInteraction): Promise<void> {
+    const [, ownerId, gameIdRaw, choice] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await interaction.reply({
+        content: "This note prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (choice === "no") {
+      await interaction.update({
+        content: "Cancelled.",
+        components: [],
+      }).catch(() => {});
+      return;
+    }
+
+    const gameId = Number(gameIdRaw);
+    if (!Number.isInteger(gameId) || gameId <= 0) {
+      await interaction.reply({
+        content: "Invalid selection.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
 
     const updated = await Member.updateNowPlayingNote(ownerId, gameId, null);
-    await safeReply(interaction, {
+    await interaction.update({
       content: updated ? "Note deleted." : "Could not update that entry.",
-      flags: MessageFlags.Ephemeral,
-    });
+      components: [],
+    }).catch(() => {});
   }
 
   @ButtonComponent({ id: /^np-remove:[^:]+:\d+$/ })

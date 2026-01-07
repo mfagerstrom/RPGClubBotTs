@@ -38,22 +38,31 @@ function sortNowPlayingEntries(entries) {
         return gameIdA - gameIdB;
     });
 }
-async function promptForNote(interaction, question, timeoutMs = 120_000) {
-    const channel = interaction.channel;
+async function promptForNote(interaction, question, preface, timeoutMs = 120_000) {
     const userId = interaction.user.id;
-    if (!channel || typeof channel.awaitMessages !== "function") {
+    const context = await openPromptThread(interaction, "Now Playing note prompt");
+    if (!context)
+        return null;
+    const { promptThread, createdThread } = context;
+    let promptMessage = null;
+    if (createdThread) {
         await safeReply(interaction, {
-            content: "Cannot prompt for additional input; use this command in a text channel.",
+            content: `Please reply in <#${promptThread.id}>.`,
             flags: MessageFlags.Ephemeral,
         });
-        return null;
     }
-    await safeReply(interaction, {
+    if (preface) {
+        await promptThread.send({
+            content: preface,
+            allowedMentions: { users: [userId] },
+        }).catch(() => { });
+    }
+    promptMessage = await promptThread.send({
         content: `<@${userId}> ${question}`,
-        flags: MessageFlags.Ephemeral,
+        allowedMentions: { users: [userId] },
     });
     try {
-        const collected = await channel.awaitMessages({
+        const collected = await promptThread.awaitMessages({
             filter: (m) => m.author?.id === userId,
             max: 1,
             time: timeoutMs,
@@ -98,6 +107,74 @@ async function promptForNote(interaction, question, timeoutMs = 120_000) {
             flags: MessageFlags.Ephemeral,
         });
         return null;
+    }
+    finally {
+        if (promptMessage && "delete" in promptMessage) {
+            await promptMessage.delete().catch(() => { });
+        }
+        await cleanupPromptThread(context);
+    }
+}
+async function openPromptThread(interaction, label) {
+    const userId = interaction.user.id;
+    const channel = interaction.channel;
+    let promptThread = null;
+    let createdThread = false;
+    let parentMessage = null;
+    if (!channel || typeof channel.send !== "function") {
+        await safeReply(interaction, {
+            content: "Cannot start a prompt thread in this channel.",
+            flags: MessageFlags.Ephemeral,
+        });
+        return null;
+    }
+    try {
+        if ("isThread" in channel && typeof channel.isThread === "function" && channel.isThread()) {
+            promptThread = channel;
+        }
+        else {
+            parentMessage = await channel.send({
+                content: `${label} for <@${userId}>.`,
+                allowedMentions: { users: [userId] },
+            });
+            if (!parentMessage || typeof parentMessage.startThread !== "function") {
+                await safeReply(interaction, {
+                    content: "Thread creation is not supported in this channel.",
+                    flags: MessageFlags.Ephemeral,
+                });
+                return null;
+            }
+            const threadName = `Now Playing Note - ${interaction.user.username ?? interaction.user.id}`;
+            promptThread = await parentMessage.startThread({
+                name: threadName.slice(0, 100),
+                autoArchiveDuration: 60,
+            });
+            createdThread = true;
+        }
+    }
+    catch (err) {
+        const msg = err?.message ?? String(err);
+        await safeReply(interaction, {
+            content: `Failed to start a thread for this prompt: ${msg}`,
+            flags: MessageFlags.Ephemeral,
+        });
+        return null;
+    }
+    if (!promptThread || typeof promptThread.awaitMessages !== "function") {
+        await safeReply(interaction, {
+            content: "Cannot prompt for additional input in this channel.",
+            flags: MessageFlags.Ephemeral,
+        });
+        return null;
+    }
+    return { promptThread, createdThread, parentMessage };
+}
+async function cleanupPromptThread(context) {
+    if (context.createdThread && "delete" in context.promptThread) {
+        await context.promptThread.delete().catch(() => { });
+    }
+    if (context.parentMessage && "delete" in context.parentMessage) {
+        await context.parentMessage.delete().catch(() => { });
     }
 }
 let NowPlayingCommand = class NowPlayingCommand {
@@ -311,10 +388,18 @@ let NowPlayingCommand = class NowPlayingCommand {
             });
             return;
         }
-        const options = current.map((entry) => ({
+        const entriesWithNotes = current.filter((entry) => Boolean(entry.note?.trim()));
+        if (!entriesWithNotes.length) {
+            await safeReply(interaction, {
+                content: "None of your Now Playing entries have notes to delete.",
+                flags: MessageFlags.Ephemeral,
+            });
+            return;
+        }
+        const options = entriesWithNotes.map((entry) => ({
             label: entry.title.slice(0, 100),
             value: String(entry.gameId),
-            description: entry.note ? entry.note.slice(0, 95) : "No note to delete",
+            description: entry.note ? entry.note.slice(0, 95) : "Note",
         }));
         const selectId = `nowplaying-delete-note-select:${interaction.user.id}`;
         const selectRow = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
@@ -441,8 +526,13 @@ let NowPlayingCommand = class NowPlayingCommand {
             });
             return;
         }
-        await interaction.deferUpdate().catch(() => { });
-        const note = await promptForNote(interaction, "Enter a note for this Now Playing entry (or type `cancel`).");
+        const currentEntries = await Member.getNowPlayingEntries(ownerId);
+        const currentEntry = currentEntries.find((entry) => entry.gameId === gameId);
+        const currentNote = currentEntry?.note ? currentEntry.note : "No note set.";
+        const preface = currentEntry
+            ? `Current note for **${currentEntry.title}**:\n> ${currentNote}`
+            : "Current entry not found.";
+        const note = await promptForNote(interaction, "Enter a note for this Now Playing entry (or type `cancel`).", preface);
         if (!note)
             return;
         const updated = await Member.updateNowPlayingNote(ownerId, gameId, note);
@@ -468,12 +558,61 @@ let NowPlayingCommand = class NowPlayingCommand {
             });
             return;
         }
-        await interaction.deferUpdate().catch(() => { });
-        const updated = await Member.updateNowPlayingNote(ownerId, gameId, null);
-        await safeReply(interaction, {
-            content: updated ? "Note deleted." : "Could not update that entry.",
-            flags: MessageFlags.Ephemeral,
+        const currentEntries = await Member.getNowPlayingEntries(ownerId);
+        const currentEntry = currentEntries.find((entry) => entry.gameId === gameId);
+        const currentNote = currentEntry?.note ? currentEntry.note : "No note set.";
+        if (!currentEntry) {
+            await safeReply(interaction, {
+                content: "Entry not found.",
+                flags: MessageFlags.Ephemeral,
+            });
+            return;
+        }
+        const embed = new EmbedBuilder()
+            .setTitle(`Delete Note: ${currentEntry.title}`)
+            .setDescription(currentEntry.note ? `> ${currentNote}` : "No note set.");
+        const row = new ActionRowBuilder().addComponents(new ButtonBuilder()
+            .setCustomId(`nowplaying-delete-note-confirm:${ownerId}:${gameId}:yes`)
+            .setLabel("Delete Note")
+            .setStyle(ButtonStyle.Danger), new ButtonBuilder()
+            .setCustomId(`nowplaying-delete-note-confirm:${ownerId}:${gameId}:no`)
+            .setLabel("Cancel")
+            .setStyle(ButtonStyle.Secondary));
+        await interaction.update({
+            content: "Confirm note deletion:",
+            embeds: [embed],
+            components: [row],
         });
+    }
+    async handleDeleteNoteConfirm(interaction) {
+        const [, ownerId, gameIdRaw, choice] = interaction.customId.split(":");
+        if (interaction.user.id !== ownerId) {
+            await interaction.reply({
+                content: "This note prompt isn't for you.",
+                flags: MessageFlags.Ephemeral,
+            });
+            return;
+        }
+        if (choice === "no") {
+            await interaction.update({
+                content: "Cancelled.",
+                components: [],
+            }).catch(() => { });
+            return;
+        }
+        const gameId = Number(gameIdRaw);
+        if (!Number.isInteger(gameId) || gameId <= 0) {
+            await interaction.reply({
+                content: "Invalid selection.",
+                flags: MessageFlags.Ephemeral,
+            });
+            return;
+        }
+        const updated = await Member.updateNowPlayingNote(ownerId, gameId, null);
+        await interaction.update({
+            content: updated ? "Note deleted." : "Could not update that entry.",
+            components: [],
+        }).catch(() => { });
     }
     async handleRemoveNowPlayingButton(interaction) {
         const [, ownerId, gameIdRaw] = interaction.customId.split(":");
@@ -859,6 +998,9 @@ __decorate([
 __decorate([
     SelectMenuComponent({ id: /^nowplaying-delete-note-select:\d+$/ })
 ], NowPlayingCommand.prototype, "handleDeleteNoteSelect", null);
+__decorate([
+    ButtonComponent({ id: /^nowplaying-delete-note-confirm:\d+:\d+:(yes|no)$/ })
+], NowPlayingCommand.prototype, "handleDeleteNoteConfirm", null);
 __decorate([
     ButtonComponent({ id: /^np-remove:[^:]+:\d+$/ })
 ], NowPlayingCommand.prototype, "handleRemoveNowPlayingButton", null);

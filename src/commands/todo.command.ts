@@ -142,7 +142,10 @@ function buildTodoListComponents(
     .addOptions(sizeOptions);
 
   rows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(sizeSelect));
-  const openItems = items.filter((item) => !item.isCompleted);
+  const scopedItems = active === "all" || active === "completed"
+    ? items
+    : items.filter((item) => item.todoCategory === active);
+  const openItems = scopedItems.filter((item) => !item.isCompleted);
   if (openItems.length) {
     const options = openItems.slice(0, MAX_SUGGESTION_OPTIONS).map((item) => ({
       label: `[#${item.todoId}] ${item.title}`.slice(0, 100),
@@ -256,6 +259,7 @@ async function refreshLatestTodoList(
       return;
     }
 
+    const query = extractTodoQueryFromMessage(message);
     const includeDetails = state.filter !== "all" && state.filter !== "completed";
     const todos = state.filter === "completed"
       ? (await listTodos(true, MAX_LIST_ITEMS)).filter((item) => item.isCompleted)
@@ -263,13 +267,14 @@ async function refreshLatestTodoList(
     const filteredTodos = state.sizes.length
       ? todos.filter((item) => item.todoSize && state.sizes.includes(item.todoSize as TodoSize))
       : todos;
+    const filteredTodosByQuery = filterTodosByQuery(filteredTodos, query);
     const response = buildTodoListEmbed(
-      filteredTodos,
+      filteredTodosByQuery,
       state.filter === "completed",
       footerText,
       state.filter,
       includeDetails,
-      null,
+      query,
     );
 
     await message.edit({
@@ -278,7 +283,7 @@ async function refreshLatestTodoList(
         state.filter,
         state.ownerId,
         state.sizes,
-        filteredTodos,
+        filteredTodosByQuery,
       ),
     });
   } catch {
@@ -417,6 +422,29 @@ function buildTodoDescription(
   }
 
   return trimmedLines.join("\n");
+}
+
+function normalizeTodoQuery(query: string | null | undefined): string {
+  return (query ?? "").trim().toLowerCase();
+}
+
+function filterTodosByQuery(items: ITodoItem[], query: string | null | undefined): ITodoItem[] {
+  const trimmedQuery = normalizeTodoQuery(query);
+  if (!trimmedQuery) return items;
+  return items.filter((item) => {
+    const title = item.title.toLowerCase();
+    const details = item.details?.toLowerCase() ?? "";
+    return title.includes(trimmedQuery) || details.includes(trimmedQuery);
+  });
+}
+
+function extractTodoQueryFromMessage(message: any): string | null {
+  const description = message?.embeds?.[0]?.description;
+  if (typeof description !== "string") return null;
+  const match = description.match(/^Query:\s*(.+?)(?:\n|$)/);
+  if (!match) return null;
+  const trimmedQuery = normalizeTodoQuery(match[1]);
+  return trimmedQuery ? trimmedQuery : null;
 }
 
 function buildTodoListEmbed(
@@ -574,14 +602,8 @@ export class TodoCommand {
     const filteredTodosBySize = size
       ? todos.filter((item) => item.todoSize === size)
       : todos;
-    const trimmedQuery = query?.trim().toLowerCase() ?? "";
-    const filteredTodos = trimmedQuery
-      ? filteredTodosBySize.filter((item) => {
-          const title = item.title.toLowerCase();
-          const details = item.details?.toLowerCase() ?? "";
-          return title.includes(trimmedQuery) || details.includes(trimmedQuery);
-        })
-      : filteredTodosBySize;
+    const trimmedQuery = normalizeTodoQuery(query);
+    const filteredTodos = filterTodosByQuery(filteredTodosBySize, trimmedQuery);
     const response = buildTodoListEmbed(
       filteredTodos,
       filter === "completed",
@@ -1053,6 +1075,7 @@ export class TodoCommand {
     }
 
     const sizes = parseSizeToken(sizeRaw);
+    const query = extractTodoQueryFromMessage(interaction.message);
     const summary = await countTodoSummary();
     const suggestionCount = await countSuggestions();
     const footerText = buildAllTodoFooterText(summary, suggestionCount);
@@ -1075,18 +1098,19 @@ export class TodoCommand {
     const filteredTodos = sizes.length
       ? todos.filter((item) => item.todoSize && sizes.includes(item.todoSize as TodoSize))
       : todos;
+    const filteredTodosByQuery = filterTodosByQuery(filteredTodos, query);
     const response = buildTodoListEmbed(
-      filteredTodos,
+      filteredTodosByQuery,
       selectedFilter === "completed",
       footerText,
       selectedFilter,
       includeDetails,
-      null,
+      query,
     );
 
     await safeUpdate(interaction, {
       ...response,
-      components: buildTodoListComponents(selectedFilter, ownerId, sizes, filteredTodos),
+      components: buildTodoListComponents(selectedFilter, ownerId, sizes, filteredTodosByQuery),
     });
     trackTodoListState(
       interaction.channelId,
@@ -1115,6 +1139,7 @@ export class TodoCommand {
       (value): value is TodoSize => TODO_SIZES.includes(value as TodoSize),
     )));
     const filter = filterRaw as TodoFilter;
+    const query = extractTodoQueryFromMessage(interaction.message);
 
     const summary = await countTodoSummary();
     const suggestionCount = await countSuggestions();
@@ -1138,18 +1163,19 @@ export class TodoCommand {
     const filteredTodos = sizes.length
       ? todos.filter((item) => item.todoSize && sizes.includes(item.todoSize as TodoSize))
       : todos;
+    const filteredTodosByQuery = filterTodosByQuery(filteredTodos, query);
     const response = buildTodoListEmbed(
-      filteredTodos,
+      filteredTodosByQuery,
       filter === "completed",
       footerText,
       filter,
       includeDetails,
-      null,
+      query,
     );
 
     await safeUpdate(interaction, {
       ...response,
-      components: buildTodoListComponents(filter, ownerId, sizes, filteredTodos),
+      components: buildTodoListComponents(filter, ownerId, sizes, filteredTodosByQuery),
     });
     trackTodoListState(interaction.channelId, interaction.message?.id, filter, ownerId, sizes);
   }
@@ -1190,6 +1216,7 @@ export class TodoCommand {
 
     const sizes = parseSizeToken(sizeRaw);
     const filter = filterRaw as TodoFilter;
+    const query = extractTodoQueryFromMessage(interaction.message);
     const summary = await countTodoSummary();
     const suggestionCount = await countSuggestions();
     const footerText = buildAllTodoFooterText(summary, suggestionCount);
@@ -1212,18 +1239,19 @@ export class TodoCommand {
     const filteredTodos = sizes.length
       ? todos.filter((item) => item.todoSize && sizes.includes(item.todoSize as TodoSize))
       : todos;
+    const filteredTodosByQuery = filterTodosByQuery(filteredTodos, query);
     const response = buildTodoListEmbed(
-      filteredTodos,
+      filteredTodosByQuery,
       filter === "completed",
       footerText,
       filter,
       includeDetails,
-      null,
+      query,
     );
 
     await safeUpdate(interaction, {
       ...response,
-      components: buildTodoListComponents(filter, ownerId, sizes, filteredTodos),
+      components: buildTodoListComponents(filter, ownerId, sizes, filteredTodosByQuery),
     });
     trackTodoListState(interaction.channelId, interaction.message?.id, filter, ownerId, sizes);
   }
