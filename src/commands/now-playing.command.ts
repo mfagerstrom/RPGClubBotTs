@@ -66,6 +66,20 @@ function formatEntry(
   return entry.title;
 }
 
+function sortNowPlayingEntries(
+  entries: IMemberNowPlayingEntry[],
+): IMemberNowPlayingEntry[] {
+  return [...entries].sort((a, b) => {
+    const titleA = a.title.toLowerCase();
+    const titleB = b.title.toLowerCase();
+    const titleCompare = titleA.localeCompare(titleB);
+    if (titleCompare !== 0) return titleCompare;
+    const gameIdA = a.gameId ?? 0;
+    const gameIdB = b.gameId ?? 0;
+    return gameIdA - gameIdB;
+  });
+}
+
 async function promptForNote(
   interaction: CommandInteraction | StringSelectMenuInteraction,
   question: string,
@@ -745,14 +759,15 @@ export class NowPlayingCommand {
       return;
     }
 
+    const sortedEntries = sortNowPlayingEntries(entries);
     let hasLinks = false;
     let hasUnlinked = false;
 
     const lines: string[] = [];
-    entries.forEach((entry) => {
+    sortedEntries.forEach((entry) => {
       if (entry.threadId) hasLinks = true;
       else hasUnlinked = true;
-      lines.push(formatEntry(entry, interaction.guildId));
+      lines.push(`- ${formatEntry(entry, interaction.guildId)}`);
       if (entry.note) {
         lines.push(`> ${entry.note}`);
       }
@@ -778,7 +793,7 @@ export class NowPlayingCommand {
       })
       .setFooter({ text: footerParts.join("\n") });
 
-    const files = await this.buildNowPlayingAttachments(entries, 6);
+    const files = await this.buildNowPlayingAttachments(sortedEntries, 6);
     await safeReply(interaction, {
       embeds: [embed],
       files,
@@ -811,8 +826,13 @@ export class NowPlayingCommand {
       return;
     }
 
-    const { embed } = this.buildSingleNowPlayingEmbed(target, entries, interaction.guildId);
-    const files = await this.buildNowPlayingAttachments(entries);
+    const sortedEntries = sortNowPlayingEntries(entries);
+    const { embed } = this.buildSingleNowPlayingEmbed(
+      target,
+      sortedEntries,
+      interaction.guildId,
+    );
+    const files = await this.buildNowPlayingAttachments(sortedEntries);
     await interaction.update({
       embeds: [embed],
       components: selectRow ? [selectRow] : [],
@@ -864,14 +884,15 @@ export class NowPlayingCommand {
     entries: IMemberNowPlayingEntry[],
     guildId: string | null,
   ): { embed: EmbedBuilder } {
+    const sortedEntries = sortNowPlayingEntries(entries);
     let hasLinks = false;
     let hasUnlinked = false;
 
     const lines: string[] = [];
-    entries.forEach((entry) => {
+    sortedEntries.forEach((entry) => {
       if (entry.threadId) hasLinks = true;
       else hasUnlinked = true;
-      lines.push(formatEntry(entry, guildId));
+      lines.push(`- ${formatEntry(entry, guildId)}`);
       if (entry.note) {
         lines.push(`> ${entry.note}`);
       }
