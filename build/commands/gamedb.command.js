@@ -726,7 +726,7 @@ let GameDb = class GameDb {
             });
             const nowPlayingMembers = await Game.getNowPlayingMembers(gameId);
             const completions = await Game.getGameCompletions(gameId);
-            const mentionIds = new Set();
+            const mentionIds = new Set([interaction.user.id]);
             nowPlayingMembers.forEach((member) => mentionIds.add(member.userId));
             completions.forEach((member) => mentionIds.add(member.userId));
             if (mentionIds.size) {

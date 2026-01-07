@@ -50,7 +50,7 @@ type TodoFilter = "all" | "completed" | "suggestions" | TodoCategory;
 type TodoListState = { messageId: string; filter: TodoFilter; ownerId: string };
 
 const TODO_TAB_DEFINITIONS: Array<{ id: TodoFilter; label: string }> = [
-  { id: "all", label: "All" },
+  { id: "all", label: "All Open" },
   { id: "New Features", label: "New Features" },
   { id: "Improvements", label: "Improvements" },
   { id: "Defects", label: "Defects" },
@@ -59,7 +59,7 @@ const TODO_TAB_DEFINITIONS: Array<{ id: TodoFilter; label: string }> = [
 ];
 
 const TODO_TAB_OPTIONS = TODO_TAB_DEFINITIONS.map((tab) => tab.label) as [
-  "All",
+  "All Open",
   "New Features",
   "Improvements",
   "Defects",
@@ -68,7 +68,7 @@ const TODO_TAB_OPTIONS = TODO_TAB_DEFINITIONS.map((tab) => tab.label) as [
 ];
 
 const TODO_TAB_LABEL_TO_FILTER: Record<(typeof TODO_TAB_OPTIONS)[number], TodoFilter> = {
-  All: "all",
+  "All Open": "all",
   "New Features": "New Features",
   Improvements: "Improvements",
   Defects: "Defects",

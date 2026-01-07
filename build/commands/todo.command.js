@@ -19,7 +19,7 @@ const MAX_SUGGESTION_OPTIONS = 25;
 const DEFAULT_TODO_CATEGORY = "Improvements";
 const TODO_CATEGORIES = ["New Features", "Improvements", "Defects"];
 const TODO_TAB_DEFINITIONS = [
-    { id: "all", label: "All" },
+    { id: "all", label: "All Open" },
     { id: "New Features", label: "New Features" },
     { id: "Improvements", label: "Improvements" },
     { id: "Defects", label: "Defects" },
@@ -28,7 +28,7 @@ const TODO_TAB_DEFINITIONS = [
 ];
 const TODO_TAB_OPTIONS = TODO_TAB_DEFINITIONS.map((tab) => tab.label);
 const TODO_TAB_LABEL_TO_FILTER = {
-    All: "all",
+    "All Open": "all",
     "New Features": "New Features",
     Improvements: "Improvements",
     Defects: "Defects",
