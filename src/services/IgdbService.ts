@@ -17,6 +17,7 @@ export interface IGDBGame {
   first_release_date?: number; // Unix timestamp
   total_rating?: number;
   url?: string;
+  platforms?: { id: number }[];
 }
 
 // Detailed IGDB Game interface
@@ -49,6 +50,15 @@ export interface IGDBGameDetails extends IGDBGame {
     m: number;
     category?: number;
   }[];
+}
+
+export interface IGDBPlatform {
+  id: number;
+  name: string;
+  abbreviation?: string;
+  slug?: string;
+  checksum?: string;
+  updated_at?: number;
 }
 
 export const IGDB_SEARCH_LIMIT = 500;
@@ -113,7 +123,7 @@ class IgdbService {
     const cappedLimit = Math.min(limit ?? IGDB_SEARCH_LIMIT, IGDB_SEARCH_LIMIT);
     const buildBody = (): string =>
       [
-        "fields name, cover.image_id, summary, first_release_date, total_rating, url;",
+        "fields name, cover.image_id, summary, first_release_date, total_rating, url, platforms.id;",
         `search "${sanitizedQuery}";`,
         `limit ${cappedLimit};`,
       ].join(" ");
@@ -204,6 +214,7 @@ class IgdbService {
       "first_release_date",
       "cover.image_id",
       "genres.name",
+      "platforms.id",
       "platforms.name",
       "platforms.platform_logo.image_id",
       "release_dates.platform",
@@ -258,6 +269,44 @@ class IgdbService {
     } catch (error: any) {
       console.error("IGDB: Failed to get game details:", error);
       throw new Error(`IGDB service unavailable: Could not retrieve game details. Error: ${error.message}`);
+    }
+  }
+
+  async getPlatformsPage(
+    limit: number,
+    offset: number,
+  ): Promise<IGDBPlatform[]> {
+    if (!this.clientId) {
+      throw new Error("IGDB service not configured.");
+    }
+    const token: string = await this.getAccessToken();
+    const cappedLimit: number = Math.min(Math.max(limit, 1), 500);
+    const body: string = [
+      "fields id, name, abbreviation, slug, checksum, updated_at;",
+      `limit ${cappedLimit};`,
+      `offset ${offset};`,
+      "sort id asc;",
+    ].join(" ");
+
+    try {
+      const response = await axios.post<IGDBPlatform[]>(
+        "https://api.igdb.com/v4/platforms",
+        body,
+        {
+          headers: {
+            "Client-ID": this.clientId,
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "text/plain",
+          },
+        },
+      );
+
+      return response.data ?? [];
+    } catch (error: any) {
+      console.error("IGDB: Failed to fetch platforms:", error);
+      throw new Error(
+        `IGDB service unavailable: Could not fetch platforms. Error: ${error.message}`,
+      );
     }
   }
 

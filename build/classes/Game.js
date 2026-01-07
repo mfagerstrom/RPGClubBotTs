@@ -491,6 +491,37 @@ export default class Game {
             await connection.close();
         }
     }
+    static async getPlatformsByIgdbIds(igdbIds) {
+        const uniqueIds = Array.from(new Set(igdbIds.filter((id) => Number.isInteger(id) && id > 0)));
+        if (!uniqueIds.length) {
+            return new Map();
+        }
+        const binds = {};
+        const placeholders = [];
+        uniqueIds.forEach((id, idx) => {
+            const key = `id${idx}`;
+            binds[key] = id;
+            placeholders.push(`:${key}`);
+        });
+        const pool = getOraclePool();
+        const connection = await pool.getConnection();
+        try {
+            const result = await connection.execute(`SELECT PLATFORM_ID, PLATFORM_CODE, PLATFORM_NAME, IGDB_PLATFORM_ID
+           FROM GAMEDB_PLATFORMS
+          WHERE IGDB_PLATFORM_ID IN (${placeholders.join(", ")})`, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+            const map = new Map();
+            (result.rows ?? []).forEach((row) => {
+                const platform = mapPlatformDefRow(row);
+                if (platform.igdbPlatformId) {
+                    map.set(platform.igdbPlatformId, platform);
+                }
+            });
+            return map;
+        }
+        finally {
+            await connection.close();
+        }
+    }
     static async getPlatformByCode(code) {
         const pool = getOraclePool();
         const connection = await pool.getConnection();
@@ -514,6 +545,65 @@ export default class Game {
           WHERE PLATFORM_ID = :id`, { id }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
             const row = (result.rows ?? [])[0];
             return row ? mapPlatformDefRow(row) : null;
+        }
+        finally {
+            await connection.close();
+        }
+    }
+    static async attachPlatformsToGames(games) {
+        const gameIds = Array.from(new Set(games.map((game) => game.id).filter((id) => Number.isInteger(id) && id > 0)));
+        if (!gameIds.length) {
+            return games.map((game) => ({ ...game, platforms: [] }));
+        }
+        const binds = {};
+        const placeholders = [];
+        gameIds.forEach((id, idx) => {
+            const key = `id${idx}`;
+            binds[key] = id;
+            placeholders.push(`:${key}`);
+        });
+        const pool = getOraclePool();
+        const connection = await pool.getConnection();
+        try {
+            const result = await connection.execute(`SELECT gp.GAME_ID,
+                gp.PLATFORM_ID,
+                p.PLATFORM_CODE,
+                p.PLATFORM_NAME,
+                p.IGDB_PLATFORM_ID
+           FROM GAMEDB_GAME_PLATFORMS gp
+           LEFT JOIN GAMEDB_PLATFORMS p
+             ON p.PLATFORM_ID = gp.PLATFORM_ID
+          WHERE gp.GAME_ID IN (${placeholders.join(", ")})`, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+            const gameToPlatforms = new Map();
+            const missingPlatformIds = new Set();
+            (result.rows ?? []).forEach((row) => {
+                const gameId = Number(row.GAME_ID);
+                const platformId = Number(row.PLATFORM_ID);
+                if (!Number.isInteger(gameId) || !Number.isInteger(platformId)) {
+                    return;
+                }
+                if (!row.PLATFORM_NAME || !row.PLATFORM_CODE) {
+                    missingPlatformIds.add(platformId);
+                    return;
+                }
+                const platform = {
+                    id: platformId,
+                    code: String(row.PLATFORM_CODE),
+                    name: String(row.PLATFORM_NAME),
+                    igdbPlatformId: row.IGDB_PLATFORM_ID ? Number(row.IGDB_PLATFORM_ID) : null,
+                };
+                if (!gameToPlatforms.has(gameId)) {
+                    gameToPlatforms.set(gameId, []);
+                }
+                gameToPlatforms.get(gameId).push(platform);
+            });
+            if (missingPlatformIds.size) {
+                console.warn(`Missing platform IDs in GAMEDB_PLATFORMS: ${Array.from(missingPlatformIds).join(", ")}`);
+            }
+            return games.map((game) => ({
+                ...game,
+                platforms: gameToPlatforms.get(game.id) ?? [],
+            }));
         }
         finally {
             await connection.close();
@@ -604,7 +694,7 @@ export default class Game {
                 fetchInfo: { DESCRIPTION: { type: oracledb.STRING } },
             });
             // Map rows, but exclude imageData to keep search results lightweight
-            return (result.rows ?? []).map(row => ({
+            const games = (result.rows ?? []).map(row => ({
                 id: Number(row.GAME_ID),
                 title: String(row.TITLE),
                 description: row.DESCRIPTION ? String(row.DESCRIPTION) : null,
@@ -616,6 +706,41 @@ export default class Game {
                 createdAt: row.CREATED_AT instanceof Date ? row.CREATED_AT : new Date(row.CREATED_AT),
                 updatedAt: row.UPDATED_AT instanceof Date ? row.UPDATED_AT : new Date(row.UPDATED_AT),
             }));
+            return await Game.attachPlatformsToGames(games);
+        }
+        finally {
+            await connection.close();
+        }
+    }
+    static async addGamePlatformsByIgdbIds(gameId, igdbPlatformIds) {
+        if (!Number.isInteger(gameId) || gameId <= 0)
+            return;
+        const uniqueIds = Array.from(new Set(igdbPlatformIds.filter((id) => Number.isInteger(id) && id > 0)));
+        if (!uniqueIds.length)
+            return;
+        const platformMap = await Game.getPlatformsByIgdbIds(uniqueIds);
+        const missingIds = uniqueIds.filter((id) => !platformMap.has(id));
+        if (missingIds.length) {
+            console.warn(`Missing IGDB platform IDs in GAMEDB_PLATFORMS: ${missingIds.join(", ")}`);
+        }
+        const pool = getOraclePool();
+        const connection = await pool.getConnection();
+        try {
+            for (const igdbId of uniqueIds) {
+                const platform = platformMap.get(igdbId);
+                if (!platform)
+                    continue;
+                await connection.execute(`MERGE INTO GAMEDB_GAME_PLATFORMS gp
+           USING (SELECT :gameId AS GAME_ID, :platformId AS PLATFORM_ID FROM dual) src
+           ON (gp.GAME_ID = src.GAME_ID AND gp.PLATFORM_ID = src.PLATFORM_ID)
+           WHEN NOT MATCHED THEN
+             INSERT (GAME_ID, PLATFORM_ID) VALUES (src.GAME_ID, src.PLATFORM_ID)`, { gameId, platformId: platform.id }, { autoCommit: false });
+            }
+            await connection.commit();
+        }
+        catch (err) {
+            await connection.rollback();
+            throw err;
         }
         finally {
             await connection.close();

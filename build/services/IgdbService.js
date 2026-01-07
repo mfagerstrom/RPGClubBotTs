@@ -40,7 +40,7 @@ class IgdbService {
         const sanitizedQuery = query.replace(/"/g, '\\"');
         const cappedLimit = Math.min(limit ?? IGDB_SEARCH_LIMIT, IGDB_SEARCH_LIMIT);
         const buildBody = () => [
-            "fields name, cover.image_id, summary, first_release_date, total_rating, url;",
+            "fields name, cover.image_id, summary, first_release_date, total_rating, url, platforms.id;",
             `search "${sanitizedQuery}";`,
             `limit ${cappedLimit};`,
         ].join(" ");
@@ -105,6 +105,7 @@ class IgdbService {
             "first_release_date",
             "cover.image_id",
             "genres.name",
+            "platforms.id",
             "platforms.name",
             "platforms.platform_logo.image_id",
             "release_dates.platform",
@@ -153,6 +154,33 @@ class IgdbService {
         catch (error) {
             console.error("IGDB: Failed to get game details:", error);
             throw new Error(`IGDB service unavailable: Could not retrieve game details. Error: ${error.message}`);
+        }
+    }
+    async getPlatformsPage(limit, offset) {
+        if (!this.clientId) {
+            throw new Error("IGDB service not configured.");
+        }
+        const token = await this.getAccessToken();
+        const cappedLimit = Math.min(Math.max(limit, 1), 500);
+        const body = [
+            "fields id, name, abbreviation, slug, checksum, updated_at;",
+            `limit ${cappedLimit};`,
+            `offset ${offset};`,
+            "sort id asc;",
+        ].join(" ");
+        try {
+            const response = await axios.post("https://api.igdb.com/v4/platforms", body, {
+                headers: {
+                    "Client-ID": this.clientId,
+                    "Authorization": `Bearer ${token}`,
+                    "Content-Type": "text/plain",
+                },
+            });
+            return response.data ?? [];
+        }
+        catch (error) {
+            console.error("IGDB: Failed to fetch platforms:", error);
+            throw new Error(`IGDB service unavailable: Could not fetch platforms. Error: ${error.message}`);
         }
     }
     // Helper to get image URL from image_id

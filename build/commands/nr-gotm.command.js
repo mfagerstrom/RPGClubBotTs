@@ -495,22 +495,36 @@ async function importNrGameFromIgdb(interaction, igdbId) {
     const igdbUrl = details.url || (details.slug ? `https://www.igdb.com/games/${details.slug}` : null);
     const newGame = await Game.createGame(details.name, details.summary || null, imageData, details.id, details.slug, details.total_rating ?? null, igdbUrl);
     await Game.saveFullGameMetadata(newGame.id, details);
-    await processNrReleaseDates(newGame.id, details.release_dates || [], details.platforms || []);
+    const igdbPlatformIds = (details.platforms ?? [])
+        .map((platform) => platform.id)
+        .filter((id) => Number.isInteger(id) && id > 0);
+    await Game.addGamePlatformsByIgdbIds(newGame.id, igdbPlatformIds);
+    await processNrReleaseDates(newGame.id, details.release_dates || []);
     return newGame;
 }
-async function processNrReleaseDates(gameId, releaseDates, platforms) {
+async function processNrReleaseDates(gameId, releaseDates) {
     if (!releaseDates || !Array.isArray(releaseDates)) {
         return;
     }
+    const platformIds = [];
     for (const release of releaseDates) {
         const platformId = typeof release.platform === "number" ? release.platform : release.platform?.id ?? null;
-        const platformName = typeof release.platform === "object"
-            ? release.platform?.name ?? null
-            : platforms.find((p) => p.id === platformId)?.name ?? null;
+        if (platformId) {
+            platformIds.push(platformId);
+        }
+    }
+    const uniquePlatformIds = Array.from(new Set(platformIds));
+    const platformMap = await Game.getPlatformsByIgdbIds(uniquePlatformIds);
+    const missingPlatformIds = uniquePlatformIds.filter((id) => !platformMap.has(id));
+    if (missingPlatformIds.length) {
+        console.warn(`[NR-GOTM] Missing IGDB platform IDs in GAMEDB_PLATFORMS: ${missingPlatformIds.join(", ")}`);
+    }
+    for (const release of releaseDates) {
+        const platformId = typeof release.platform === "number" ? release.platform : release.platform?.id ?? null;
         if (!platformId || !release.region) {
             continue;
         }
-        const platform = await Game.ensurePlatform({ id: platformId, name: platformName });
+        const platform = platformMap.get(platformId);
         const region = await Game.ensureRegion(release.region);
         if (!platform || !region) {
             continue;

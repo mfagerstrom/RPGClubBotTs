@@ -11,6 +11,7 @@
     "buildProd": "pm2 kill && rimraf ./build && tsc && pm2 start build/RPGClubBotTS.js",
     "bs": "tsc && node build/RPGClubBotTS.js",
     "dev": "node --no-warnings=ExperimentalWarning --loader ts-node/esm/transpile-only src/RPGClubBotTS.ts",
+    "import:igdb-platforms": "node --no-warnings=ExperimentalWarning --loader ts-node/esm/transpile-only src/scripts/import-igdb-platforms.ts",
     "start": "node build/RPGClubBotTS.js",
     "start:prod": "pm2 start build/RPGClubBotTS.js",
     "watch": "nodemon --exec npm run dev --watch src --ext ts",

@@ -30,7 +30,7 @@ import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import Game, { type IGameAssociationSummary } from "../classes/Game.js";
 import { getThreadsByGameId, setThreadGameLink, upsertThreadRecord } from "../classes/Thread.js";
 import axios from "axios"; // For downloading image attachments
-import { igdbService } from "../services/IgdbService.js";
+import { igdbService, type IGDBGame } from "../services/IgdbService.js";
 import {
   createIgdbSession,
   type IgdbSelectOption,
@@ -163,16 +163,7 @@ export class GameDb {
         return;
       }
 
-      const opts: IgdbSelectOption[] = results.map((game) => {
-        const year = game.first_release_date
-          ? new Date(game.first_release_date * 1000).getFullYear()
-          : "TBD";
-        return {
-          id: game.id,
-          label: `${game.name} (${year})`,
-          description: (game.summary || "No summary").substring(0, 95),
-        };
-      });
+      const opts: IgdbSelectOption[] = await this.buildIgdbSelectOptions(results);
 
       const { components } = createIgdbSession(
         interaction.user.id,
@@ -290,46 +281,81 @@ export class GameDb {
       }
 
       // 2. Build Select Menu
-    const opts: IgdbSelectOption[] = results.map((game) => {
-      const year = game.first_release_date
-        ? new Date(game.first_release_date * 1000).getFullYear()
-        : "TBD";
-      return {
-        id: game.id,
-        label: `${game.name} (${year})`,
-        description: (game.summary || "No summary").substring(0, 95),
-      };
-    });
+      const opts: IgdbSelectOption[] = await this.buildIgdbSelectOptions(results);
 
-    const attachment = includeRaw && searchRes.raw
-      ? new AttachmentBuilder(Buffer.from(JSON.stringify(searchRes.raw, null, 2), "utf8"), {
-          name: "igdb-search.json",
-        })
-      : null;
+      const attachment = includeRaw && searchRes.raw
+        ? new AttachmentBuilder(Buffer.from(JSON.stringify(searchRes.raw, null, 2), "utf8"), {
+            name: "igdb-search.json",
+          })
+        : null;
 
-    const { components } = createIgdbSession(
-      interaction.user.id,
-      opts,
-      async (sel, igdbId) => {
-        if (!sel.deferred && !sel.replied) {
-          await sel.deferUpdate().catch(() => {});
-        }
-        await this.addGameToDatabase(sel, igdbId, { selectionMessage: sel.message as any });
-      },
-    );
+      const { components } = createIgdbSession(
+        interaction.user.id,
+        opts,
+        async (sel, igdbId) => {
+          if (!sel.deferred && !sel.replied) {
+            await sel.deferUpdate().catch(() => {});
+          }
+          await this.addGameToDatabase(sel, igdbId, { selectionMessage: sel.message as any });
+        },
+      );
 
-    await safeReply(interaction, {
-      content: `Found ${results.length} results for "${title}". Please select one:`,
-      components,
-      files: attachment ? [attachment] : undefined,
-      __forceFollowUp: true,
-    });
+      await safeReply(interaction, {
+        content: `Found ${results.length} results for "${title}". Please select one:`,
+        components,
+        files: attachment ? [attachment] : undefined,
+        __forceFollowUp: true,
+      });
 
     } catch (error: any) {
       await safeReply(interaction, {
         content: `Failed to search IGDB. Error: ${error.message}`,
       });
     }
+  }
+
+  private async buildIgdbSelectOptions(
+    results: IGDBGame[],
+  ): Promise<IgdbSelectOption[]> {
+    const platformIds: number[] = [];
+    for (const game of results) {
+      const ids = (game.platforms ?? [])
+        .map((platform) => platform.id)
+        .filter((id) => Number.isInteger(id) && id > 0);
+      platformIds.push(...ids);
+    }
+
+    const uniquePlatformIds: number[] = Array.from(new Set(platformIds));
+    const platformMap = await Game.getPlatformsByIgdbIds(uniquePlatformIds);
+    const missingPlatformIds = uniquePlatformIds.filter((id) => !platformMap.has(id));
+    if (missingPlatformIds.length) {
+      console.warn(
+        `[GameDB] Missing IGDB platform IDs in GAMEDB_PLATFORMS: ${missingPlatformIds.join(", ")}`,
+      );
+    }
+
+    return results.map((game) => {
+      const year = game.first_release_date
+        ? new Date(game.first_release_date * 1000).getFullYear()
+        : "TBD";
+      const ids = (game.platforms ?? [])
+        .map((platform) => platform.id)
+        .filter((id) => Number.isInteger(id) && id > 0);
+      const platformNames = ids
+        .map((id) => platformMap.get(id)?.name)
+        .filter((name): name is string => Boolean(name));
+      const platformLabel = platformNames.length
+        ? `Platforms: ${platformNames.join(", ")}`
+        : "Platforms: Unknown";
+      const summary = game.summary || "No summary";
+      const description = `${platformLabel} — ${summary}`.substring(0, 95);
+
+      return {
+        id: game.id,
+        label: `${game.name} (${year})`,
+        description,
+      };
+    });
   }
 
   private async addGameToDatabase(
@@ -412,11 +438,16 @@ export class GameDb {
     // 6a. Save Extended Metadata
     await Game.saveFullGameMetadata(newGame.id, details);
 
+    // 6aa. Save platform relationships
+    const igdbPlatformIds: number[] = (details.platforms ?? [])
+      .map((platform) => platform.id)
+      .filter((id) => Number.isInteger(id) && id > 0);
+    await Game.addGamePlatformsByIgdbIds(newGame.id, igdbPlatformIds);
+
     // 6b. Process Releases
     await this.processReleaseDates(
       newGame.id,
       details.release_dates || [],
-      details.platforms || [],
     );
 
     // Clean up selection menu if present
@@ -1193,24 +1224,38 @@ export class GameDb {
   private async processReleaseDates(
     gameId: number,
     releaseDates: any[],
-    platforms: { id: number; name: string }[],
   ): Promise<void> {
     if (!releaseDates || !Array.isArray(releaseDates)) {
       return;
+    }
+
+    const platformIds: number[] = [];
+    for (const release of releaseDates) {
+      const platformId: number | null = typeof release.platform === "number"
+        ? release.platform
+        : (release.platform?.id ?? null);
+      if (platformId) {
+        platformIds.push(platformId);
+      }
+    }
+    const uniquePlatformIds: number[] = Array.from(new Set(platformIds));
+    const platformMap = await Game.getPlatformsByIgdbIds(uniquePlatformIds);
+    const missingPlatformIds = uniquePlatformIds.filter((id) => !platformMap.has(id));
+    if (missingPlatformIds.length) {
+      console.warn(
+        `[GameDB] Missing IGDB platform IDs in GAMEDB_PLATFORMS: ${missingPlatformIds.join(", ")}`,
+      );
     }
 
     for (const release of releaseDates) {
       const platformId: number | null = typeof release.platform === "number"
         ? release.platform
         : (release.platform?.id ?? null);
-      const platformName: string | null = typeof release.platform === "object"
-        ? (release.platform?.name ?? null)
-        : (platforms.find((p) => p.id === platformId)?.name ?? null);
       if (!platformId || !release.region) {
         continue;
       }
 
-      const platform = await Game.ensurePlatform({ id: platformId, name: platformName });
+      const platform = platformMap.get(platformId);
       const region = await Game.ensureRegion(release.region);
 
       if (!platform || !region) {
