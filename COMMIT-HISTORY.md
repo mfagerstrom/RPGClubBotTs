@@ -1,3 +1,4 @@
+2026-01-13 - Commit ID: 9571c9b - fix: corrected interactive wizard logic in threads, issue 3 (#41)
 2026-01-13 - Commit ID: 8453a6e - fix: removed build from repo
 2026-01-07 - Commit ID: 9454b53 - fix: improvements to edit-completion
 2026-01-07 - Commit ID: 63386b8 - fix: more todo improvements
