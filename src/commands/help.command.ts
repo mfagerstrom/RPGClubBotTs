@@ -184,7 +184,8 @@ const HELP_TOPICS: HelpTopic[] = [
     id: "now-playing",
     label: "/now-playing",
     summary: "Manage your Now Playing list and view others'.",
-    syntax: "Use /now-playing help for subcommands: list, add, remove, edit-note, delete-note.",
+    syntax:
+      "Use /now-playing help for subcommands: list, search, add, remove, edit-note, delete-note.",
   },
   {
     id: "game-completion",
@@ -700,6 +701,7 @@ const PROFILE_HELP_TOPICS: ProfileHelpTopic[] = [
 
 type NowPlayingHelpTopicId =
   | "list"
+  | "search"
   | "add"
   | "remove"
   | "edit-note"
@@ -721,6 +723,13 @@ const NOW_PLAYING_HELP_TOPICS: NowPlayingHelpTopic[] = [
     syntax: "Syntax: /now-playing list [member:<user>] [all:<boolean>] [showinchat:<boolean>]",
     notes:
       "Defaults to a private view for one member. Set all:true to list everyone (sent publicly) with thread links when available.",
+  },
+  {
+    id: "search",
+    label: "/now-playing search",
+    summary: "Find members playing GameDB titles that match a search.",
+    syntax: "Syntax: /now-playing search title:<string> [showinchat:<boolean>]",
+    notes: "Matches GameDB titles and lists users currently playing those games.",
   },
   {
     id: "add",

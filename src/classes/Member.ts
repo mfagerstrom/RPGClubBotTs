@@ -280,6 +280,84 @@ export default class Member {
     }
   }
 
+  static async getNowPlayingByGameIds(
+    gameIds: number[],
+  ): Promise<{ gameId: number; title: string; userId: string }[]> {
+    if (!gameIds.length) return [];
+    const connection = await getOraclePool().getConnection();
+    const placeholders = gameIds.map((_, idx) => `:id${idx}`);
+    const binds: Record<string, number> = {};
+    gameIds.forEach((id, idx) => {
+      binds[`id${idx}`] = id;
+    });
+
+    try {
+      const res = await connection.execute<{
+        GAME_ID: number;
+        TITLE: string;
+        USER_ID: string;
+      }>(
+        `SELECT u.GAMEDB_GAME_ID AS GAME_ID,
+                g.TITLE,
+                u.USER_ID
+           FROM USER_NOW_PLAYING u
+           JOIN RPG_CLUB_USERS ru ON ru.USER_ID = u.USER_ID
+           JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
+          WHERE u.GAMEDB_GAME_ID IN (${placeholders.join(", ")})
+            AND NVL(ru.IS_BOT, 0) = 0
+            AND ru.SERVER_LEFT_AT IS NULL
+          ORDER BY g.TITLE, u.USER_ID`,
+        binds,
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+      return (res.rows ?? []).map((row) => ({
+        gameId: Number(row.GAME_ID),
+        title: row.TITLE,
+        userId: row.USER_ID,
+      }));
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async getNowPlayingByTitleSearch(
+    query: string,
+  ): Promise<{ gameId: number; title: string; userId: string }[]> {
+    const trimmed = query.trim().toLowerCase();
+    if (!trimmed) return [];
+    const connection = await getOraclePool().getConnection();
+    const searchQuery = `%${trimmed}%`;
+    const normalizedQuery = `%${trimmed.replace(/[^a-z0-9]/g, "")}%`;
+    try {
+      const res = await connection.execute<{
+        GAME_ID: number;
+        TITLE: string;
+        USER_ID: string;
+      }>(
+        `SELECT u.GAMEDB_GAME_ID AS GAME_ID,
+                g.TITLE,
+                u.USER_ID
+           FROM USER_NOW_PLAYING u
+           JOIN RPG_CLUB_USERS ru ON ru.USER_ID = u.USER_ID
+           JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
+          WHERE (LOWER(g.TITLE) LIKE :searchQuery
+              OR REGEXP_REPLACE(LOWER(g.TITLE), '[^a-z0-9]', '') LIKE :normalizedQuery)
+            AND NVL(ru.IS_BOT, 0) = 0
+            AND ru.SERVER_LEFT_AT IS NULL
+          ORDER BY g.TITLE, u.USER_ID`,
+        { searchQuery, normalizedQuery },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+      return (res.rows ?? []).map((row) => ({
+        gameId: Number(row.GAME_ID),
+        title: row.TITLE,
+        userId: row.USER_ID,
+      }));
+    } finally {
+      await connection.close();
+    }
+  }
+
   static async getNowPlayingEntries(
     userId: string,
   ): Promise<{ gameId: number; title: string; note: string | null }[]> {

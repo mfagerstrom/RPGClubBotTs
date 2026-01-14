@@ -42,6 +42,7 @@ import {
 
 const MAX_NOW_PLAYING = 10;
 const MAX_NOW_PLAYING_NOTE_LEN = 500;
+const NOW_PLAYING_SEARCH_LIMIT = 10;
 const nowPlayingAddSessions = new Map<
   string,
   { userId: string; query: string; note: string | null }
@@ -299,6 +300,85 @@ export class NowPlayingCommand {
     }
 
     await this.showSingle(interaction, target, ephemeral);
+  }
+
+  @Slash({ description: "Search for who is playing a GameDB title", name: "search" })
+  async searchNowPlaying(
+    @SlashOption({
+      description: "Game title to search in GameDB",
+      name: "title",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    title: string,
+    @SlashOption({
+      description: "Show in chat (public) instead of ephemeral",
+      name: "showinchat",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    showInChat: boolean | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    const query = title.trim();
+    const ephemeral = !showInChat;
+    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
+
+    if (!query) {
+      await safeReply(interaction, {
+        content: "Please provide a title to search.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const nowPlayingRows = await Member.getNowPlayingByTitleSearch(query);
+    if (!nowPlayingRows.length) {
+      await safeReply(interaction, {
+        content: `No one is currently playing GameDB titles matching "${query}".`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const usersByGameId = new Map<number, { title: string; users: string[] }>();
+    for (const row of nowPlayingRows) {
+      const record = usersByGameId.get(row.gameId) ?? { title: row.title, users: [] };
+      record.users.push(`<@${row.userId}>`);
+      usersByGameId.set(row.gameId, record);
+    }
+
+    const sortedGames = Array.from(usersByGameId.entries())
+      .map(([gameId, record]) => ({ gameId, title: record.title, users: record.users }))
+      .sort((a, b) => a.title.localeCompare(b.title));
+    const totalGames = sortedGames.length;
+    const limitedGames = sortedGames.slice(0, NOW_PLAYING_SEARCH_LIMIT);
+
+    const embed = new EmbedBuilder()
+      .setTitle("Now Playing Search")
+      .setDescription(`Results for **${query}**.`);
+
+    for (const game of limitedGames) {
+      const uniqueUsers = Array.from(new Set(game.users));
+      const displayedUsers = uniqueUsers.slice(0, 30);
+      const remaining = uniqueUsers.length - displayedUsers.length;
+      const userList = `${displayedUsers.join(", ")}${remaining > 0 ? ` (+${remaining} more)` : ""}`;
+      embed.addFields({
+        name: `${game.title} (GameDB #${game.gameId})`,
+        value: userList,
+      });
+    }
+
+    if (totalGames > limitedGames.length) {
+      embed.setFooter({
+        text: `Showing first ${limitedGames.length} of ${totalGames} titles with active players.`,
+      });
+    }
+
+    await safeReply(interaction, {
+      embeds: [embed],
+      flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+    });
   }
 
   @Slash({ description: "Add a game to your Now Playing list", name: "add" })
