@@ -186,7 +186,7 @@ const HELP_TOPICS: HelpTopic[] = [
     label: "/now-playing",
     summary: "Manage your Now Playing list and view others'.",
     syntax:
-      "Use /now-playing help for subcommands: list, search, add, remove, edit-note, delete-note.",
+      "Use /now-playing help for subcommands: list, search, add, remove, sort, edit-note, delete-note.",
   },
   {
     id: "game-completion",
@@ -715,6 +715,7 @@ type NowPlayingHelpTopicId =
   | "search"
   | "add"
   | "remove"
+  | "sort"
   | "edit-note"
   | "delete-note";
 
@@ -757,6 +758,13 @@ const NOW_PLAYING_HELP_TOPICS: NowPlayingHelpTopic[] = [
     syntax: "Syntax: /now-playing remove",
     notes:
       "Shows a dropdown of your current list to pick what to remove.",
+  },
+  {
+    id: "sort",
+    label: "/now-playing sort",
+    summary: "Manually sort the order of your Now Playing list.",
+    syntax: "Syntax: /now-playing sort",
+    notes: "Reply with a comma-separated list of numbers in your desired order.",
   },
   {
     id: "edit-note",

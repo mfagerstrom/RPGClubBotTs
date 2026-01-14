@@ -89,6 +89,7 @@ export interface IMemberNowPlayingEntry {
   title: string;
   threadId: string | null;
   note: string | null;
+  sortOrder: number | null;
 }
 
 export interface IMemberNowPlayingList {
@@ -166,6 +167,7 @@ export default class Member {
         TITLE: string;
         THREAD_ID: string | null;
         NOTE: string | null;
+        SORT_ORDER: number | null;
       }>(
         `SELECT g.GAME_ID,
                 g.TITLE,
@@ -181,12 +183,13 @@ export default class Member {
                     WHERE th.GAMEDB_GAME_ID = u.GAMEDB_GAME_ID
                   )
                 ) AS THREAD_ID,
-                u.NOTE
+                u.NOTE,
+                u.SORT_ORDER
            FROM USER_NOW_PLAYING u
            JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
           WHERE u.USER_ID = :userId
             AND u.GAMEDB_GAME_ID IS NOT NULL
-          ORDER BY u.ADDED_AT DESC, u.ENTRY_ID DESC`,
+          ORDER BY u.SORT_ORDER NULLS LAST, u.ADDED_AT DESC, u.ENTRY_ID DESC`,
         { userId },
         { outFormat: oracledb.OUT_FORMAT_OBJECT },
       );
@@ -196,6 +199,7 @@ export default class Member {
           title: r.TITLE,
           threadId: r.THREAD_ID ?? null,
           note: r.NOTE ?? null,
+          sortOrder: r.SORT_ORDER == null ? null : Number(r.SORT_ORDER),
         }))
         .slice(0, MAX_NOW_PLAYING);
     } finally {
@@ -266,6 +270,7 @@ export default class Member {
             title: row.TITLE,
             threadId: row.THREAD_ID ?? null,
             note: row.NOTE ?? null,
+            sortOrder: null,
           });
         }
       }
@@ -360,20 +365,21 @@ export default class Member {
 
   static async getNowPlayingEntries(
     userId: string,
-  ): Promise<{ gameId: number; title: string; note: string | null }[]> {
+  ): Promise<{ gameId: number; title: string; note: string | null; sortOrder: number | null }[]> {
     const connection = await getOraclePool().getConnection();
     try {
       const res = await connection.execute<{
         GAME_ID: number;
         TITLE: string;
         NOTE: string | null;
+        SORT_ORDER: number | null;
       }>(
-        `SELECT u.GAMEDB_GAME_ID AS GAME_ID, g.TITLE, u.NOTE
+        `SELECT u.GAMEDB_GAME_ID AS GAME_ID, g.TITLE, u.NOTE, u.SORT_ORDER
            FROM USER_NOW_PLAYING u
            JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
           WHERE u.USER_ID = :userId
             AND u.GAMEDB_GAME_ID IS NOT NULL
-          ORDER BY u.ADDED_AT DESC, u.ENTRY_ID DESC`,
+          ORDER BY u.SORT_ORDER NULLS LAST, u.ADDED_AT DESC, u.ENTRY_ID DESC`,
         { userId },
         { outFormat: oracledb.OUT_FORMAT_OBJECT },
       );
@@ -381,6 +387,7 @@ export default class Member {
         gameId: Number(r.GAME_ID),
         title: r.TITLE,
         note: r.NOTE ?? null,
+        sortOrder: r.SORT_ORDER == null ? null : Number(r.SORT_ORDER),
       }));
     } finally {
       await connection.close();
@@ -437,10 +444,20 @@ export default class Member {
         throw new Error(`You can only track up to ${MAX_NOW_PLAYING} Now Playing titles.`);
       }
 
+      const sortRes = await connection.execute<{ MAX_SORT: number | null }>(
+        `SELECT MAX(SORT_ORDER) AS MAX_SORT
+           FROM USER_NOW_PLAYING
+          WHERE USER_ID = :userId`,
+        { userId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+      const maxSort = Number((sortRes.rows ?? [])[0]?.MAX_SORT ?? 0);
+      const nextSort = maxSort + 1;
+
       await connection.execute(
-        `INSERT INTO USER_NOW_PLAYING (USER_ID, GAMEDB_GAME_ID, NOTE)
-         VALUES (:userId, :gameId, :note)`,
-        { userId, gameId, note: noteValue },
+        `INSERT INTO USER_NOW_PLAYING (USER_ID, GAMEDB_GAME_ID, NOTE, SORT_ORDER)
+         VALUES (:userId, :gameId, :note, :sortOrder)`,
+        { userId, gameId, note: noteValue, sortOrder: nextSort },
         { autoCommit: true },
       );
     } catch (err: any) {
@@ -449,6 +466,32 @@ export default class Member {
         throw new Error("That title is already in your Now Playing list.");
       }
       throw err;
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async updateNowPlayingSort(
+    userId: string,
+    orderedGameIds: number[],
+  ): Promise<boolean> {
+    if (!orderedGameIds.length) return false;
+    const connection = await getOraclePool().getConnection();
+    try {
+      const binds = orderedGameIds.map((gameId, idx) => ({
+        userId,
+        gameId,
+        sortOrder: idx + 1,
+      }));
+      const result = await connection.executeMany(
+        `UPDATE USER_NOW_PLAYING
+            SET SORT_ORDER = :sortOrder
+          WHERE USER_ID = :userId
+            AND GAMEDB_GAME_ID = :gameId`,
+        binds,
+        { autoCommit: true },
+      );
+      return (result.rowsAffected ?? 0) > 0;
     } finally {
       await connection.close();
     }

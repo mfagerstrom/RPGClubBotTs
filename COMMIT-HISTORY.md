@@ -1,4 +1,6 @@
 2026-01-14 - Commit ID: 146dcf1 - issue-36: Implemented /gamegiveaway functionality
+2026-01-14 - Commit ID: 9b07d6e - issue-2: corrected duplicate listings of completions on /gamedb view
+2026-01-14 - Commit ID: 146dcf1 - issue-36: Implemented /gamegiveaway functionality
 2026-01-13 - Commit ID: 74fd9b8 - issue-15: added /now-playing search function
 2026-01-13 - Commit ID: d1a2560 - fix: consolidated ephemeral messages for now playing edit note into one. (#42)
 2026-01-13 - Commit ID: 9571c9b - fix: corrected interactive wizard logic in threads, issue 3 (#41)

@@ -82,6 +82,13 @@ function sortNowPlayingEntries(
   });
 }
 
+function getDisplayNowPlayingEntries(
+  entries: IMemberNowPlayingEntry[],
+): IMemberNowPlayingEntry[] {
+  const hasManualOrder = entries.some((entry) => entry.sortOrder != null);
+  return hasManualOrder ? entries : sortNowPlayingEntries(entries);
+}
+
 async function promptForNote(
   interaction: CommandInteraction | StringSelectMenuInteraction,
   question: string,
@@ -175,6 +182,97 @@ async function promptForNote(
     await updateStatusMessage(`Error while waiting for a response: ${msg}`);
     await updatePrompt([...promptLines, `❌ Error: ${msg}`]);
     return { note: null, threadId: promptThread.id };
+  } finally {
+    if (promptMessage && "delete" in promptMessage) {
+      await promptMessage.delete().catch(() => {});
+    }
+    await cleanupPromptThread(context);
+  }
+}
+
+async function promptForSortOrder(
+  interaction: CommandInteraction,
+  entries: { gameId: number; title: string }[],
+  timeoutMs: number = 120_000,
+): Promise<number[] | null> {
+  const userId = interaction.user.id;
+  const context = await openPromptThread(interaction, "Now Playing sort prompt");
+  if (!context) return null;
+  const { promptThread, createdThread } = context;
+  let promptMessage: Message | null = null;
+
+  if (createdThread) {
+    await safeReply(interaction, {
+      content: `Please reply in <#${promptThread.id}>.`,
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  const lines = entries.map((entry, idx) => `${idx + 1}. ${entry.title}`);
+  const embed = new EmbedBuilder()
+    .setTitle("Sort Now Playing")
+    .setDescription(
+      `${lines.join("\n")}\n\n` +
+      "Reply with the numbers in your desired order, comma-separated. Example: `3,1,2`.",
+    );
+
+  promptMessage = await promptThread.send({
+    content: `<@${userId}>`,
+    embeds: [embed],
+    allowedMentions: { users: [userId] },
+  });
+
+  try {
+    const collected = await promptThread.awaitMessages({
+      filter: (m: any) => m.author?.id === userId,
+      max: 1,
+      time: timeoutMs,
+    });
+    const first = collected?.first?.();
+    if (!first) {
+      await safeReply(interaction, {
+        content: "Timed out waiting for a response.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return null;
+    }
+
+    const content: string = (first.content ?? "").trim();
+    await first.delete().catch(() => {});
+
+    if (/^cancel$/i.test(content)) {
+      await safeReply(interaction, {
+        content: "Cancelled.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return null;
+    }
+
+    const tokens = content.match(/\d+/g) ?? [];
+    const indices = tokens.map((token) => Number(token));
+    const expectedCount = entries.length;
+    const validRange = indices.every(
+      (idx) => Number.isInteger(idx) && idx >= 1 && idx <= expectedCount,
+    );
+    const unique = new Set(indices);
+
+    if (!validRange || unique.size !== expectedCount || indices.length !== expectedCount) {
+      await safeReply(interaction, {
+        content:
+          `Please provide each number 1-${expectedCount} exactly once, comma-separated.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return null;
+    }
+
+    return indices.map((idx) => entries[idx - 1].gameId);
+  } catch (err: any) {
+    const msg = err?.message ?? String(err);
+    await safeReply(interaction, {
+      content: `Error while waiting for a response: ${msg}`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return null;
   } finally {
     if (promptMessage && "delete" in promptMessage) {
       await promptMessage.delete().catch(() => {});
@@ -577,6 +675,29 @@ export class NowPlayingCommand {
         flags: MessageFlags.Ephemeral,
       });
     }
+  }
+
+  @Slash({ description: "Sort your Now Playing list", name: "sort" })
+  async sortNowPlaying(interaction: CommandInteraction): Promise<void> {
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const entries = await Member.getNowPlayingEntries(interaction.user.id);
+    if (!entries.length) {
+      await safeReply(interaction, {
+        content: "Your Now Playing list is empty.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const orderedGameIds = await promptForSortOrder(interaction, entries);
+    if (!orderedGameIds) return;
+
+    const updated = await Member.updateNowPlayingSort(interaction.user.id, orderedGameIds);
+    await safeReply(interaction, {
+      content: updated ? "Your Now Playing order has been updated." : "No changes made.",
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   @Slash({
@@ -1024,7 +1145,7 @@ export class NowPlayingCommand {
       return;
     }
 
-    const sortedEntries = sortNowPlayingEntries(entries);
+    const sortedEntries = getDisplayNowPlayingEntries(entries);
     let hasLinks = false;
     let hasUnlinked = false;
 
@@ -1091,7 +1212,7 @@ export class NowPlayingCommand {
       return;
     }
 
-    const sortedEntries = sortNowPlayingEntries(entries);
+    const sortedEntries = getDisplayNowPlayingEntries(entries);
     const { embed } = this.buildSingleNowPlayingEmbed(
       target,
       sortedEntries,
@@ -1149,7 +1270,7 @@ export class NowPlayingCommand {
     entries: IMemberNowPlayingEntry[],
     guildId: string | null,
   ): { embed: EmbedBuilder } {
-    const sortedEntries = sortNowPlayingEntries(entries);
+    const sortedEntries = getDisplayNowPlayingEntries(entries);
     let hasLinks = false;
     let hasUnlinked = false;
 
