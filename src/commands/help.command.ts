@@ -30,6 +30,7 @@ type HelpTopicId =
   | "profile"
   | "game-completion"
   | "gamedb"
+  | "avatar-history"
   | "publicreminder"
   | "giveaway"
   | "thread"
@@ -219,6 +220,13 @@ const HELP_TOPICS: HelpTopic[] = [
       "nominations, and related threads for the GameDB id. Audit is admin only.",
   },
   {
+    id: "avatar-history",
+    label: "/avatar-history",
+    summary: "View a member's historical avatars.",
+    syntax: "Syntax: /avatar-history [member:<user>] [showinchat:<boolean>]",
+    notes: "Defaults to your own avatar history.",
+  },
+  {
     id: "publicreminder",
     label: "/publicreminder",
     summary: "Schedule public reminders with optional recurrence (admin only).",
@@ -310,7 +318,7 @@ const HELP_CATEGORIES: { id: string; name: string; topicIds: HelpTopicId[] }[] =
   {
     id: "utilities",
     name: "Utilities",
-    topicIds: ["hltb", "remindme", "suggestion", "giveaway"],
+    topicIds: ["hltb", "remindme", "suggestion", "giveaway", "avatar-history"],
   },
   {
     id: "server-admin",

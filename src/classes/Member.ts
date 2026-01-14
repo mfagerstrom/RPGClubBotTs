@@ -99,6 +99,15 @@ export interface IMemberNowPlayingList {
   entries: IMemberNowPlayingEntry[];
 }
 
+export interface IAvatarHistoryRecord {
+  eventId: number;
+  userId: string;
+  avatarHash: string | null;
+  avatarUrl: string | null;
+  avatarBlob: Buffer | null;
+  changedAt: Date;
+}
+
 export interface ICompletionRecord {
   completionId: number;
   gameId: number;
@@ -1332,6 +1341,72 @@ export default class Member {
         profileImage: row.PROFILE_IMAGE ?? null,
         profileImageAt: row.PROFILE_IMAGE_AT ?? null,
       };
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async getAvatarHistory(
+    userId: string,
+    limit: number = 10,
+    offset: number = 0,
+  ): Promise<IAvatarHistoryRecord[]> {
+    const safeLimit = Math.min(Math.max(limit, 1), 50);
+    const safeOffset = Math.max(offset, 0);
+    const connection = await getOraclePool().getConnection();
+    try {
+      const result = await connection.execute<{
+        EVENT_ID: number;
+        USER_ID: string;
+        AVATAR_HASH: string | null;
+        AVATAR_URL: string | null;
+        AVATAR_BLOB: Buffer | null;
+        CHANGED_AT: Date | string;
+      }>(
+        `SELECT EVENT_ID,
+                USER_ID,
+                AVATAR_HASH,
+                AVATAR_URL,
+                AVATAR_BLOB,
+                CHANGED_AT
+           FROM RPG_CLUB_USER_AVATAR_HISTORY
+          WHERE USER_ID = :userId
+          ORDER BY CHANGED_AT DESC, EVENT_ID DESC
+          OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`,
+        { userId, limit: safeLimit, offset: safeOffset },
+        {
+          outFormat: oracledb.OUT_FORMAT_OBJECT,
+          fetchInfo: { AVATAR_BLOB: { type: oracledb.BUFFER } },
+        },
+      );
+      return (result.rows ?? []).map((row) => ({
+        eventId: Number(row.EVENT_ID),
+        userId: String(row.USER_ID),
+        avatarHash: row.AVATAR_HASH ?? null,
+        avatarUrl: row.AVATAR_URL ?? null,
+        avatarBlob: row.AVATAR_BLOB ?? null,
+        changedAt:
+          row.CHANGED_AT instanceof Date
+            ? row.CHANGED_AT
+            : new Date(row.CHANGED_AT as any),
+      }));
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async countAvatarHistory(userId: string): Promise<number> {
+    const connection = await getOraclePool().getConnection();
+    try {
+      const result = await connection.execute<{ TOTAL: number | null }>(
+        `SELECT COUNT(*) AS TOTAL
+           FROM RPG_CLUB_USER_AVATAR_HISTORY
+          WHERE USER_ID = :userId`,
+        { userId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+      const row = result.rows?.[0];
+      return Number(row?.TOTAL ?? 0);
     } finally {
       await connection.close();
     }
