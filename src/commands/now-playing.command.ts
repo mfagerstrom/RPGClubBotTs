@@ -86,29 +86,47 @@ async function promptForNote(
   question: string,
   preface: string | null,
   timeoutMs: number = 120_000,
-): Promise<string | null> {
+  updateStatus?: (content: string) => Promise<void>,
+): Promise<{ note: string | null; threadId: string | null }> {
   const userId = interaction.user.id;
   const context = await openPromptThread(interaction, "Now Playing note prompt");
-  if (!context) return null;
+  if (!context) return { note: null, threadId: null };
   const { promptThread, createdThread } = context;
   let promptMessage: Message | null = null;
+  const embed = new EmbedBuilder().setTitle("Now Playing Note");
 
-  if (createdThread) {
+  const updatePrompt = async (lines: string[]): Promise<void> => {
+    embed.setDescription(lines.filter(Boolean).join("\n"));
+    if (promptMessage) {
+      await promptMessage.edit({ embeds: [embed] }).catch(() => {});
+    }
+  };
+
+  const updateStatusMessage = async (content: string): Promise<void> => {
+    if (updateStatus) {
+      await updateStatus(content);
+      return;
+    }
     await safeReply(interaction, {
-      content: `Please reply in <#${promptThread.id}>.`,
+      content,
       flags: MessageFlags.Ephemeral,
     });
+  };
+
+  if (createdThread) {
+    await updateStatusMessage(`Please reply in <#${promptThread.id}>.`);
+  } else {
+    await updateStatusMessage("Please reply in this thread.");
   }
 
-  if (preface) {
-    await promptThread.send({
-      content: preface,
-      allowedMentions: { users: [userId] },
-    }).catch(() => {});
-  }
+  const promptLines = [
+    preface ?? "",
+    `❓ **${question}**`,
+  ];
 
   promptMessage = await promptThread.send({
-    content: `<@${userId}> ${question}`,
+    content: `<@${userId}>`,
+    embeds: [embed.setDescription(promptLines.filter(Boolean).join("\n"))],
     allowedMentions: { users: [userId] },
   });
 
@@ -121,48 +139,41 @@ async function promptForNote(
 
     const first = collected?.first?.();
     if (!first) {
-      await safeReply(interaction, {
-        content: "Timed out waiting for a response.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return null;
+      await updateStatusMessage("Timed out waiting for a response.");
+      await updatePrompt([...promptLines, "❌ Timed out."]);
+      return { note: null, threadId: promptThread.id };
     }
 
     const content: string = (first.content ?? "").trim();
     await first.delete().catch(() => {});
 
     if (!content) {
-      await safeReply(interaction, {
-        content: "Empty response received. Cancelled.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return null;
+      await updateStatusMessage("Empty response received. Cancelled.");
+      await updatePrompt([...promptLines, "❌ Empty response."]);
+      return { note: null, threadId: promptThread.id };
     }
 
     if (/^cancel$/i.test(content)) {
-      await safeReply(interaction, {
-        content: "Cancelled.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return null;
+      await updateStatusMessage("Cancelled.");
+      await updatePrompt([...promptLines, "❌ Cancelled by user."]);
+      return { note: null, threadId: promptThread.id };
     }
 
     if (content.length > MAX_NOW_PLAYING_NOTE_LEN) {
-      await safeReply(interaction, {
-        content: `Note must be ${MAX_NOW_PLAYING_NOTE_LEN} characters or fewer.`,
-        flags: MessageFlags.Ephemeral,
-      });
-      return null;
+      await updateStatusMessage(
+        `Note must be ${MAX_NOW_PLAYING_NOTE_LEN} characters or fewer.`,
+      );
+      await updatePrompt([...promptLines, "❌ Note was too long."]);
+      return { note: null, threadId: promptThread.id };
     }
 
-    return content;
+    await updatePrompt([...promptLines, `> *${content}*`]);
+    return { note: content, threadId: promptThread.id };
   } catch (err: any) {
     const msg = err?.message ?? String(err);
-    await safeReply(interaction, {
-      content: `Error while waiting for a response: ${msg}`,
-      flags: MessageFlags.Ephemeral,
-    });
-    return null;
+    await updateStatusMessage(`Error while waiting for a response: ${msg}`);
+    await updatePrompt([...promptLines, `❌ Error: ${msg}`]);
+    return { note: null, threadId: promptThread.id };
   } finally {
     if (promptMessage && "delete" in promptMessage) {
       await promptMessage.delete().catch(() => {});
@@ -761,18 +772,25 @@ export class NowPlayingCommand {
       ? `Current note for **${currentEntry.title}**:\n> ${currentNote}`
       : "Current entry not found.";
 
-    const note = await promptForNote(
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.deferUpdate().catch(() => {});
+    }
+
+    const updateStatus = async (content: string): Promise<void> => {
+      await interaction.editReply({ content, components: [] }).catch(() => {});
+    };
+
+    const noteResult = await promptForNote(
       interaction,
       "Enter a note for this Now Playing entry (or type `cancel`).",
       preface,
+      120_000,
+      updateStatus,
     );
-    if (!note) return;
+    if (!noteResult.note) return;
 
-    const updated = await Member.updateNowPlayingNote(ownerId, gameId, note);
-    await safeReply(interaction, {
-      content: updated ? "Note saved." : "Could not update that entry.",
-      flags: MessageFlags.Ephemeral,
-    });
+    const updated = await Member.updateNowPlayingNote(ownerId, gameId, noteResult.note);
+    await updateStatus(updated ? "Note saved." : "Could not update that entry.");
   }
 
   @SelectMenuComponent({ id: /^nowplaying-delete-note-select:\d+$/ })
