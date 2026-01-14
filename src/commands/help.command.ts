@@ -31,6 +31,7 @@ type HelpTopicId =
   | "game-completion"
   | "gamedb"
   | "publicreminder"
+  | "giveaway"
   | "thread"
   | "admin"
   | "mod"
@@ -227,6 +228,16 @@ const HELP_TOPICS: HelpTopic[] = [
       "Times parse in America/New_York. Recurring reminders need both recur and recurunit. Replies are private; creation shows the scheduled time.",
   },
   {
+    id: "giveaway",
+    label: "/gamegiveaway",
+    summary: "List, donate, and revoke digital game keys for giveaways.",
+    syntax:
+      "Syntax: /gamegiveaway list [showinchat:<boolean>] | " +
+      "/gamegiveaway donate title:<string> platform:<string> key:<string> | " +
+      "/gamegiveaway revoke key_id:<int>",
+    notes: "Claims are handled from the list menu; keys are shared privately.",
+  },
+  {
     id: "thread",
     label: "/thread",
     summary:
@@ -299,7 +310,7 @@ const HELP_CATEGORIES: { id: string; name: string; topicIds: HelpTopicId[] }[] =
   {
     id: "utilities",
     name: "Utilities",
-    topicIds: ["hltb", "remindme", "suggestion"],
+    topicIds: ["hltb", "remindme", "suggestion", "giveaway"],
   },
   {
     id: "server-admin",

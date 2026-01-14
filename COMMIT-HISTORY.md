@@ -1,3 +1,4 @@
+2026-01-13 - Commit ID: 74fd9b8 - issue-15: added /now-playing search function
 2026-01-13 - Commit ID: d1a2560 - fix: consolidated ephemeral messages for now playing edit note into one. (#42)
 2026-01-13 - Commit ID: 9571c9b - fix: corrected interactive wizard logic in threads, issue 3 (#41)
 2026-01-13 - Commit ID: 8453a6e - fix: removed build from repo
