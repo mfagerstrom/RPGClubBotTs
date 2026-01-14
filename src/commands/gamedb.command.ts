@@ -11,6 +11,7 @@ import {
   ComponentType,
   type ForumChannel,
   type Message,
+  type ThreadChannel,
   type TextBasedChannel,
   type MessageCreateOptions,
   type ActionRow,
@@ -892,28 +893,34 @@ export class GameDb {
     }
 
     if (action === "nowplaying" || action === "completion") {
-      const parentMessage = interaction.message;
-      if (!parentMessage || typeof parentMessage.startThread !== "function") {
-        await interaction.followUp({
-          content: "Unable to start a thread from this message.",
-          flags: MessageFlags.Ephemeral,
-        }).catch(() => {});
-        return;
-      }
+      const channel: any = interaction.channel;
+      let thread: ThreadChannel | null = null;
+      if ("isThread" in channel && typeof channel.isThread === "function" && channel.isThread()) {
+        thread = channel as ThreadChannel;
+      } else {
+        const parentMessage = interaction.message;
+        if (!parentMessage || typeof parentMessage.startThread !== "function") {
+          await interaction.followUp({
+            content: "Unable to start a thread from this message.",
+            flags: MessageFlags.Ephemeral,
+          }).catch(() => {});
+          return;
+        }
 
-      const threadName = action === "nowplaying"
-        ? `${game.title} - Now Playing`
-        : `${game.title} - Completion`;
-      const thread = await parentMessage.startThread({
-        name: threadName.slice(0, 100),
-        autoArchiveDuration: 60,
-      }).catch(() => null);
-      if (!thread) {
-        await interaction.followUp({
-          content: "Failed to create a thread for the wizard.",
-          flags: MessageFlags.Ephemeral,
-        }).catch(() => {});
-        return;
+        const threadName = action === "nowplaying"
+          ? `${game.title} - Now Playing`
+          : `${game.title} - Completion`;
+        thread = await parentMessage.startThread({
+          name: threadName.slice(0, 100),
+          autoArchiveDuration: 60,
+        }).catch(() => null);
+        if (!thread) {
+          await interaction.followUp({
+            content: "Failed to create a thread for the wizard.",
+            flags: MessageFlags.Ephemeral,
+          }).catch(() => {});
+          return;
+        }
       }
 
       const baseEmbed = this.getWizardBaseEmbed(interaction, action === "nowplaying"
@@ -943,7 +950,7 @@ export class GameDb {
     interaction: ButtonInteraction,
     gameId: number,
     gameTitle: string,
-    thread?: TextBasedChannel,
+    thread?: TextBasedChannel | ThreadChannel,
     wizardMessage?: Message,
   ): Promise<void> {
     const baseEmbed = this.getWizardBaseEmbed(interaction, "Now Playing Wizard");
@@ -1199,7 +1206,7 @@ export class GameDb {
     interaction: ButtonInteraction,
     gameId: number,
     gameTitle: string,
-    thread?: TextBasedChannel,
+    thread?: TextBasedChannel | ThreadChannel,
     wizardMessage?: Message,
   ): Promise<void> {
     const baseEmbed = this.getWizardBaseEmbed(interaction, "Completion Wizard");
