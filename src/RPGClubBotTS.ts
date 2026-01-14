@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { dirname, importx } from "@discordx/importer";
 import type { Channel, Interaction, Message, TextBasedChannel } from "discord.js";
-import { IntentsBitField } from "discord.js";
+import { IntentsBitField, Partials } from "discord.js";
 import { Client } from "discordx";
 
 import { updateBotPresence } from "./functions/SetPresence.js";
@@ -38,6 +38,7 @@ export const bot: Client = new Client({
     IntentsBitField.Flags.GuildVoiceStates,
     IntentsBitField.Flags.MessageContent,
   ],
+  partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 
   // Debug logs are disabled in silent mode
   silent: false,

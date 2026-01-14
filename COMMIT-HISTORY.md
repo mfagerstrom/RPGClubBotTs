@@ -1,4 +1,5 @@
-2026-01-14 - Commit ID: 146dcf1 - issue-36: Implemented /gamegiveaway functionality
+2026-01-14 - Commit ID: 2629f13 - fix: improved display of now playing notes
+2026-01-14 - Commit ID: 34e5262 - issue-38: implemented /avatar-history command
 2026-01-14 - Commit ID: 843866e - issue-7 implemented /now-playing sort
 2026-01-14 - Commit ID: 9b07d6e - issue-2: corrected duplicate listings of completions on /gamedb view
 2026-01-14 - Commit ID: 146dcf1 - issue-36: Implemented /gamegiveaway functionality
