@@ -668,13 +668,20 @@ export class GameDb {
 
       if (completions.length) {
         const MAX_COMPLETIONS_DISPLAY = 12;
-        const lines = completions.slice(0, MAX_COMPLETIONS_DISPLAY).map((member) => {
+        const uniqueCompletions = new Map<string, (typeof completions)[number]>();
+        completions.forEach((member) => {
+          if (!uniqueCompletions.has(member.userId)) {
+            uniqueCompletions.set(member.userId, member);
+          }
+        });
+        const uniqueList = Array.from(uniqueCompletions.values());
+        const lines = uniqueList.slice(0, MAX_COMPLETIONS_DISPLAY).map((member) => {
           const name = member.globalName ?? member.username ?? member.userId;
-          return `${name} (<@${member.userId}>) — ${member.completionType}`;
+          return `${name} (<@${member.userId}>)`;
         });
 
-        if (completions.length > MAX_COMPLETIONS_DISPLAY) {
-          const remaining = completions.length - MAX_COMPLETIONS_DISPLAY;
+        if (uniqueList.length > MAX_COMPLETIONS_DISPLAY) {
+          const remaining = uniqueList.length - MAX_COMPLETIONS_DISPLAY;
           lines.push(`…and ${remaining} more completed this.`);
         }
 
