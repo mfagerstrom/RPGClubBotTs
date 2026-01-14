@@ -1155,7 +1155,7 @@ export class NowPlayingCommand {
       else hasUnlinked = true;
       lines.push(`- ${formatEntry(entry, interaction.guildId)}`);
       if (entry.note) {
-        lines.push(`> ${entry.note}`);
+        lines.push(`  - ${entry.note}`);
       }
     });
 
@@ -1280,7 +1280,7 @@ export class NowPlayingCommand {
       else hasUnlinked = true;
       lines.push(`- ${formatEntry(entry, guildId)}`);
       if (entry.note) {
-        lines.push(`> ${entry.note}`);
+        lines.push(`  - ${entry.note}`);
       }
     });
 
