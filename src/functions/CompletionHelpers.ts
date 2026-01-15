@@ -8,6 +8,7 @@ import {
   type ButtonInteraction,
   type CommandInteraction,
   type Message,
+  type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
 } from "discord.js";
 import {
@@ -15,7 +16,7 @@ import {
   formatPlaytimeHours,
   formatTableDate,
 } from "../commands/profile.command.js";
-import Game from "../classes/Game.js";
+import Game, { type IGame } from "../classes/Game.js";
 import Member from "../classes/Member.js";
 
 const ANNOUNCEMENT_CHANNEL_ID = "360819470836695042";
@@ -85,47 +86,77 @@ export async function saveCompletion(
   });
 
   if (announce) {
-    try {
-      const channel = await interaction.client.channels.fetch(ANNOUNCEMENT_CHANNEL_ID);
-      if (channel && "send" in channel) {
-        // Fetch the user who actually completed the game, not necessarily the interaction user
-        const user = await interaction.client.users.fetch(userId).catch(() => null);
-        
-        if (user) {
-          const completions = await Game.getGameCompletions(gameId);
-          const isFirst = completions.length === 1;
+    await announceCompletion(
+      interaction,
+      userId,
+      game,
+      completionType,
+      completedAt,
+      finalPlaytimeHours,
+      isAdminOverride,
+    );
+  }
+}
 
-          const dateStr = completedAt ? formatTableDate(completedAt) : "No date";
-          const hoursStr = playtimeText ? ` - ${playtimeText}` : "";
-          
-          let desc = `<@${user.id}> has added a game completion: **${game.title}** - ${completionType} - ${dateStr}${hoursStr}`;
-          if (isAdminOverride && interaction.user.id !== userId) {
-             desc = `<@${interaction.user.id}> added a game completion for <@${user.id}>: **${game.title}** - ${completionType} - ${dateStr}${hoursStr}`;
-          }
-
-          const embed = new EmbedBuilder()
-            .setAuthor({
-              name: user.displayName ?? user.username,
-              iconURL: user.displayAvatarURL(),
-            })
-            .setDescription(desc)
-            .setColor(0x00ff00);
-
-          if (isFirst) {
-            embed.addFields({
-              name: "First Completion!",
-              value: "This is the first recorded completion for this game in the club!",
-            });
-          }
-
-          await (channel as any).send({
-            embeds: [embed],
-          });
-        }
-      }
-    } catch (err) {
-      console.error("Failed to announce completion:", err);
+export async function announceCompletion(
+  interaction:
+    | CommandInteraction
+    | StringSelectMenuInteraction
+    | ButtonInteraction
+    | ModalSubmitInteraction,
+  userId: string,
+  game: IGame,
+  completionType: CompletionType,
+  completedAt: Date | null,
+  finalPlaytimeHours: number | null,
+  isAdminOverride: boolean = false,
+): Promise<void> {
+  try {
+    const channel = await interaction.client.channels.fetch(ANNOUNCEMENT_CHANNEL_ID);
+    if (!channel || !("send" in channel)) {
+      return;
     }
+
+    const user = await interaction.client.users.fetch(userId).catch(() => null);
+    if (!user) {
+      return;
+    }
+
+    const completions = await Game.getGameCompletions(game.id);
+    const isFirst = completions.length === 1;
+
+    const playtimeText = formatPlaytimeHours(finalPlaytimeHours);
+    const dateStr = completedAt ? formatTableDate(completedAt) : "No date";
+    const hoursStr = playtimeText ? ` - ${playtimeText}` : "";
+    let desc =
+      `<@${user.id}> has added a game completion: **${game.title}** - ` +
+      `${completionType} - ${dateStr}${hoursStr}`;
+    if (isAdminOverride && interaction.user.id !== userId) {
+      desc =
+        `<@${interaction.user.id}> added a game completion for <@${user.id}>: ` +
+        `**${game.title}** - ${completionType} - ${dateStr}${hoursStr}`;
+    }
+
+    const embed = new EmbedBuilder()
+      .setAuthor({
+        name: user.displayName ?? user.username,
+        iconURL: user.displayAvatarURL(),
+      })
+      .setDescription(desc)
+      .setColor(0x00ff00);
+
+    if (isFirst) {
+      embed.addFields({
+        name: "First Completion!",
+        value: "This is the first recorded completion for this game in the club!",
+      });
+    }
+
+    await (channel as any).send({
+      embeds: [embed],
+    });
+  } catch (err) {
+    console.error("Failed to announce completion:", err);
   }
 }
 

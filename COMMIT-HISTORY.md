@@ -1,3 +1,8 @@
+2026-01-14 - Commit ID: 7e62933 - C:/Program Files/Git/now-playing list layout changes
+2026-01-14 - Commit ID: 88393f4 - C:/Program Files/Git/now-playing list layout changes
+2026-01-14 - Commit ID: 84faf13 - fix: improved layout of /now-playing list
+2026-01-14 - Commit ID: 28b8f35 - issue-13: improvements to /gamedb view
+2026-01-14 - Commit ID: 8eba33b - fix: adding a game completion will prompt you to remove that game from now playing
 2026-01-14 - Commit ID: 96ffc92 - issue-25: implemented pinning of messages via reactions with :pushpin:
 2026-01-14 - Commit ID: 2629f13 - fix: improved display of now playing notes
 2026-01-14 - Commit ID: 34e5262 - issue-38: implemented /avatar-history command

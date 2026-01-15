@@ -187,7 +187,9 @@ const HELP_TOPICS: HelpTopic[] = [
     label: "/now-playing",
     summary: "Manage your Now Playing list and view others'.",
     syntax:
-      "Use /now-playing help for subcommands: list, search, add, remove, sort, edit-note, delete-note.",
+      "Use /now-playing help for subcommands: list, search.",
+    notes:
+      "Add Game, Edit Note, Sort, Remove Game, and Add Completion are available from the buttons under your own list.",
   },
   {
     id: "game-completion",
@@ -720,12 +722,7 @@ const PROFILE_HELP_TOPICS: ProfileHelpTopic[] = [
 
 type NowPlayingHelpTopicId =
   | "list"
-  | "search"
-  | "add"
-  | "remove"
-  | "sort"
-  | "edit-note"
-  | "delete-note";
+  | "search";
 
 type NowPlayingHelpTopic = {
   id: NowPlayingHelpTopicId;
@@ -750,43 +747,6 @@ const NOW_PLAYING_HELP_TOPICS: NowPlayingHelpTopic[] = [
     summary: "Find members playing GameDB titles that match a search.",
     syntax: "Syntax: /now-playing search title:<string> [showinchat:<boolean>]",
     notes: "Matches GameDB titles and lists users currently playing those games.",
-  },
-  {
-    id: "add",
-    label: "/now-playing add",
-    summary: "Add a GameDB title to your Now Playing list (max 10).",
-    syntax: "Syntax: /now-playing add title:<string> [note:<string>]",
-    notes:
-      "Searches GameDB; choose from up to 24 results. Only GameDB titles are allowed; no free text.",
-  },
-  {
-    id: "remove",
-    label: "/now-playing remove",
-    summary: "Remove a GameDB title from your Now Playing list.",
-    syntax: "Syntax: /now-playing remove",
-    notes:
-      "Shows a dropdown of your current list to pick what to remove.",
-  },
-  {
-    id: "sort",
-    label: "/now-playing sort",
-    summary: "Manually sort the order of your Now Playing list.",
-    syntax: "Syntax: /now-playing sort",
-    notes: "Reply with a comma-separated list of numbers in your desired order.",
-  },
-  {
-    id: "edit-note",
-    label: "/now-playing edit-note",
-    summary: "Add or update a note for a Now Playing entry.",
-    syntax: "Syntax: /now-playing edit-note",
-    notes: "Select a game, then enter the note (max 500 chars).",
-  },
-  {
-    id: "delete-note",
-    label: "/now-playing delete-note",
-    summary: "Delete the note from a Now Playing entry.",
-    syntax: "Syntax: /now-playing delete-note",
-    notes: "Select a game to clear its note.",
   },
 ];
 
