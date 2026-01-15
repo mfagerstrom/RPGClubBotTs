@@ -1326,35 +1326,8 @@ export class NowPlayingCommand {
     guildId: string | null,
     thumbnailsByGameId: Map<number, string>,
   ): ContainerBuilder[] {
-    const containers: ContainerBuilder[] = [];
-    let current = new ContainerBuilder();
-    let componentCount = 0;
-
-    const pushContainer = (): void => {
-      if (componentCount > 0) {
-        containers.push(current);
-      }
-      current = new ContainerBuilder();
-      componentCount = 0;
-    };
-
-    const addComponent = (
-      component: MediaGalleryBuilder | SeparatorBuilder | TextDisplayBuilder,
-    ): void => {
-      if (componentCount >= 10) {
-        pushContainer();
-      }
-      if (component instanceof MediaGalleryBuilder) {
-        current.addMediaGalleryComponents(component);
-      } else if (component instanceof SeparatorBuilder) {
-        current.addSeparatorComponents(component);
-      } else {
-        current.addTextDisplayComponents(component);
-      }
-      componentCount += 1;
-    };
-
-    addComponent(new TextDisplayBuilder().setContent(`## ${title}`));
+    const container = new ContainerBuilder();
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${title}`));
 
     const galleryItems: MediaGalleryItemBuilder[] = [];
     for (const entry of entries) {
@@ -1375,28 +1348,32 @@ export class NowPlayingCommand {
     }
 
     if (galleryItems.length) {
-      const gallery = new MediaGalleryBuilder().addItems(galleryItems);
-      addComponent(gallery);
-      addComponent(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small));
+      container.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(galleryItems));
+      container.addSeparatorComponents(
+        new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small),
+      );
     }
-
-    for (let idx = 0; idx < entries.length; idx += 1) {
-      const entry = entries[idx];
-      const title = formatEntry(entry, guildId);
-      const content = entry.note ? `**${title}**\n${entry.note}` : `**${title}**`;
-      addComponent(new TextDisplayBuilder().setContent(content));
-      if (idx < entries.length - 1) {
-        addComponent(
-          new SeparatorBuilder()
-            .setSpacing(SeparatorSpacingSize.Small)
-            .setDivider(false),
-        );
+    const gameBlocks = entries.map((entry) => {
+      const entryTitle = formatEntry(entry, guildId);
+      if (!entry.note) {
+        return `- **${entryTitle}**`;
       }
+      return `- **${entryTitle}**\n  - ${entry.note}`;
+    });
+    if (gameBlocks.length) {
+      const content = this.trimTextDisplayContent(gameBlocks.join("\n"));
+      container.addTextDisplayComponents(new TextDisplayBuilder().setContent(content));
     }
-
-    pushContainer();
-    return containers;
+    return [container];
   }
+
+  private trimTextDisplayContent(content: string): string {
+    if (content.length <= 4000) {
+      return content;
+    }
+    return `${content.slice(0, 3997)}...`;
+  }
+
 
   private buildNowPlayingMemberSelect(
     lists: Array<{
