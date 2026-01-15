@@ -18,7 +18,6 @@ import {
   type ActionRow,
   type MessageActionRowComponent,
   type Message,
-  type ThreadChannel,
 } from "discord.js";
 import {
   Discord,
@@ -51,6 +50,8 @@ const NOW_PLAYING_SEARCH_LIMIT = 10;
 const NOW_PLAYING_SORT_MODAL_ID = "nowplaying-sort-modal";
 const NOW_PLAYING_SORT_INPUT_PREFIX = "nowplaying-sort-input";
 const NOW_PLAYING_SORT_CHUNK_SIZE = 5;
+const NOW_PLAYING_NOTE_MODAL_ID = "nowplaying-note-modal";
+const NOW_PLAYING_NOTE_INPUT_ID = "nowplaying-note-input";
 type NowPlayingSortEntry = {
   gameId: number;
   title: string;
@@ -154,182 +155,24 @@ function toSortEntries(
   }));
 }
 
-async function promptForNote(
-  interaction: CommandInteraction | StringSelectMenuInteraction,
-  question: string,
-  preface: string | null,
-  timeoutMs: number = 120_000,
-  updateStatus?: (content: string) => Promise<void>,
-): Promise<{ note: string | null; threadId: string | null }> {
-  const userId = interaction.user.id;
-  const context = await openPromptThread(interaction, "Now Playing note prompt");
-  if (!context) return { note: null, threadId: null };
-  const { promptThread, createdThread } = context;
-  let promptMessage: Message | null = null;
-  const embed = new EmbedBuilder().setTitle("Now Playing Note");
+function buildEditNoteModal(
+  ownerId: string,
+  gameId: number,
+  title: string,
+  currentNote: string | null,
+): ModalBuilder {
+  const input = new TextInputBuilder()
+    .setCustomId(NOW_PLAYING_NOTE_INPUT_ID)
+    .setLabel(title.slice(0, 45))
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false)
+    .setMaxLength(MAX_NOW_PLAYING_NOTE_LEN)
+    .setValue(currentNote ?? "");
 
-  const updatePrompt = async (lines: string[]): Promise<void> => {
-    embed.setDescription(lines.filter(Boolean).join("\n"));
-    if (promptMessage) {
-      await promptMessage.edit({ embeds: [embed] }).catch(() => {});
-    }
-  };
-
-  const updateStatusMessage = async (content: string): Promise<void> => {
-    if (updateStatus) {
-      await updateStatus(content);
-      return;
-    }
-    await safeReply(interaction, {
-      content,
-      flags: MessageFlags.Ephemeral,
-    });
-  };
-
-  if (createdThread) {
-    await updateStatusMessage(`Please reply in <#${promptThread.id}>.`);
-  } else {
-    await updateStatusMessage("Please reply in this thread.");
-  }
-
-  const promptLines = [
-    preface ?? "",
-    `❓ **${question}**`,
-  ];
-
-  promptMessage = await promptThread.send({
-    content: `<@${userId}>`,
-    embeds: [embed.setDescription(promptLines.filter(Boolean).join("\n"))],
-    allowedMentions: { users: [userId] },
-  });
-
-  try {
-    const collected = await promptThread.awaitMessages({
-      filter: (m: any) => m.author?.id === userId,
-      max: 1,
-      time: timeoutMs,
-    });
-
-    const first = collected?.first?.();
-    if (!first) {
-      await updateStatusMessage("Timed out waiting for a response.");
-      await updatePrompt([...promptLines, "❌ Timed out."]);
-      return { note: null, threadId: promptThread.id };
-    }
-
-    const content: string = (first.content ?? "").trim();
-    await first.delete().catch(() => {});
-
-    if (!content) {
-      await updateStatusMessage("Empty response received. Cancelled.");
-      await updatePrompt([...promptLines, "❌ Empty response."]);
-      return { note: null, threadId: promptThread.id };
-    }
-
-    if (/^cancel$/i.test(content)) {
-      await updateStatusMessage("Cancelled.");
-      await updatePrompt([...promptLines, "❌ Cancelled by user."]);
-      return { note: null, threadId: promptThread.id };
-    }
-
-    if (content.length > MAX_NOW_PLAYING_NOTE_LEN) {
-      await updateStatusMessage(
-        `Note must be ${MAX_NOW_PLAYING_NOTE_LEN} characters or fewer.`,
-      );
-      await updatePrompt([...promptLines, "❌ Note was too long."]);
-      return { note: null, threadId: promptThread.id };
-    }
-
-    await updatePrompt([...promptLines, `> *${content}*`]);
-    return { note: content, threadId: promptThread.id };
-  } catch (err: any) {
-    const msg = err?.message ?? String(err);
-    await updateStatusMessage(`Error while waiting for a response: ${msg}`);
-    await updatePrompt([...promptLines, `❌ Error: ${msg}`]);
-    return { note: null, threadId: promptThread.id };
-  } finally {
-    if (promptMessage && "delete" in promptMessage) {
-      await promptMessage.delete().catch(() => {});
-    }
-    await cleanupPromptThread(context);
-  }
-}
-
-async function openPromptThread(
-  interaction: CommandInteraction | StringSelectMenuInteraction,
-  label: string,
-): Promise<{
-  promptThread: ThreadChannel;
-  createdThread: boolean;
-  parentMessage: Message | null;
-} | null> {
-  const userId = interaction.user.id;
-  const channel: any = interaction.channel;
-  let promptThread: ThreadChannel | null = null;
-  let createdThread = false;
-  let parentMessage: Message | null = null;
-
-  if (!channel || typeof channel.send !== "function") {
-    await safeReply(interaction, {
-      content: "Cannot start a prompt thread in this channel.",
-      flags: MessageFlags.Ephemeral,
-    });
-    return null;
-  }
-
-  try {
-    if ("isThread" in channel && typeof channel.isThread === "function" && channel.isThread()) {
-      promptThread = channel as ThreadChannel;
-    } else {
-      parentMessage = await channel.send({
-        content: `${label} for <@${userId}>.`,
-        allowedMentions: { users: [userId] },
-      });
-      if (!parentMessage || typeof parentMessage.startThread !== "function") {
-        await safeReply(interaction, {
-          content: "Thread creation is not supported in this channel.",
-          flags: MessageFlags.Ephemeral,
-        });
-        return null;
-      }
-      const threadName = `Now Playing Note - ${interaction.user.username ?? interaction.user.id}`;
-      promptThread = await parentMessage.startThread({
-        name: threadName.slice(0, 100),
-        autoArchiveDuration: 60,
-      });
-      createdThread = true;
-    }
-  } catch (err: any) {
-    const msg = err?.message ?? String(err);
-    await safeReply(interaction, {
-      content: `Failed to start a thread for this prompt: ${msg}`,
-      flags: MessageFlags.Ephemeral,
-    });
-    return null;
-  }
-
-  if (!promptThread || typeof promptThread.awaitMessages !== "function") {
-    await safeReply(interaction, {
-      content: "Cannot prompt for additional input in this channel.",
-      flags: MessageFlags.Ephemeral,
-    });
-    return null;
-  }
-
-  return { promptThread, createdThread, parentMessage };
-}
-
-async function cleanupPromptThread(context: {
-  promptThread: ThreadChannel;
-  createdThread: boolean;
-  parentMessage: Message | null;
-}): Promise<void> {
-  if (context.createdThread && "delete" in context.promptThread) {
-    await context.promptThread.delete().catch(() => {});
-  }
-  if (context.parentMessage && "delete" in context.parentMessage) {
-    await context.parentMessage.delete().catch(() => {});
-  }
+  return new ModalBuilder()
+    .setCustomId(`${NOW_PLAYING_NOTE_MODAL_ID}:${ownerId}:${gameId}`)
+    .setTitle("Edit Now Playing Note")
+    .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
 }
 
 @Discord()
@@ -943,30 +786,22 @@ export class NowPlayingCommand {
 
     const currentEntries = await Member.getNowPlayingEntries(ownerId);
     const currentEntry = currentEntries.find((entry) => entry.gameId === gameId);
-    const currentNote = currentEntry?.note ? currentEntry.note : "No note set.";
-    const preface = currentEntry
-      ? `Current note for **${currentEntry.title}**:\n> ${currentNote}`
-      : "Current entry not found.";
-
-    if (!interaction.deferred && !interaction.replied) {
-      await interaction.deferUpdate().catch(() => {});
+    if (!currentEntry) {
+      await safeReply(interaction, {
+        content: "Entry not found.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
     }
 
-    const updateStatus = async (content: string): Promise<void> => {
-      await interaction.editReply({ content, components: [] }).catch(() => {});
-    };
-
-    const noteResult = await promptForNote(
-      interaction,
-      "Enter a note for this Now Playing entry (or type `cancel`).",
-      preface,
-      120_000,
-      updateStatus,
-    );
-    if (!noteResult.note) return;
-
-    const updated = await Member.updateNowPlayingNote(ownerId, gameId, noteResult.note);
-    await updateStatus(updated ? "Note saved." : "Could not update that entry.");
+    await interaction.showModal(
+      buildEditNoteModal(ownerId, gameId, currentEntry.title, currentEntry.note ?? null),
+    ).catch(async () => {
+      await safeReply(interaction, {
+        content: "Unable to open the note form right now.",
+        flags: MessageFlags.Ephemeral,
+      });
+    });
   }
 
   @ButtonComponent({ id: /^nowplaying-sort-open:\d+:\d+$/ })
@@ -1108,6 +943,45 @@ export class NowPlayingCommand {
     nowPlayingSortSessions.delete(ownerId);
     await safeReply(interaction, {
       content: updated ? "Your Now Playing order has been updated." : "No changes made.",
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  @ModalComponent({ id: /^nowplaying-note-modal:\d+:\d+$/ })
+  async handleEditNoteModal(interaction: ModalSubmitInteraction): Promise<void> {
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+    const [, ownerId, gameIdRaw] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await safeReply(interaction, {
+        content: "This note prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const gameId = Number(gameIdRaw);
+    if (!Number.isInteger(gameId) || gameId <= 0) {
+      await safeReply(interaction, {
+        content: "Invalid selection.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const noteInput = interaction.fields.getTextInputValue(NOW_PLAYING_NOTE_INPUT_ID);
+    const note = noteInput.trim();
+    const nextNote = note ? note : null;
+    if (note && note.length > MAX_NOW_PLAYING_NOTE_LEN) {
+      await safeReply(interaction, {
+        content: `Note must be ${MAX_NOW_PLAYING_NOTE_LEN} characters or fewer.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const updated = await Member.updateNowPlayingNote(ownerId, gameId, nextNote);
+    await safeReply(interaction, {
+      content: updated ? "Note updated." : "Could not update that entry.",
       flags: MessageFlags.Ephemeral,
     });
   }
