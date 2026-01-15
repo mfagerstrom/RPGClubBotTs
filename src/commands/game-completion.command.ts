@@ -58,7 +58,7 @@ import {
   parseCompletionDateInput,
   formatTableDate,
 } from "./profile.command.js";
-import { saveCompletion } from "../functions/CompletionHelpers.js";
+import { promptRemoveFromNowPlaying, saveCompletion } from "../functions/CompletionHelpers.js";
 
 type CompletionAddContext = {
   userId: string;
@@ -75,6 +75,40 @@ const completionAddSessions = new Map<string, CompletionAddContext>();
 const COMPLETIONATOR_SKIP_SENTINEL = "skip";
 const COMPLETIONATOR_PAUSE_SENTINEL = "pause";
 const COMPLETIONATOR_STATUS_OPTIONS = ["start", "resume", "status", "pause", "cancel"] as const;
+
+function shouldPromptNowPlayingRemoval(
+  addedAt: Date | null,
+  completedAt: Date | null,
+  requireCompletionAfterAdded: boolean,
+): boolean {
+  if (!addedAt) return true;
+  if (!requireCompletionAfterAdded) return true;
+  if (!completedAt) return true;
+  return completedAt >= addedAt;
+}
+
+async function resolveNowPlayingRemoval(
+  interaction: CommandInteraction | ButtonInteraction | StringSelectMenuInteraction,
+  userId: string,
+  gameId: number,
+  gameTitle: string,
+  completedAt: Date | null,
+  requireCompletionAfterAdded: boolean,
+): Promise<boolean> {
+  const nowPlayingMeta = await Member.getNowPlayingEntryMeta(userId, gameId);
+  if (!nowPlayingMeta) {
+    return false;
+  }
+  const shouldPrompt = shouldPromptNowPlayingRemoval(
+    nowPlayingMeta.addedAt,
+    completedAt,
+    requireCompletionAfterAdded,
+  );
+  if (!shouldPrompt) {
+    return false;
+  }
+  return promptRemoveFromNowPlaying(interaction, gameTitle);
+}
 
 type CompletionatorAction = (typeof COMPLETIONATOR_STATUS_OPTIONS)[number];
 type CompletionatorThreadContext = {
@@ -206,6 +240,14 @@ export class GameCompletionCommands {
         });
         return;
       }
+      const removeFromNowPlaying = await resolveNowPlayingRemoval(
+        interaction,
+        userId,
+        game.id,
+        game.title,
+        completedAt,
+        false,
+      );
       await saveCompletion(
         interaction,
         userId,
@@ -216,6 +258,8 @@ export class GameCompletionCommands {
         trimmedNote,
         game.title,
         announce,
+        false,
+        removeFromNowPlaying,
       );
       return;
     }
@@ -628,6 +672,14 @@ export class GameCompletionCommands {
         return;
       }
 
+      const removeFromNowPlaying = await resolveNowPlayingRemoval(
+        interaction,
+        interaction.user.id,
+        item.gameDbGameId,
+        item.gameTitle,
+        item.completedAt ?? null,
+        true,
+      );
       const completionId = await Member.addCompletion({
         userId: interaction.user.id,
         gameId: item.gameDbGameId,
@@ -636,7 +688,9 @@ export class GameCompletionCommands {
         finalPlaytimeHours: item.playtimeHours,
         note: null,
       });
-      await Member.removeNowPlaying(interaction.user.id, item.gameDbGameId).catch(() => {});
+      if (removeFromNowPlaying) {
+        await Member.removeNowPlaying(interaction.user.id, item.gameDbGameId).catch(() => {});
+      }
 
       await updateImportItem(item.itemId, {
         status: "IMPORTED",
@@ -693,6 +747,14 @@ export class GameCompletionCommands {
         return;
       }
 
+      const removeFromNowPlaying = await resolveNowPlayingRemoval(
+        interaction,
+        interaction.user.id,
+        item.gameDbGameId,
+        item.gameTitle,
+        item.completedAt ?? null,
+        true,
+      );
       const completionId = await Member.addCompletion({
         userId: interaction.user.id,
         gameId: item.gameDbGameId,
@@ -701,7 +763,9 @@ export class GameCompletionCommands {
         finalPlaytimeHours: item.playtimeHours,
         note: null,
       });
-      await Member.removeNowPlaying(interaction.user.id, item.gameDbGameId).catch(() => {});
+      if (removeFromNowPlaying) {
+        await Member.removeNowPlaying(interaction.user.id, item.gameDbGameId).catch(() => {});
+      }
 
       await updateImportItem(item.itemId, {
         status: "IMPORTED",
@@ -3201,6 +3265,14 @@ export class GameCompletionCommands {
         }).catch(() => {});
 
         const imported = await this.importGameFromIgdb(gameId);
+        const removeFromNowPlaying = await resolveNowPlayingRemoval(
+          sel,
+          ctx.userId,
+          imported.gameId,
+          imported.title,
+          ctx.completedAt,
+          false,
+        );
         await saveCompletion(
           sel,
           ctx.userId,
@@ -3211,6 +3283,8 @@ export class GameCompletionCommands {
           ctx.note,
           imported.title,
           ctx.announce,
+          false,
+          removeFromNowPlaying,
         );
       },
     );
@@ -3301,6 +3375,14 @@ export class GameCompletionCommands {
         return false;
       }
 
+      const removeFromNowPlaying = await resolveNowPlayingRemoval(
+        interaction,
+        ctx.userId,
+        gameId,
+        gameTitle ?? "this game",
+        ctx.completedAt,
+        false,
+      );
       await saveCompletion(
         interaction,
         ctx.userId,
@@ -3311,6 +3393,8 @@ export class GameCompletionCommands {
         ctx.note,
         gameTitle ?? undefined,
         ctx.announce,
+        false,
+        removeFromNowPlaying,
       );
       return false;
     } catch (err: any) {

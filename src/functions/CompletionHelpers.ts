@@ -1,7 +1,13 @@
 import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ComponentType,
   EmbedBuilder,
   MessageFlags,
+  type ButtonInteraction,
   type CommandInteraction,
+  type Message,
   type StringSelectMenuInteraction,
 } from "discord.js";
 import {
@@ -25,6 +31,7 @@ export async function saveCompletion(
   gameTitle?: string,
   announce?: boolean,
   isAdminOverride: boolean = false,
+  removeFromNowPlaying: boolean = true,
 ): Promise<void> {
   if (interaction.user.id !== userId && !isAdminOverride) {
     await interaction.followUp({
@@ -61,10 +68,12 @@ export async function saveCompletion(
     return;
   }
 
-  try {
-    await Member.removeNowPlaying(userId, gameId);
-  } catch {
-    // Ignore cleanup errors
+  if (removeFromNowPlaying) {
+    try {
+      await Member.removeNowPlaying(userId, gameId);
+    } catch {
+      // Ignore cleanup errors
+    }
   }
 
   const playtimeText = formatPlaytimeHours(finalPlaytimeHours);
@@ -117,5 +126,75 @@ export async function saveCompletion(
     } catch (err) {
       console.error("Failed to announce completion:", err);
     }
+  }
+}
+
+export async function promptRemoveFromNowPlaying(
+  interaction: CommandInteraction | StringSelectMenuInteraction | ButtonInteraction,
+  gameTitle: string,
+): Promise<boolean> {
+  const promptId = `np-remove:${interaction.user.id}:${Date.now()}`;
+  const yesId = `${promptId}:yes`;
+  const noId = `${promptId}:no`;
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(yesId)
+      .setLabel("Yes")
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId(noId)
+      .setLabel("No")
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  const payload = {
+    content: `Remove **${gameTitle}** from your Now Playing list?`,
+    components: [row],
+    flags: MessageFlags.Ephemeral,
+    fetchReply: true,
+  };
+
+  let message: Message | null = null;
+  try {
+    if (interaction.deferred || interaction.replied) {
+      const reply = await interaction.followUp(payload as any);
+      message = reply as unknown as Message;
+    } else {
+      const reply = await interaction.reply(payload as any);
+      message = reply as unknown as Message;
+    }
+  } catch {
+    try {
+      const reply = await interaction.followUp(payload as any);
+      message = reply as unknown as Message;
+    } catch {
+      return false;
+    }
+  }
+
+  if (!message || typeof message.awaitMessageComponent !== "function") {
+    return false;
+  }
+
+  try {
+    const selection = await message.awaitMessageComponent({
+      componentType: ComponentType.Button,
+      filter: (i) => i.user.id === interaction.user.id && i.customId.startsWith(promptId),
+      time: 120_000,
+    });
+    const remove = selection.customId.endsWith(":yes");
+    await selection.update({
+      content: remove
+        ? "Okay, I'll remove it from Now Playing."
+        : "Okay, I'll leave it in your Now Playing list.",
+      components: [],
+    }).catch(() => {});
+    return remove;
+  } catch {
+    await message.edit({
+      content: "No response received. Leaving it in your Now Playing list.",
+      components: [],
+    }).catch(() => {});
+    return false;
   }
 }

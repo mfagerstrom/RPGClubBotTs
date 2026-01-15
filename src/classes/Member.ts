@@ -403,6 +403,40 @@ export default class Member {
     }
   }
 
+  static async getNowPlayingEntryMeta(
+    userId: string,
+    gameId: number,
+  ): Promise<{ addedAt: Date | null } | null> {
+    if (!Number.isInteger(gameId) || gameId <= 0) {
+      throw new Error("Invalid GameDB id.");
+    }
+    const connection = await getOraclePool().getConnection();
+    try {
+      const res = await connection.execute<{
+        ADDED_AT: Date | string | null;
+      }>(
+        `SELECT ADDED_AT
+           FROM USER_NOW_PLAYING
+          WHERE USER_ID = :userId
+            AND GAMEDB_GAME_ID = :gameId`,
+        { userId, gameId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+      const row = res.rows?.[0];
+      if (!row) {
+        return null;
+      }
+      const addedAt = row.ADDED_AT instanceof Date
+        ? row.ADDED_AT
+        : row.ADDED_AT
+          ? new Date(row.ADDED_AT as any)
+          : null;
+      return { addedAt };
+    } finally {
+      await connection.close();
+    }
+  }
+
   static async updateNowPlayingNote(
     userId: string,
     gameId: number,

@@ -1399,6 +1399,22 @@ export class GameDb {
       }
     }
 
+    let removeFromNowPlaying = false;
+    const nowPlayingMeta = await Member.getNowPlayingEntryMeta(interaction.user.id, gameId);
+    if (nowPlayingMeta) {
+      const removeChoice = await wizardChoice(
+        "Remove from your Now Playing list?",
+        [
+          { label: "Yes", value: "yes", style: ButtonStyle.Danger },
+          { label: "No", value: "no" },
+          { label: "Cancel", value: "cancel", style: ButtonStyle.Secondary },
+        ],
+      );
+      if (removeChoice === null) return;
+      if (removeChoice === "cancel") return;
+      removeFromNowPlaying = removeChoice === "yes";
+    }
+
     try {
       await Member.addCompletion({
         userId: interaction.user.id,
@@ -1408,7 +1424,9 @@ export class GameDb {
         finalPlaytimeHours: playtime,
         note,
       });
-      await Member.removeNowPlaying(interaction.user.id, gameId).catch(() => {});
+      if (removeFromNowPlaying) {
+        await Member.removeNowPlaying(interaction.user.id, gameId).catch(() => {});
+      }
       await updateEmbed(`✅ Added completion for **${gameTitle}**.`);
       finalMessage = `✅ Added completion for **${gameTitle}**.`;
     } catch (err: any) {
