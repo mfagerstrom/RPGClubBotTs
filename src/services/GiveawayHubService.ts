@@ -1,5 +1,11 @@
 import type { Client, TextBasedChannel } from "discord.js";
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from "discord.js";
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+  MessageFlags,
+} from "discord.js";
 import { countAvailableGameKeys, listAvailableGameKeys } from "../classes/GameKey.js";
 
 export const GIVEAWAY_HUB_CHANNEL_ID = "1461101188572254351";
@@ -236,6 +242,7 @@ async function updateGiveawayHubMessages(
   client: Client,
   channel: TextBasedChannel,
   payload: GiveawayHubPayload,
+  options?: { suppressNotifications?: boolean },
 ): Promise<void> {
   if (!("send" in channel)) {
     return;
@@ -269,6 +276,7 @@ async function updateGiveawayHubMessages(
         content: content ?? undefined,
         embeds: batch,
         components,
+        flags: options?.suppressNotifications ? MessageFlags.SuppressNotifications : undefined,
       }).catch(() => {});
     }
   }
@@ -305,7 +313,9 @@ export async function refreshGiveawayHubMessage(
       return;
     }
     await deleteAllGiveawayHubMessages(textChannel);
-    await updateGiveawayHubMessages(client, textChannel, payload);
+    await updateGiveawayHubMessages(client, textChannel, payload, {
+      suppressNotifications: true,
+    });
     return;
   }
 

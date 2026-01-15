@@ -5,9 +5,13 @@ import {
   type User,
   AttachmentBuilder,
   MessageFlags,
+  ModalBuilder,
+  ModalSubmitInteraction,
   ActionRowBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
+  TextInputBuilder,
+  TextInputStyle,
   ButtonBuilder,
   ButtonStyle,
   ButtonInteraction,
@@ -24,6 +28,7 @@ import {
   SlashChoice,
   SelectMenuComponent,
   ButtonComponent,
+  ModalComponent,
 } from "discordx";
 import Member, { type IMemberNowPlayingEntry } from "../classes/Member.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
@@ -43,6 +48,19 @@ import {
 const MAX_NOW_PLAYING = 10;
 const MAX_NOW_PLAYING_NOTE_LEN = 500;
 const NOW_PLAYING_SEARCH_LIMIT = 10;
+const NOW_PLAYING_SORT_MODAL_ID = "nowplaying-sort-modal";
+const NOW_PLAYING_SORT_INPUT_PREFIX = "nowplaying-sort-input";
+const NOW_PLAYING_SORT_CHUNK_SIZE = 5;
+type NowPlayingSortEntry = {
+  gameId: number;
+  title: string;
+  sortOrder: number | null;
+};
+
+const nowPlayingSortSessions = new Map<string, {
+  entries: NowPlayingSortEntry[];
+  orders: Map<number, number>;
+}>();
 const nowPlayingAddSessions = new Map<
   string,
   { userId: string; query: string; note: string | null }
@@ -87,6 +105,53 @@ function getDisplayNowPlayingEntries(
 ): IMemberNowPlayingEntry[] {
   const hasManualOrder = entries.some((entry) => entry.sortOrder != null);
   return hasManualOrder ? entries : sortNowPlayingEntries(entries);
+}
+
+function buildSortModal(
+  userId: string,
+  entries: NowPlayingSortEntry[],
+  chunkIndex: number,
+): ModalBuilder {
+  const start = chunkIndex * NOW_PLAYING_SORT_CHUNK_SIZE;
+  const chunk = entries.slice(start, start + NOW_PLAYING_SORT_CHUNK_SIZE);
+  const modal = new ModalBuilder()
+    .setCustomId(`${NOW_PLAYING_SORT_MODAL_ID}:${userId}:${chunkIndex}`)
+    .setTitle("Sort Now Playing");
+
+  chunk.forEach((entry, idx) => {
+    const currentOrder = start + idx + 1;
+    const input = new TextInputBuilder()
+      .setCustomId(`${NOW_PLAYING_SORT_INPUT_PREFIX}:${entry.gameId}`)
+      .setLabel(entry.title.slice(0, 45))
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true)
+      .setValue(String(currentOrder));
+    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
+  });
+
+  return modal;
+}
+
+function buildSortContinueRow(userId: string, chunkIndex: number): ActionRowBuilder<ButtonBuilder> {
+  const button = new ButtonBuilder()
+    .setCustomId(`nowplaying-sort-open:${userId}:${chunkIndex}`)
+    .setLabel("Open Sort Form")
+    .setStyle(ButtonStyle.Primary);
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(button);
+}
+
+function buildSortValidationError(entryCount: number): string {
+  return `Please provide each number 1-${entryCount} exactly once.`;
+}
+
+function toSortEntries(
+  entries: Array<{ gameId: number; title: string; sortOrder: number | null }>,
+): NowPlayingSortEntry[] {
+  return entries.map((entry) => ({
+    gameId: entry.gameId,
+    title: entry.title,
+    sortOrder: entry.sortOrder ?? null,
+  }));
 }
 
 async function promptForNote(
@@ -182,97 +247,6 @@ async function promptForNote(
     await updateStatusMessage(`Error while waiting for a response: ${msg}`);
     await updatePrompt([...promptLines, `❌ Error: ${msg}`]);
     return { note: null, threadId: promptThread.id };
-  } finally {
-    if (promptMessage && "delete" in promptMessage) {
-      await promptMessage.delete().catch(() => {});
-    }
-    await cleanupPromptThread(context);
-  }
-}
-
-async function promptForSortOrder(
-  interaction: CommandInteraction,
-  entries: { gameId: number; title: string }[],
-  timeoutMs: number = 120_000,
-): Promise<number[] | null> {
-  const userId = interaction.user.id;
-  const context = await openPromptThread(interaction, "Now Playing sort prompt");
-  if (!context) return null;
-  const { promptThread, createdThread } = context;
-  let promptMessage: Message | null = null;
-
-  if (createdThread) {
-    await safeReply(interaction, {
-      content: `Please reply in <#${promptThread.id}>.`,
-      flags: MessageFlags.Ephemeral,
-    });
-  }
-
-  const lines = entries.map((entry, idx) => `${idx + 1}. ${entry.title}`);
-  const embed = new EmbedBuilder()
-    .setTitle("Sort Now Playing")
-    .setDescription(
-      `${lines.join("\n")}\n\n` +
-      "Reply with the numbers in your desired order, comma-separated. Example: `3,1,2`.",
-    );
-
-  promptMessage = await promptThread.send({
-    content: `<@${userId}>`,
-    embeds: [embed],
-    allowedMentions: { users: [userId] },
-  });
-
-  try {
-    const collected = await promptThread.awaitMessages({
-      filter: (m: any) => m.author?.id === userId,
-      max: 1,
-      time: timeoutMs,
-    });
-    const first = collected?.first?.();
-    if (!first) {
-      await safeReply(interaction, {
-        content: "Timed out waiting for a response.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return null;
-    }
-
-    const content: string = (first.content ?? "").trim();
-    await first.delete().catch(() => {});
-
-    if (/^cancel$/i.test(content)) {
-      await safeReply(interaction, {
-        content: "Cancelled.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return null;
-    }
-
-    const tokens = content.match(/\d+/g) ?? [];
-    const indices = tokens.map((token) => Number(token));
-    const expectedCount = entries.length;
-    const validRange = indices.every(
-      (idx) => Number.isInteger(idx) && idx >= 1 && idx <= expectedCount,
-    );
-    const unique = new Set(indices);
-
-    if (!validRange || unique.size !== expectedCount || indices.length !== expectedCount) {
-      await safeReply(interaction, {
-        content:
-          `Please provide each number 1-${expectedCount} exactly once, comma-separated.`,
-        flags: MessageFlags.Ephemeral,
-      });
-      return null;
-    }
-
-    return indices.map((idx) => entries[idx - 1].gameId);
-  } catch (err: any) {
-    const msg = err?.message ?? String(err);
-    await safeReply(interaction, {
-      content: `Error while waiting for a response: ${msg}`,
-      flags: MessageFlags.Ephemeral,
-    });
-    return null;
   } finally {
     if (promptMessage && "delete" in promptMessage) {
       await promptMessage.delete().catch(() => {});
@@ -679,9 +653,7 @@ export class NowPlayingCommand {
 
   @Slash({ description: "Sort your Now Playing list", name: "sort" })
   async sortNowPlaying(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-
-    const entries = await Member.getNowPlayingEntries(interaction.user.id);
+    const entries = toSortEntries(await Member.getNowPlayingEntries(interaction.user.id));
     if (!entries.length) {
       await safeReply(interaction, {
         content: "Your Now Playing list is empty.",
@@ -690,13 +662,16 @@ export class NowPlayingCommand {
       return;
     }
 
-    const orderedGameIds = await promptForSortOrder(interaction, entries);
-    if (!orderedGameIds) return;
+    nowPlayingSortSessions.set(interaction.user.id, {
+      entries,
+      orders: new Map(),
+    });
 
-    const updated = await Member.updateNowPlayingSort(interaction.user.id, orderedGameIds);
-    await safeReply(interaction, {
-      content: updated ? "Your Now Playing order has been updated." : "No changes made.",
-      flags: MessageFlags.Ephemeral,
+    await interaction.showModal(buildSortModal(interaction.user.id, entries, 0)).catch(async () => {
+      await safeReply(interaction, {
+        content: "Unable to open the sort form right now.",
+        flags: MessageFlags.Ephemeral,
+      });
     });
   }
 
@@ -992,6 +967,149 @@ export class NowPlayingCommand {
 
     const updated = await Member.updateNowPlayingNote(ownerId, gameId, noteResult.note);
     await updateStatus(updated ? "Note saved." : "Could not update that entry.");
+  }
+
+  @ButtonComponent({ id: /^nowplaying-sort-open:\d+:\d+$/ })
+  async handleSortOpen(interaction: ButtonInteraction): Promise<void> {
+    const [, ownerId, chunkRaw] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await safeReply(interaction, {
+        content: "This sort prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const chunkIndex = Number(chunkRaw);
+    if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
+      await safeReply(interaction, {
+        content: "Invalid sort chunk.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const session = nowPlayingSortSessions.get(ownerId);
+    const entries = session?.entries ?? toSortEntries(await Member.getNowPlayingEntries(ownerId));
+    if (!entries.length) {
+      await safeReply(interaction, {
+        content: "Your Now Playing list is empty.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (!session) {
+      nowPlayingSortSessions.set(ownerId, { entries, orders: new Map() });
+    }
+
+    await interaction.showModal(buildSortModal(ownerId, entries, chunkIndex)).catch(() => {});
+  }
+
+  @ModalComponent({ id: /^nowplaying-sort-modal:\d+:\d+$/ })
+  async handleSortModal(interaction: ModalSubmitInteraction): Promise<void> {
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+    const [, ownerId, chunkRaw] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await safeReply(interaction, {
+        content: "This sort prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const chunkIndex = Number(chunkRaw);
+    if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
+      await safeReply(interaction, {
+        content: "Invalid sort chunk.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const session = nowPlayingSortSessions.get(ownerId);
+    const entries = session?.entries ?? toSortEntries(await Member.getNowPlayingEntries(ownerId));
+    if (!entries.length) {
+      await safeReply(interaction, {
+        content: "Your Now Playing list is empty.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const effectiveSession = session ?? {
+      entries,
+      orders: new Map<number, number>(),
+    };
+    nowPlayingSortSessions.set(ownerId, effectiveSession);
+
+    const start = chunkIndex * NOW_PLAYING_SORT_CHUNK_SIZE;
+    const chunk = entries.slice(start, start + NOW_PLAYING_SORT_CHUNK_SIZE);
+    if (!chunk.length) {
+      await safeReply(interaction, {
+        content: "This sort chunk is no longer available.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    for (const entry of chunk) {
+      effectiveSession.orders.delete(entry.gameId);
+    }
+
+    const used = new Set<number>(effectiveSession.orders.values());
+    for (const entry of chunk) {
+      const value = interaction.fields.getTextInputValue(
+        `${NOW_PLAYING_SORT_INPUT_PREFIX}:${entry.gameId}`,
+      );
+      const order = Number(value);
+      if (!Number.isInteger(order) || order < 1 || order > entries.length || used.has(order)) {
+        await safeReply(interaction, {
+          content: buildSortValidationError(entries.length),
+          components: [buildSortContinueRow(ownerId, chunkIndex)],
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      used.add(order);
+      effectiveSession.orders.set(entry.gameId, order);
+    }
+
+    const totalChunks = Math.ceil(entries.length / NOW_PLAYING_SORT_CHUNK_SIZE);
+    const nextChunk = chunkIndex + 1;
+    if (nextChunk < totalChunks) {
+      await safeReply(interaction, {
+        content: `Saved part ${chunkIndex + 1} of ${totalChunks}.`,
+        components: [buildSortContinueRow(ownerId, nextChunk)],
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const orders = Array.from(effectiveSession.orders.values());
+    const uniqueOrders = new Set(orders);
+    const hasAll = orders.length === entries.length && uniqueOrders.size === entries.length;
+    const inRange = orders.every((order) => order >= 1 && order <= entries.length);
+    if (!hasAll || !inRange) {
+      await safeReply(interaction, {
+        content: buildSortValidationError(entries.length),
+        components: [buildSortContinueRow(ownerId, 0)],
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const orderedIds = [...entries]
+      .sort((a, b) => (effectiveSession.orders.get(a.gameId) ?? 0)
+        - (effectiveSession.orders.get(b.gameId) ?? 0))
+      .map((entry) => entry.gameId);
+
+    const updated = await Member.updateNowPlayingSort(ownerId, orderedIds);
+    nowPlayingSortSessions.delete(ownerId);
+    await safeReply(interaction, {
+      content: updated ? "Your Now Playing order has been updated." : "No changes made.",
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   @SelectMenuComponent({ id: /^nowplaying-delete-note-select:\d+$/ })
