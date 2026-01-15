@@ -950,13 +950,35 @@ export class GiveawayCommand {
     }
 
     await interaction.editReply({
-      content:
-        `You claimed **${result.key.keyTitle}** (${result.key.platform}).\n` +
-        `Key: \`${result.key.keyValue}\`\n` +
-        `This key was donated by ${result.key.donorName}, be sure to thank them!`,
+      content: "Sending your key by DM now.",
       embeds: [],
       components: [],
     }).catch(() => {});
+
+    const dmResult = await interaction.user
+      .send({
+        content:
+          `You claimed **${result.key.keyTitle}** (${result.key.platform}).\n` +
+          `Key: \`${result.key.keyValue}\`\n` +
+          `This key was donated by ${result.key.donorName}, be sure to thank them!`,
+      })
+      .catch(() => null);
+
+    if (dmResult) {
+      await interaction.editReply({
+        content:
+          "Your key was sent by DM. Thanks for claiming responsibly.",
+        embeds: [],
+        components: [],
+      }).catch(() => {});
+    } else {
+      await interaction.editReply({
+        content:
+          "I could not send you a DM. Please enable DMs and contact an admin to resend your key.",
+        embeds: [],
+        components: [],
+      }).catch(() => {});
+    }
 
     if (scope === "public") {
       const sessionId = parts[4];

@@ -245,7 +245,7 @@ const HELP_TOPICS: HelpTopic[] = [
       "Syntax: /gamegiveaway (returns a link to the hub list).",
     notes:
       "The giveaway list is kept in <#1461101188572254351> with claim/donate buttons. " +
-      "Claims are handled from the list menu; keys are shared privately.",
+      "Claims are handled from the list menu; keys are sent by DM.",
   },
   {
     id: "thread",
