@@ -1,3 +1,4 @@
+2026-01-14 - Commit ID: 96ffc92 - issue-25: implemented pinning of messages via reactions with :pushpin:
 2026-01-14 - Commit ID: 2629f13 - fix: improved display of now playing notes
 2026-01-14 - Commit ID: 34e5262 - issue-38: implemented /avatar-history command
 2026-01-14 - Commit ID: 843866e - issue-7 implemented /now-playing sort
