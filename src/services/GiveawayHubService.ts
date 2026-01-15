@@ -250,7 +250,10 @@ async function updateGiveawayHubMessages(
 
   const messages = await channel.messages
     .fetch({ limit: GIVEAWAY_HUB_SCAN_LIMIT })
-    .catch(() => null);
+    .catch((err) => {
+      console.error("Giveaway hub fetch failed:", err);
+      return null;
+    });
   const hubMessages = messages
     ? Array.from(messages.values())
       .filter((message) => isGiveawayHubMessage(client, message as GiveawayMessage))
@@ -270,21 +273,27 @@ async function updateGiveawayHubMessages(
     const components = i === 0 ? payload.components ?? [] : [];
     const existing = hubMessages[i];
     if (existing) {
-      await existing.edit({ content, embeds: batch, components }).catch(() => {});
+      await existing.edit({ content, embeds: batch, components }).catch((err) => {
+        console.error("Giveaway hub edit failed:", err);
+      });
     } else {
       await channel.send({
         content: content ?? undefined,
         embeds: batch,
         components,
         flags: options?.suppressNotifications ? MessageFlags.SuppressNotifications : undefined,
-      }).catch(() => {});
+      }).catch((err) => {
+        console.error("Giveaway hub send failed:", err);
+      });
     }
   }
 
   if (hubMessages.length > totalMessages) {
     const extras = hubMessages.slice(totalMessages);
     for (const extra of extras) {
-      await extra.delete().catch(() => {});
+      await extra.delete().catch((err) => {
+        console.error("Giveaway hub delete failed:", err);
+      });
     }
   }
 }
@@ -300,9 +309,15 @@ export async function refreshGiveawayHubMessage(
 
   const channel = await client.channels
     .fetch(GIVEAWAY_HUB_CHANNEL_ID)
-    .catch(() => null);
+    .catch((err) => {
+      console.error("Giveaway hub channel fetch failed:", err);
+      return null;
+    });
   const textChannel = channel?.isTextBased() ? channel : null;
   if (!textChannel) {
+    console.warn(
+      `Giveaway hub channel ${GIVEAWAY_HUB_CHANNEL_ID} not found or not text-based.`,
+    );
     return;
   }
 
@@ -310,6 +325,7 @@ export async function refreshGiveawayHubMessage(
   const shouldRecreate = options?.forceRecreate ?? true;
   if (shouldRecreate) {
     if (!("send" in textChannel)) {
+      console.warn("Giveaway hub channel does not support send.");
       return;
     }
     await deleteAllGiveawayHubMessages(textChannel);

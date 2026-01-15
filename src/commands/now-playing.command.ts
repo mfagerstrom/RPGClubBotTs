@@ -29,6 +29,14 @@ import {
   ButtonComponent,
   ModalComponent,
 } from "discordx";
+import {
+  ContainerBuilder,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
+  SeparatorBuilder,
+  TextDisplayBuilder,
+} from "@discordjs/builders";
+import { SeparatorSpacingSize } from "discord-api-types/v10";
 import Member, { type IMemberNowPlayingEntry } from "../classes/Member.js";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import Game from "../classes/Game.js";
@@ -52,6 +60,8 @@ const NOW_PLAYING_SORT_INPUT_PREFIX = "nowplaying-sort-input";
 const NOW_PLAYING_SORT_CHUNK_SIZE = 5;
 const NOW_PLAYING_NOTE_MODAL_ID = "nowplaying-note-modal";
 const NOW_PLAYING_NOTE_INPUT_ID = "nowplaying-note-input";
+const COMPONENTS_V2_FLAG = 1 << 15;
+const NOW_PLAYING_GALLERY_MAX = 10;
 type NowPlayingSortEntry = {
   gameId: number;
   title: string;
@@ -76,6 +86,10 @@ type NowPlayingCompleteContext = {
 };
 
 const nowPlayingCompleteSessions = new Map<string, NowPlayingCompleteContext>();
+
+function buildComponentsV2Flags(isEphemeral: boolean): number {
+  return (isEphemeral ? MessageFlags.Ephemeral : 0) | COMPONENTS_V2_FLAG;
+}
 
 function formatEntry(
   entry: IMemberNowPlayingEntry,
@@ -1130,52 +1144,33 @@ export class NowPlayingCommand {
   ): Promise<void> {
     const entries = await Member.getNowPlaying(target.id);
     if (!entries.length) {
+      const container = this.buildNowPlayingMessageContainer(
+        "Now Playing",
+        `No Now Playing entries found for <@${target.id}>.`,
+      );
       await safeReply(interaction, {
-        content: `No Now Playing entries found for <@${target.id}>.`,
-        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+        components: [container],
+        flags: buildComponentsV2Flags(ephemeral),
       });
       return;
     }
 
     const sortedEntries = getDisplayNowPlayingEntries(entries);
-    let hasLinks = false;
-    let hasUnlinked = false;
-
-    const lines: string[] = [];
-    sortedEntries.forEach((entry) => {
-      if (entry.threadId) hasLinks = true;
-      else hasUnlinked = true;
-      lines.push(`- ${formatEntry(entry, interaction.guildId)}`);
-      if (entry.note) {
-        lines.push(`  - ${entry.note}`);
-      }
-    });
-
-    const footerParts: string[] = [];
-    if (hasLinks) {
-      footerParts.push("Links on game titles lead to their respective discussion threads.");
-    }
-    if (hasUnlinked) {
-      footerParts.push(
-        "For unlinked games, feel free to add a new thread or link one to the game if it already exists.",
-      );
-    }
-
     const displayName = target.displayName ?? target.username ?? "User";
-    const embed = new EmbedBuilder()
-      .setTitle(`${displayName}'s Now Playing List`)
-      .setDescription(lines.join("\n"))
-      .setAuthor({
-        name: displayName,
-        iconURL: target.displayAvatarURL({ size: 64, forceStatic: false }),
-      })
-      .setFooter({ text: footerParts.join("\n") });
-
-    const files = await this.buildNowPlayingAttachments(sortedEntries, 6);
+    const { files, thumbnailsByGameId } = await this.buildNowPlayingAttachments(
+      sortedEntries,
+      NOW_PLAYING_GALLERY_MAX,
+    );
+    const containers = this.buildNowPlayingEntryContainers(
+      `${displayName}'s Now Playing List`,
+      sortedEntries,
+      interaction.guildId,
+      thumbnailsByGameId,
+    );
     await safeReply(interaction, {
-      embeds: [embed],
+      components: containers,
       files,
-      flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+      flags: buildComponentsV2Flags(ephemeral),
     });
   }
 
@@ -1194,27 +1189,35 @@ export class NowPlayingCommand {
       : null;
 
     if (!entries.length) {
-      const embed = new EmbedBuilder()
-        .setTitle("Now Playing - Everyone")
-        .setDescription(`No Now Playing entries found for <@${selectedUserId}>.`);
+      const container = this.buildNowPlayingMessageContainer(
+        "Now Playing - Everyone",
+        `No Now Playing entries found for <@${selectedUserId}>.`,
+      );
+      const isEphemeral = interaction.message.flags?.has(MessageFlags.Ephemeral) ?? false;
       await interaction.update({
-        embeds: [embed],
-        components: selectRow ? [selectRow] : [],
+        components: [container, ...(selectRow ? [selectRow] : [])],
+        flags: buildComponentsV2Flags(isEphemeral),
       });
       return;
     }
 
     const sortedEntries = getDisplayNowPlayingEntries(entries);
-    const { embed } = this.buildSingleNowPlayingEmbed(
-      target,
+    const displayName = target.displayName ?? target.username ?? "User";
+    const { files, thumbnailsByGameId } = await this.buildNowPlayingAttachments(
+      sortedEntries,
+      NOW_PLAYING_GALLERY_MAX,
+    );
+    const containers = this.buildNowPlayingEntryContainers(
+      `${displayName}'s Now Playing List`,
       sortedEntries,
       interaction.guildId,
+      thumbnailsByGameId,
     );
-    const files = await this.buildNowPlayingAttachments(sortedEntries);
+    const isEphemeral = interaction.message.flags?.has(MessageFlags.Ephemeral) ?? false;
     await interaction.update({
-      embeds: [embed],
-      components: selectRow ? [selectRow] : [],
+      components: [...containers, ...(selectRow ? [selectRow] : [])],
       files,
+      flags: buildComponentsV2Flags(isEphemeral),
     });
   }
 
@@ -1224,9 +1227,13 @@ export class NowPlayingCommand {
   ): Promise<void> {
     const lists = await Member.getAllNowPlaying();
     if (!lists.length) {
+      const container = this.buildNowPlayingMessageContainer(
+        "Now Playing - Everyone",
+        "No Now Playing data found for anyone yet.",
+      );
       await safeReply(interaction, {
-        content: "No Now Playing data found for anyone yet.",
-        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+        components: [container],
+        flags: buildComponentsV2Flags(ephemeral),
       });
       return;
     }
@@ -1244,66 +1251,55 @@ export class NowPlayingCommand {
       return `**${displayName}**: ${count} ${suffix}`;
     });
 
-    const embed = new EmbedBuilder()
-      .setTitle("Now Playing - Everyone")
-      .setDescription(lines.join("\n"));
+    const container = this.buildNowPlayingListContainer("Now Playing - Everyone", lines);
 
     const selectRow = this.buildNowPlayingMemberSelect(sortedLists);
 
     await safeReply(interaction, {
-      embeds: [embed],
-      components: [selectRow],
-      flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+      components: [container, selectRow],
+      flags: buildComponentsV2Flags(ephemeral),
     });
   }
 
-  private buildSingleNowPlayingEmbed(
-    target: User,
+  private buildNowPlayingListLines(
     entries: IMemberNowPlayingEntry[],
     guildId: string | null,
-  ): { embed: EmbedBuilder } {
-    const sortedEntries = getDisplayNowPlayingEntries(entries);
-    let hasLinks = false;
-    let hasUnlinked = false;
-
+  ): string[] {
     const lines: string[] = [];
-    sortedEntries.forEach((entry) => {
-      if (entry.threadId) hasLinks = true;
-      else hasUnlinked = true;
+    entries.forEach((entry) => {
       lines.push(`- ${formatEntry(entry, guildId)}`);
       if (entry.note) {
         lines.push(`  - ${entry.note}`);
       }
     });
+    return lines;
+  }
 
-    const footerParts: string[] = [];
-    if (hasLinks) {
-      footerParts.push("Links on game titles lead to their respective discussion threads.");
-    }
-    if (hasUnlinked) {
-      footerParts.push(
-        "For unlinked games, feel free to add a new thread or link one to the game if it already exists.",
+  private buildNowPlayingListContainer(title: string, lines: string[]): ContainerBuilder {
+    const container = new ContainerBuilder();
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`# ${title}`));
+    if (lines.length) {
+      container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(lines.join("\n")),
       );
     }
+    return container;
+  }
 
-    const displayName = target.displayName ?? target.username ?? "User";
-    const embed = new EmbedBuilder()
-      .setTitle(`${displayName}'s Now Playing List`)
-      .setDescription(lines.join("\n"))
-      .setAuthor({
-        name: displayName,
-        iconURL: target.displayAvatarURL({ size: 64, forceStatic: false }),
-      })
-      .setFooter({ text: footerParts.join("\n") });
-    return { embed };
+  private buildNowPlayingMessageContainer(title: string, message: string): ContainerBuilder {
+    const container = new ContainerBuilder();
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`# ${title}`));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(message));
+    return container;
   }
 
   private async buildNowPlayingAttachments(
     entries: IMemberNowPlayingEntry[],
     maxImages: number = Number.POSITIVE_INFINITY,
-  ): Promise<AttachmentBuilder[]> {
+  ): Promise<{ files: AttachmentBuilder[]; thumbnailsByGameId: Map<number, string> }> {
     const files: AttachmentBuilder[] = [];
     const seen = new Set<number>();
+    const thumbnailsByGameId = new Map<number, string>();
     let imageCount = 0;
     for (const entry of entries) {
       if (!entry.gameId || seen.has(entry.gameId)) continue;
@@ -1313,13 +1309,93 @@ export class NowPlayingCommand {
         if (imageCount >= maxImages) {
           break;
         }
+        const filename = `now_playing_${entry.gameId}.png`;
         files.push(
-          new AttachmentBuilder(game.imageData, { name: `now_playing_${entry.gameId}.png` }),
+          new AttachmentBuilder(game.imageData, { name: filename }),
         );
+        thumbnailsByGameId.set(entry.gameId, `attachment://${filename}`);
         imageCount += 1;
       }
     }
-    return files;
+    return { files, thumbnailsByGameId };
+  }
+
+  private buildNowPlayingEntryContainers(
+    title: string,
+    entries: IMemberNowPlayingEntry[],
+    guildId: string | null,
+    thumbnailsByGameId: Map<number, string>,
+  ): ContainerBuilder[] {
+    const containers: ContainerBuilder[] = [];
+    let current = new ContainerBuilder();
+    let componentCount = 0;
+
+    const pushContainer = (): void => {
+      if (componentCount > 0) {
+        containers.push(current);
+      }
+      current = new ContainerBuilder();
+      componentCount = 0;
+    };
+
+    const addComponent = (
+      component: MediaGalleryBuilder | SeparatorBuilder | TextDisplayBuilder,
+    ): void => {
+      if (componentCount >= 10) {
+        pushContainer();
+      }
+      if (component instanceof MediaGalleryBuilder) {
+        current.addMediaGalleryComponents(component);
+      } else if (component instanceof SeparatorBuilder) {
+        current.addSeparatorComponents(component);
+      } else {
+        current.addTextDisplayComponents(component);
+      }
+      componentCount += 1;
+    };
+
+    addComponent(new TextDisplayBuilder().setContent(`## ${title}`));
+
+    const galleryItems: MediaGalleryItemBuilder[] = [];
+    for (const entry of entries) {
+      if (galleryItems.length >= NOW_PLAYING_GALLERY_MAX) {
+        break;
+      }
+      if (!entry.gameId) {
+        continue;
+      }
+      const imageUrl = thumbnailsByGameId.get(entry.gameId);
+      if (!imageUrl) {
+        continue;
+      }
+      const item = new MediaGalleryItemBuilder()
+        .setURL(imageUrl)
+        .setDescription(entry.title);
+      galleryItems.push(item);
+    }
+
+    if (galleryItems.length) {
+      const gallery = new MediaGalleryBuilder().addItems(galleryItems);
+      addComponent(gallery);
+      addComponent(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small));
+    }
+
+    for (let idx = 0; idx < entries.length; idx += 1) {
+      const entry = entries[idx];
+      const title = formatEntry(entry, guildId);
+      const content = entry.note ? `**${title}**\n${entry.note}` : `**${title}**`;
+      addComponent(new TextDisplayBuilder().setContent(content));
+      if (idx < entries.length - 1) {
+        addComponent(
+          new SeparatorBuilder()
+            .setSpacing(SeparatorSpacingSize.Small)
+            .setDivider(false),
+        );
+      }
+    }
+
+    pushContainer();
+    return containers;
   }
 
   private buildNowPlayingMemberSelect(
