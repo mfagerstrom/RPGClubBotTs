@@ -61,7 +61,7 @@ const NOW_PLAYING_SORT_CHUNK_SIZE = 5;
 const NOW_PLAYING_NOTE_MODAL_ID = "nowplaying-note-modal";
 const NOW_PLAYING_NOTE_INPUT_ID = "nowplaying-note-input";
 const COMPONENTS_V2_FLAG = 1 << 15;
-const NOW_PLAYING_GALLERY_MAX = 10;
+const NOW_PLAYING_GALLERY_MAX = 5;
 type NowPlayingSortEntry = {
   gameId: number;
   title: string;
