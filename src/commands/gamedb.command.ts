@@ -188,7 +188,10 @@ export class GameDb {
       }
 
       if (results.length === 1) {
-        await this.addGameToDatabase(interaction, results[0].id, { selectionMessage: null });
+        await this.addGameToDatabase(interaction, results[0].id, {
+          selectionMessage: null,
+          showProfile: true,
+        });
         return;
       }
 
@@ -305,7 +308,10 @@ export class GameDb {
 
       // 1b. Single Result - Auto Add
       if (results.length === 1) {
-        await this.addGameToDatabase(interaction, results[0].id, { selectionMessage: null });
+        await this.addGameToDatabase(interaction, results[0].id, {
+          selectionMessage: null,
+          showProfile: true,
+        });
         return;
       }
 
@@ -390,7 +396,7 @@ export class GameDb {
   private async addGameToDatabase(
     interaction: CommandInteraction | StringSelectMenuInteraction,
     igdbId: number,
-    opts?: { selectionMessage?: Message | null },
+    opts?: { selectionMessage?: Message | null; showProfile?: boolean },
   ): Promise<void> {
     // 4. Fetch Details
     const details = await igdbService.getGameDetails(igdbId);
@@ -486,6 +492,11 @@ export class GameDb {
       } catch {
         // ignore cleanup failures
       }
+    }
+
+    if (opts?.showProfile) {
+      await this.showGameProfile(interaction, newGame.id);
+      return;
     }
 
     // 7. Final Success Message with embed left in chat
