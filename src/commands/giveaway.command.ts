@@ -34,6 +34,7 @@ import {
   listAvailableGameKeys,
   revokeGameKey,
 } from "../classes/GameKey.js";
+import Member from "../classes/Member.js";
 import { isAdmin } from "./admin.command.js";
 import {
   buildKeyListEmbed,
@@ -55,6 +56,8 @@ const GIVEAWAY_DONATE_TITLE_ID = "giveaway-donate-title";
 const GIVEAWAY_DONATE_PLATFORM_ID = "giveaway-donate-platform";
 const GIVEAWAY_DONATE_KEY_ID = "giveaway-donate-key";
 const GIVEAWAY_REVOKE_KEY_ID = "giveaway-revoke-key-id";
+const GIVEAWAY_DONOR_SETTINGS_ID = "giveaway-hub-settings";
+const GIVEAWAY_DONOR_NOTIFY_ID = "giveaway-donor-notify";
 
 type GiveawayListPayload = {
   content?: string;
@@ -254,6 +257,27 @@ function buildClaimConfirmComponents(
   return [new ActionRowBuilder<ButtonBuilder>().addComponents(yesButton, noButton)];
 }
 
+function formatDonorNotifyStatus(enabled: boolean): string {
+  return enabled ? "On" : "Off";
+}
+
+function buildDonorSettingsRow(
+  userId: string,
+  enabled: boolean,
+): ActionRowBuilder<ButtonBuilder> {
+  const yesButton = new ButtonBuilder()
+    .setCustomId(`${GIVEAWAY_DONOR_NOTIFY_ID}:${userId}:yes`)
+    .setLabel("Yes")
+    .setStyle(ButtonStyle.Success)
+    .setDisabled(enabled);
+  const noButton = new ButtonBuilder()
+    .setCustomId(`${GIVEAWAY_DONOR_NOTIFY_ID}:${userId}:no`)
+    .setLabel("No")
+    .setStyle(ButtonStyle.Secondary)
+    .setDisabled(!enabled);
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(yesButton, noButton);
+}
+
 async function claimKey(
   interaction: AnyRepliable,
   keyId: number,
@@ -284,6 +308,15 @@ async function claimKey(
     .fetch(key.donorUserId)
     .catch(() => null);
   const donorName = donorUser?.username ?? `<@${key.donorUserId}>`;
+  const notifyDonor = await Member.getGiveawayDonorNotifySetting(key.donorUserId);
+  if (notifyDonor && donorUser && key.donorUserId !== interaction.user.id) {
+    const claimantMention = `<@${interaction.user.id}>`;
+    await donorUser.send({
+      content:
+        `Your donated key for **${key.gameTitle}** (${key.platform}) was claimed by ` +
+        `${claimantMention}. Thanks for contributing!`,
+    }).catch(() => {});
+  }
 
   return {
     status: "claimed",
@@ -625,9 +658,42 @@ export class GiveawayCommand {
     await interaction.showModal(buildDonateModal()).catch(() => {});
   }
 
+  @ButtonComponent({ id: GIVEAWAY_DONOR_SETTINGS_ID })
+  async handleDonorSettings(interaction: ButtonInteraction): Promise<void> {
+    const enabled = await Member.getGiveawayDonorNotifySetting(interaction.user.id);
+    await safeReply(interaction, {
+      content:
+        "Notify you when your donated keys are claimed? " +
+        `Current setting: **${formatDonorNotifyStatus(enabled)}**.`,
+      components: [buildDonorSettingsRow(interaction.user.id, enabled)],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
   @ButtonComponent({ id: "giveaway-hub-revoke" })
   async handleHubRevoke(interaction: ButtonInteraction): Promise<void> {
     await interaction.showModal(buildRevokeModal()).catch(() => {});
+  }
+
+  @ButtonComponent({ id: /^giveaway-donor-notify:\d+:(yes|no)$/ })
+  async handleDonorNotifyUpdate(interaction: ButtonInteraction): Promise<void> {
+    const [, ownerId, choice] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await safeReply(interaction, {
+        content: "This donor setting isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const enabled = choice === "yes";
+    await Member.setGiveawayDonorNotifySetting(interaction.user.id, enabled);
+    await interaction.update({
+      content:
+        "Notify you when your donated keys are claimed? " +
+        `Current setting: **${formatDonorNotifyStatus(enabled)}**.`,
+      components: [buildDonorSettingsRow(interaction.user.id, enabled)],
+    }).catch(() => {});
   }
 
   @ButtonComponent({ id: /^giveaway-claim-button:[^:]+:\d+$/ })

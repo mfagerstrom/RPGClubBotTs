@@ -1395,6 +1395,66 @@ export default class Member {
     }
   }
 
+  static async getGiveawayDonorNotifySetting(userId: string): Promise<boolean> {
+    const connection = await getOraclePool().getConnection();
+    try {
+      const result = await connection.execute<{ DONOR_NOTIFY_ON_CLAIM: number | null }>(
+        `SELECT DONOR_NOTIFY_ON_CLAIM
+           FROM RPG_CLUB_USERS
+          WHERE USER_ID = :userId`,
+        { userId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+      const row = result.rows?.[0];
+      return Boolean(row?.DONOR_NOTIFY_ON_CLAIM);
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async setGiveawayDonorNotifySetting(
+    userId: string,
+    enabled: boolean,
+  ): Promise<void> {
+    const connection = await getOraclePool().getConnection();
+    try {
+      const result = await connection.execute(
+        `UPDATE RPG_CLUB_USERS
+            SET DONOR_NOTIFY_ON_CLAIM = :enabled
+          WHERE USER_ID = :userId`,
+        { userId, enabled: enabled ? 1 : 0 },
+        { autoCommit: true },
+      );
+      if ((result.rowsAffected ?? 0) > 0) {
+        return;
+      }
+
+      try {
+        await connection.execute(
+          `INSERT INTO RPG_CLUB_USERS (USER_ID, DONOR_NOTIFY_ON_CLAIM)
+           VALUES (:userId, :enabled)`,
+          { userId, enabled: enabled ? 1 : 0 },
+          { autoCommit: true },
+        );
+      } catch (err: any) {
+        const code = err?.code ?? err?.errorNum;
+        if (code === "ORA-00001") {
+          await connection.execute(
+            `UPDATE RPG_CLUB_USERS
+                SET DONOR_NOTIFY_ON_CLAIM = :enabled
+              WHERE USER_ID = :userId`,
+            { userId, enabled: enabled ? 1 : 0 },
+            { autoCommit: true },
+          );
+        } else {
+          throw err;
+        }
+      }
+    } finally {
+      await connection.close();
+    }
+  }
+
   static async countAvatarHistory(userId: string): Promise<number> {
     const connection = await getOraclePool().getConnection();
     try {

@@ -166,11 +166,16 @@ function buildGiveawayHubComponents(hasKeys: boolean): ActionRowBuilder<ButtonBu
     .setCustomId("giveaway-hub-donate")
     .setLabel("Donate a Game")
     .setStyle(ButtonStyle.Success);
+  const donorSettingsButton = new ButtonBuilder()
+    .setCustomId("giveaway-hub-settings")
+    .setLabel("Donor Settings")
+    .setStyle(ButtonStyle.Secondary);
 
   rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       claimButton,
       donateButton,
+      donorSettingsButton,
     ),
   );
 

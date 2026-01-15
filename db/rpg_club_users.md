@@ -37,6 +37,7 @@ Oracle table for storing RPG Club Discord user snapshots and role flags.
 | STEAM_URL | VARCHAR2(512) | Yes | — | Link to Steam profile. |
 | PROFILE_IMAGE | BLOB | Yes | — | Cached rendered profile image. |
 | PROFILE_IMAGE_AT | TIMESTAMP(6) WITH TIME ZONE | Yes | — | When the cached profile image was rendered. |
+| DONOR_NOTIFY_ON_CLAIM | NUMBER(1,0) | No | 0 | 1 if the user wants donation claim notifications. |
 
 ## History / Audit
 
