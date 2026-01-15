@@ -15,6 +15,20 @@ type GiveawayHubPayload = {
 
 type EmbedField = { name: string; value: string };
 
+type GiveawayMessage = {
+  id: string;
+  createdTimestamp: number;
+  edit: (options: {
+    content?: string | null;
+    embeds?: EmbedBuilder[];
+    components?: ActionRowBuilder<ButtonBuilder>[];
+  }) => Promise<unknown>;
+  delete: () => Promise<unknown>;
+  author?: { id?: string };
+  components?: Array<{ components?: Array<{ customId?: string }> }>;
+  embeds?: Array<{ title?: string }>;
+};
+
 export function buildKeyListEmbed(
   keys: Awaited<ReturnType<typeof listAvailableGameKeys>>,
   page: number,
@@ -192,6 +206,76 @@ async function deleteAllGiveawayHubMessages(
   }
 }
 
+function isGiveawayHubMessage(client: Client, message: GiveawayMessage): boolean {
+  if (message.author?.id !== client.user?.id) {
+    return false;
+  }
+
+  const hasComponent = message.components?.some((row) =>
+    row.components?.some((component) =>
+      typeof component.customId === "string" &&
+      component.customId.startsWith("giveaway-hub"),
+    ),
+  );
+  if (hasComponent) {
+    return true;
+  }
+
+  return message.embeds?.some((embed) =>
+    typeof embed.title === "string" &&
+    embed.title.startsWith("Game Key Giveaway"),
+  ) ?? false;
+}
+
+async function updateGiveawayHubMessages(
+  client: Client,
+  channel: TextBasedChannel,
+  payload: GiveawayHubPayload,
+): Promise<void> {
+  if (!("send" in channel)) {
+    return;
+  }
+
+  const messages = await channel.messages
+    .fetch({ limit: GIVEAWAY_HUB_SCAN_LIMIT })
+    .catch(() => null);
+  const hubMessages = messages
+    ? Array.from(messages.values())
+      .filter((message) => isGiveawayHubMessage(client, message as GiveawayMessage))
+      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+    : [];
+
+  const embeds = payload.embeds ?? [];
+  const batches: EmbedBuilder[][] = [];
+  for (let i = 0; i < embeds.length; i += 10) {
+    batches.push(embeds.slice(i, i + 10));
+  }
+
+  const totalMessages = Math.max(1, batches.length);
+  for (let i = 0; i < totalMessages; i += 1) {
+    const batch = batches[i] ?? [];
+    const content = i === 0 ? payload.content ?? null : null;
+    const components = i === 0 ? payload.components ?? [] : [];
+    const existing = hubMessages[i];
+    if (existing) {
+      await existing.edit({ content, embeds: batch, components }).catch(() => {});
+    } else {
+      await channel.send({
+        content: content ?? undefined,
+        embeds: batch,
+        components,
+      }).catch(() => {});
+    }
+  }
+
+  if (hubMessages.length > totalMessages) {
+    const extras = hubMessages.slice(totalMessages);
+    for (const extra of extras) {
+      await extra.delete().catch(() => {});
+    }
+  }
+}
+
 export async function refreshGiveawayHubMessage(
   client: Client,
   page = 0,
@@ -210,33 +294,17 @@ export async function refreshGiveawayHubMessage(
   }
 
   const payload = await buildGiveawayHubPayload(page);
-  if (!("send" in textChannel)) {
-    return;
-  }
-
   const shouldRecreate = options?.forceRecreate ?? true;
   if (shouldRecreate) {
+    if (!("send" in textChannel)) {
+      return;
+    }
     await deleteAllGiveawayHubMessages(textChannel);
-  }
-
-  const embeds = payload.embeds ?? [];
-  if (!embeds.length) {
-    await textChannel.send({
-      content: payload.content,
-      embeds: [],
-      components: payload.components ?? [],
-    }).catch(() => {});
+    await updateGiveawayHubMessages(client, textChannel, payload);
     return;
   }
 
-  for (let i = 0; i < embeds.length; i += 10) {
-    const batch = embeds.slice(i, i + 10);
-    await textChannel.send({
-      content: i === 0 ? payload.content : undefined,
-      embeds: batch,
-      components: i === 0 ? payload.components ?? [] : [],
-    }).catch(() => {});
-  }
+  await updateGiveawayHubMessages(client, textChannel, payload);
 }
 
 export async function recreateGiveawayHubMessage(client: Client): Promise<void> {

@@ -17,3 +17,4 @@ Do not keep making this mistake: avoid leaving unused imports/variables after re
 Do not keep making this mistake: stop reminding the user about local WSL/compile limitations—assume they'll run npm commands themselves unless they ask.
 Aim for clean, centralized patterns (e.g., shared helpers/defaults) instead of duplicating magic numbers or flags across files.
 Do not keep making this mistake: use Discord flags for ephemerality instead of the deprecated `ephemeral` option when sending interaction responses.
+you are not allowed to use emdashes.
