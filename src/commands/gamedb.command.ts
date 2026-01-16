@@ -9,6 +9,10 @@ import {
   ButtonInteraction,
   ButtonStyle,
   ComponentType,
+  ModalBuilder,
+  ModalSubmitInteraction,
+  TextInputBuilder,
+  TextInputStyle,
   type ForumChannel,
   type Message,
   type ThreadChannel,
@@ -23,6 +27,7 @@ import {
 import {
   ButtonComponent,
   Discord,
+  ModalComponent,
   SelectMenuComponent,
   Slash,
   SlashGroup,
@@ -895,12 +900,6 @@ export class GameDb {
       return;
     }
 
-    try {
-      await interaction.deferUpdate();
-    } catch {
-      // ignore
-    }
-
     const game = await Game.getGameById(gameId);
     if (!game) {
       await interaction.followUp({
@@ -910,7 +909,31 @@ export class GameDb {
       return;
     }
 
-    if (action === "nowplaying" || action === "completion") {
+    if (action === "nowplaying") {
+      const modal = new ModalBuilder()
+        .setCustomId(`gamedb-nowplaying-modal:${gameId}`)
+        .setTitle("Add to Now Playing")
+        .addComponents(
+          new ActionRowBuilder<TextInputBuilder>().addComponents(
+            new TextInputBuilder()
+              .setCustomId("gamedb-nowplaying-note")
+              .setLabel("Note (optional)")
+              .setStyle(TextInputStyle.Paragraph)
+              .setRequired(false)
+              .setMaxLength(MAX_NOW_PLAYING_NOTE_LEN),
+          ),
+        );
+      await interaction.showModal(modal).catch(() => {});
+      return;
+    }
+
+    try {
+      await interaction.deferUpdate();
+    } catch {
+      // ignore
+    }
+
+    if (action === "completion") {
       const channel: any = interaction.channel;
       let thread: ThreadChannel | null = null;
       if ("isThread" in channel && typeof channel.isThread === "function" && channel.isThread()) {
@@ -925,9 +948,7 @@ export class GameDb {
           return;
         }
 
-        const threadName = action === "nowplaying"
-          ? `${game.title} - Now Playing`
-          : `${game.title} - Completion`;
+        const threadName = `${game.title} - Completion`;
         thread = await parentMessage.startThread({
           name: threadName.slice(0, 100),
           autoArchiveDuration: 60,
@@ -941,18 +962,11 @@ export class GameDb {
         }
       }
 
-      const baseEmbed = this.getWizardBaseEmbed(interaction, action === "nowplaying"
-        ? "Now Playing Wizard"
-        : "Completion Wizard");
+      const baseEmbed = this.getWizardBaseEmbed(interaction, "Completion Wizard");
       const wizardMessage = await thread.send({
         content: `<@${interaction.user.id}>`,
         embeds: [baseEmbed],
       });
-
-      if (action === "nowplaying") {
-        await this.runNowPlayingWizard(interaction, gameId, game.title, thread, wizardMessage);
-        return;
-      }
 
       await this.runCompletionWizard(interaction, gameId, game.title, thread, wizardMessage);
       return;
@@ -964,148 +978,47 @@ export class GameDb {
     }
   }
 
-  private async runNowPlayingWizard(
-    interaction: ButtonInteraction,
-    gameId: number,
-    gameTitle: string,
-    thread?: TextBasedChannel | ThreadChannel,
-    wizardMessage?: Message,
-  ): Promise<void> {
-    const baseEmbed = this.getWizardBaseEmbed(interaction, "Now Playing Wizard");
-    let logHistory = "";
-    let finalMessage: string | null = null;
-    const updateEmbed = async (log?: string) => {
-      if (log) {
-        logHistory += `${log}\n`;
-      }
-      if (logHistory.length > 3500) {
-        logHistory = "..." + logHistory.slice(logHistory.length - 3500);
-      }
-      const embed = this.buildWizardEmbed(baseEmbed, logHistory || "Processing...");
-      if (wizardMessage) {
-        await wizardMessage.edit({ embeds: [embed] }).catch(() => {});
-      } else {
-        await interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
-      }
-    };
-
-    const wizardPrompt = async (question: string): Promise<string | null> => {
-      await updateEmbed(`\n❓ **${question}**`);
-      const channel: any = thread ?? interaction.channel;
-      if (!channel || typeof channel.awaitMessages !== "function") {
-        await updateEmbed("❌ Cannot prompt for input in this channel.");
-        return null;
-      }
-      const collected = await channel.awaitMessages({
-        filter: (m: Message) => m.author.id === interaction.user.id,
-        max: 1,
-        time: 120_000,
-      }).catch(() => null);
-      const first = collected?.first();
-      if (!first) {
-        await updateEmbed("❌ Timed out.");
-        return null;
-      }
-      const content = first.content.trim();
-      await first.delete().catch(() => {});
-      await updateEmbed(`> *${content}*`);
-      if (/^cancel$/i.test(content)) {
-        await updateEmbed("❌ Cancelled by user.");
-        return null;
-      }
-      return content;
-    };
-
-    const wizardChoice = async (
-      question: string,
-      options: PromptChoiceOption[],
-    ): Promise<string | null> => {
-      await updateEmbed(`\n❓ **${question}**`);
-      const channel: any = thread ?? interaction.channel;
-      if (!channel || typeof channel.send !== "function") {
-        await updateEmbed("❌ Cannot prompt for input in this channel.");
-        return null;
-      }
-
-      const promptId = `gamedb-choice:${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-      const rows = buildChoiceRows(promptId, options);
-      const promptMessage: Message | null = await channel.send({
-        content: `<@${interaction.user.id}> ${question}`,
-        components: rows,
-        allowedMentions: { users: [interaction.user.id] },
-      }).catch(() => null);
-      if (!promptMessage) {
-        await updateEmbed("❌ Failed to send prompt.");
-        return null;
-      }
-
-      try {
-        const selection = await promptMessage.awaitMessageComponent({
-          componentType: ComponentType.Button,
-          filter: (i) =>
-            i.user.id === interaction.user.id && i.customId.startsWith(`${promptId}:`),
-          time: 120_000,
-        });
-        await selection.deferUpdate().catch(() => {});
-        const value = selection.customId.slice(promptId.length + 1);
-        const chosenLabel = options.find((opt) => opt.value === value)?.label ?? value;
-        await promptMessage.edit({ components: [] }).catch(() => {});
-        await updateEmbed(`> *${chosenLabel}*`);
-        if (value === "cancel") {
-          await updateEmbed("❌ Cancelled by user.");
-          return null;
-        }
-        return value;
-      } catch {
-        await promptMessage.edit({ components: [] }).catch(() => {});
-        await updateEmbed("❌ Timed out waiting for a selection.");
-        return null;
-      }
-    };
-
-    await updateEmbed(`✅ Starting for **${gameTitle}**`);
-
-    let note: string | null = null;
-    const noteChoice = await wizardChoice(
-      "Add a note?",
-      [
-        { label: "Enter Note", value: "enter", style: ButtonStyle.Primary },
-        { label: "Skip", value: "skip" },
-        { label: "Cancel", value: "cancel", style: ButtonStyle.Danger },
-      ],
-    );
-    if (noteChoice === null) return;
-    if (noteChoice === "enter") {
-      while (true) {
-        const response = await wizardPrompt("Enter a note for this Now Playing entry.");
-        if (response === null) return;
-        if (response.length > MAX_NOW_PLAYING_NOTE_LEN) {
-          await updateEmbed(`Note must be ${MAX_NOW_PLAYING_NOTE_LEN} characters or fewer.`);
-          continue;
-        }
-        note = response;
-        break;
-      }
+  @ModalComponent({ id: /^gamedb-nowplaying-modal:\d+$/ })
+  async handleGameDbNowPlayingModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const [, gameIdRaw] = interaction.customId.split(":");
+    const gameId = Number(gameIdRaw);
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+    if (!Number.isInteger(gameId) || gameId <= 0) {
+      await interaction.editReply({ content: "Invalid GameDB id." }).catch(() => {});
+      return;
     }
 
+    const game = await Game.getGameById(gameId);
+    if (!game) {
+      await interaction.editReply({ content: "That game was not found in GameDB." }).catch(() => {});
+      return;
+    }
+
+    const noteRaw = interaction.fields.getTextInputValue("gamedb-nowplaying-note").trim();
+    if (noteRaw.length > MAX_NOW_PLAYING_NOTE_LEN) {
+      await interaction.editReply({
+        content: `Note must be ${MAX_NOW_PLAYING_NOTE_LEN} characters or fewer.`,
+      }).catch(() => {});
+      return;
+    }
+
+    const note = noteRaw.length ? noteRaw : null;
     try {
       await Member.addNowPlaying(interaction.user.id, gameId, note);
-      await updateEmbed(`✅ Added **${gameTitle}** to your Now Playing list.`);
-      finalMessage = `✅ Added **${gameTitle}** to your Now Playing list.`;
+      await interaction.editReply({
+        content: `Added **${game.title}** to your Now Playing list.`,
+      }).catch(() => {});
     } catch (err: any) {
-      const msg = `❌ Failed to add: ${err?.message ?? String(err)}`;
-      await updateEmbed(msg);
-      finalMessage = msg;
-    } finally {
-      if (finalMessage) {
-        await interaction.followUp({
-          content: finalMessage,
-          flags: MessageFlags.Ephemeral,
+      if (isUniqueConstraintError(err)) {
+        await interaction.editReply({
+          content: `**${game.title}** is already in your Now Playing list.`,
         }).catch(() => {});
+        return;
       }
-      if (thread && "delete" in thread) {
-        await thread.delete().catch(() => {});
-      }
+      const msg = err?.message ?? "Failed to add to Now Playing.";
+      await interaction.editReply({
+        content: `Failed to add: ${msg}`,
+      }).catch(() => {});
     }
   }
 

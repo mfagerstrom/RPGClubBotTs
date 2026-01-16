@@ -55,6 +55,7 @@ type CompletionAddContext = {
   completionType: CompletionType;
   completedAt: Date | null;
   finalPlaytimeHours: number | null;
+  note?: string | null;
   source: "existing" | "igdb";
   query?: string;
   announce?: boolean;
@@ -340,6 +341,7 @@ export class SuperAdmin {
     });
   }
 
+
   @SelectMenuComponent({ id: /^sa-comp-add-select:.+/ })
   async handleSuperAdminCompletionSelect(interaction: StringSelectMenuInteraction): Promise<void> {
     const [, sessionId] = interaction.customId.split(":");
@@ -385,7 +387,7 @@ export class SuperAdmin {
   }
 
   private async promptCompletionSelection(
-    interaction: CommandInteraction,
+    interaction: AnyRepliable,
     searchTerm: string,
     ctx: CompletionAddContext,
   ): Promise<void> {
@@ -423,24 +425,29 @@ export class SuperAdmin {
   }
 
   private async promptIgdbSelection(
-    interaction: CommandInteraction | StringSelectMenuInteraction,
+    interaction: AnyRepliable,
     searchTerm: string,
     ctx: CompletionAddContext,
   ): Promise<void> {
-    if (interaction.isMessageComponent()) {
+    if ("isMessageComponent" in interaction && interaction.isMessageComponent()) {
       const loading = { content: `Searching IGDB for "${searchTerm}"...`, components: [] };
       if (interaction.deferred || interaction.replied) {
-        await interaction.editReply(loading);
+        await interaction.editReply(loading).catch(() => {});
       } else {
-        await interaction.update(loading);
+        await interaction.update(loading).catch(() => {});
       }
+    } else {
+      await safeReply(interaction, {
+        content: `Searching IGDB for "${searchTerm}"...`,
+        flags: MessageFlags.Ephemeral,
+      });
     }
 
     const igdbSearch = await igdbService.searchGames(searchTerm);
     if (!igdbSearch.results.length) {
       const content = `No GameDB or IGDB matches found for "${searchTerm}".`;
-      if (interaction.isMessageComponent()) {
-        await interaction.editReply({ content, components: [] });
+      if ("isMessageComponent" in interaction && interaction.isMessageComponent()) {
+        await interaction.editReply({ content, components: [] }).catch(() => {});
       } else {
         await safeReply(interaction, {
           content,
@@ -474,23 +481,20 @@ export class SuperAdmin {
         }).catch(() => {});
 
         const imported = await this.importGameFromIgdbForCompletion(gameId);
-        await saveCompletion(
-          sel,
-          ctx.targetUserId,
-          imported.gameId,
-          ctx.completionType,
-          ctx.completedAt,
-          ctx.finalPlaytimeHours,
-          null,
-          imported.title,
-          ctx.announce,
-          true,
-        );
+        const game = await Game.getGameById(imported.gameId);
+        if (!game) {
+          await sel.followUp({
+            content: "Imported game was not found in GameDB.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+        await this.saveCompletionForContext(sel, ctx, game);
       },
     );
 
     const content = `No GameDB match; select an IGDB result to import for "${searchTerm}".`;
-    if (interaction.isMessageComponent()) {
+    if ("isMessageComponent" in interaction && interaction.isMessageComponent()) {
       await interaction.editReply({
         content: "Found results on IGDB. See message below.",
         components: [],
@@ -540,18 +544,7 @@ export class SuperAdmin {
         return false;
       }
 
-      await saveCompletion(
-        interaction,
-        ctx.targetUserId,
-        game.id,
-        ctx.completionType,
-        ctx.completedAt,
-        ctx.finalPlaytimeHours,
-        null,
-        game.title,
-        ctx.announce,
-        true,
-      );
+      await this.saveCompletionForContext(interaction, ctx, game);
       return true;
     } catch (err: any) {
       const msg = err?.message ?? String(err);
@@ -597,6 +590,26 @@ export class SuperAdmin {
     await Game.saveFullGameMetadata(newGame.id, details);
     return { gameId: newGame.id, title: details.name };
   }
+
+  private async saveCompletionForContext(
+    interaction: StringSelectMenuInteraction,
+    ctx: CompletionAddContext,
+    game: IGame,
+  ): Promise<void> {
+    await saveCompletion(
+      interaction,
+      ctx.targetUserId,
+      game.id,
+      ctx.completionType,
+      ctx.completedAt,
+      ctx.finalPlaytimeHours,
+      ctx.note ?? null,
+      game.title,
+      ctx.announce,
+      true,
+    );
+  }
+
 
   @ButtonComponent({ id: /^superadmin-presence-restore-\d+$/ })
   async handleSuperAdminPresenceRestore(interaction: ButtonInteraction): Promise<void> {

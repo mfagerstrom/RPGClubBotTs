@@ -1778,8 +1778,25 @@ export class NowPlayingCommand {
     target: User,
     ephemeral: boolean,
   ): Promise<void> {
+    const isOwnList = target.id === interaction.user.id;
     const entries = await Member.getNowPlaying(target.id);
     if (!entries.length) {
+      if (isOwnList && ephemeral) {
+        const container = this.buildNowPlayingMessageContainer(
+          "Your Now Playing List",
+          [
+            "Welcome. Your list is empty, so nothing shows yet.",
+            "Click Add Game to put your first game on the list.",
+          ].join("\n"),
+        );
+        const actions = this.buildNowPlayingActionRow(target.id, 0);
+        await safeReply(interaction, {
+          components: [container, actions],
+          flags: buildComponentsV2Flags(ephemeral),
+        });
+        return;
+      }
+
       const container = this.buildNowPlayingMessageContainer(
         "Now Playing",
         `No Now Playing entries found for <@${target.id}>.`,
@@ -1792,7 +1809,6 @@ export class NowPlayingCommand {
     }
 
     const sortedEntries = getDisplayNowPlayingEntries(entries);
-    const isOwnList = target.id === interaction.user.id;
     const title = isOwnList && ephemeral
       ? "Your Now Playing List"
       : `${target.displayName ?? target.username ?? "User"}'s Now Playing List`;
