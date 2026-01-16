@@ -1785,8 +1785,8 @@ export class NowPlayingCommand {
     await this.promptRemoveNowPlaying(interaction, "update");
   }
 
-  private async showSingle(
-    interaction: CommandInteraction,
+  async showSingle(
+    interaction: AnyRepliable,
     target: User,
     ephemeral: boolean,
   ): Promise<void> {

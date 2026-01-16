@@ -49,6 +49,7 @@ import {
   type IgdbSelectOption,
 } from "../services/IgdbSelectService.js";
 import Member from "../classes/Member.js";
+import { NowPlayingCommand } from "./now-playing.command.js";
 import {
   COMPLETION_TYPES,
   type CompletionType,
@@ -1022,9 +1023,8 @@ export class GameDb {
     const note = noteRaw.length ? noteRaw : null;
     try {
       await Member.addNowPlaying(interaction.user.id, gameId, note);
-      await interaction.editReply({
-        content: `Added **${game.title}** to your Now Playing list.`,
-      }).catch(() => {});
+      const nowPlaying = new NowPlayingCommand();
+      await nowPlaying.showSingle(interaction, interaction.user, true);
     } catch (err: any) {
       if (isUniqueConstraintError(err)) {
         await interaction.editReply({
