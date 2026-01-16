@@ -74,7 +74,8 @@ type SuperAdminHelpTopicId =
   | "gamedb-backfill"
   | "thread-game-link-backfill"
   | "presence"
-  | "completion-add-other";
+  | "completion-add-other"
+  | "say";
 
 type SuperAdminHelpTopic = {
   id: SuperAdminHelpTopicId;
@@ -132,6 +133,15 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
     summary: "Set the bot's 'Now Playing' text (owner override).",
     syntax: "Syntax: /superadmin presence [text:<string>]",
     notes: "Leave text empty to browse/restore history.",
+  },
+  {
+    id: "say",
+    label: "/superadmin say",
+    summary: "Have the bot send a message or reply to a message.",
+    syntax:
+      "Syntax: /superadmin say message:<string> [message_id:<string>] [channel_id:<string>]",
+    notes:
+      "If message_id is provided, the bot replies in that channel. If not, channel_id is required.",
   },
 ];
 
@@ -517,6 +527,105 @@ export class SuperAdmin {
         flags: MessageFlags.Ephemeral,
       });
     }
+  }
+
+  @Slash({ description: "Have the bot send a message", name: "say" })
+  async say(
+    @SlashOption({
+      description: "What should the bot say?",
+      name: "message",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    message: string,
+    @SlashOption({
+      description: "Message ID to reply to (optional)",
+      name: "message_id",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    messageId: string | undefined,
+    @SlashOption({
+      description: "Channel ID to post in (required if no message_id)",
+      name: "channel_id",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    channelId: string | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const okToUseCommand: boolean = await isSuperAdmin(interaction);
+    if (!okToUseCommand) return;
+
+    const sanitizedMessage = sanitizeUserInput(message, { preserveNewlines: true });
+    if (!sanitizedMessage) {
+      await safeReply(interaction, {
+        content: "Message cannot be empty.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const replyTargetId = messageId?.trim() ?? "";
+    const targetChannelId = channelId?.trim() ?? "";
+
+    let targetChannel: any = null;
+    if (replyTargetId) {
+      if (targetChannelId) {
+        targetChannel = await interaction.client.channels.fetch(targetChannelId).catch(() => null);
+      } else {
+        targetChannel = interaction.channel;
+      }
+      if (!targetChannel || !("messages" in targetChannel)) {
+        await safeReply(interaction, {
+          content: "Channel not found for that message id.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      const targetMessage = await (targetChannel as any).messages
+        .fetch(replyTargetId)
+        .catch(() => null);
+      if (!targetMessage) {
+        await safeReply(interaction, {
+          content: "Message not found in that channel.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      await targetMessage.reply({ content: sanitizedMessage }).catch(() => {});
+      await safeReply(interaction, {
+        content: "Reply sent.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (!targetChannelId) {
+      await safeReply(interaction, {
+        content: "Channel ID is required when no message id is provided.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    targetChannel = await interaction.client.channels.fetch(targetChannelId).catch(() => null);
+    if (!targetChannel || !("send" in targetChannel)) {
+      await safeReply(interaction, {
+        content: "Channel not found or not a text channel.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await (targetChannel as any).send({ content: sanitizedMessage }).catch(() => {});
+    await safeReply(interaction, {
+      content: "Message sent.",
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   private async processCompletionSelection(
