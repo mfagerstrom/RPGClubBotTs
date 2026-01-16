@@ -1,4 +1,6 @@
+2026-01-16 - Commit ID: f1c00f1 - feat: added # of games per year to completion announcement
 2026-01-15 - Commit ID: da2d30a - fix: giveaway keys are dm'd to users
+2026-01-15 - Commit ID: b8633d7 - feat: complete overhaul of the /now-playing set of commands/functionality
 2026-01-14 - Commit ID: 7e62933 - C:/Program Files/Git/now-playing list layout changes
 2026-01-14 - Commit ID: 88393f4 - C:/Program Files/Git/now-playing list layout changes
 2026-01-14 - Commit ID: 84faf13 - fix: improved layout of /now-playing list

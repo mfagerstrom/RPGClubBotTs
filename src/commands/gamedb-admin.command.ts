@@ -19,7 +19,7 @@ import {
   SlashGroup,
   SlashOption,
 } from "discordx";
-import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
+import { safeDeferReply, safeReply, safeUpdate, sanitizeUserInput } from "../functions/InteractionUtils.js";
 import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import { isAdmin } from "./admin.command.js";
 import Game, { IGame } from "../classes/Game.js";
@@ -163,6 +163,7 @@ export class GameDbAdmin {
 
     if (!(await isAdmin(interaction))) return;
 
+    gameIdsRaw = sanitizeUserInput(gameIdsRaw, { preserveNewlines: false });
     const gameIds = parseGameIdList(gameIdsRaw);
     if (gameIds.length < 2) {
       await safeReply(interaction, {

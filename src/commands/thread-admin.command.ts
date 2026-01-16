@@ -6,7 +6,7 @@ import {
 } from "discord.js";
 import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { removeThreadGameLink, setThreadGameLink } from "../classes/Thread.js";
-import { safeReply } from "../functions/InteractionUtils.js";
+import { safeReply, sanitizeUserInput } from "../functions/InteractionUtils.js";
 
 @Discord()
 @SlashGroup({ description: "Thread admin commands", name: "thread" })
@@ -30,6 +30,7 @@ export class ThreadAdminCommands {
     gamedbGameId: number,
     interaction: CommandInteraction,
   ): Promise<void> {
+    threadId = sanitizeUserInput(threadId, { preserveNewlines: false });
     if (!this.hasManageThreads(interaction)) {
       await safeReply(interaction, {
         content: "You need Manage Threads permission to use this.",
@@ -61,6 +62,7 @@ export class ThreadAdminCommands {
     gamedbGameId: number | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
+    threadId = sanitizeUserInput(threadId, { preserveNewlines: false });
     if (!this.hasManageThreads(interaction)) {
       await safeReply(interaction, {
         content: "You need Manage Threads permission to use this.",

@@ -4,7 +4,7 @@ import { Discord, Slash, SlashChoice, SlashGroup, SlashOption } from "discordx";
 import { AUDIT_NO_VALUE_SENTINEL } from "./superadmin.command.js";
 // Use relative import with .js for ts-node ESM compatibility
 import NrGotm, { INrGotmEntry } from "../classes/NrGotm.js";
-import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { safeDeferReply, safeReply, sanitizeUserInput } from "../functions/InteractionUtils.js";
 import {
   areNominationsClosed,
   getUpcomingNominationWindow,
@@ -125,6 +125,8 @@ export class NrGotmSearch {
     showInChat: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
+    month = month ? sanitizeUserInput(month, { preserveNewlines: false }) : undefined;
+    title = title ? sanitizeUserInput(title, { preserveNewlines: false }) : undefined;
     const ephemeral = !showInChat;
     await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
@@ -270,7 +272,7 @@ export class NrGotmSearch {
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
-    const cleanedTitle = title?.trim();
+    const cleanedTitle = sanitizeUserInput(title, { preserveNewlines: false });
     if (!cleanedTitle) {
       await safeReply(interaction, {
         content: "Please provide a non-empty game title to nominate.",
@@ -279,7 +281,9 @@ export class NrGotmSearch {
       return;
     }
 
-    const trimmedReason = typeof reason === "string" ? reason.trim() : "";
+    const trimmedReason = typeof reason === "string"
+      ? sanitizeUserInput(reason, { preserveNewlines: true, maxLength: 250 })
+      : "";
     if (trimmedReason.length > 250) {
       await safeReply(interaction, {
         content: "Reason must be 250 characters or fewer.",

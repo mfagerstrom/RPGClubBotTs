@@ -10,7 +10,13 @@ import {
 import type { CommandInteraction } from "discord.js";
 import { Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption } from "discordx";
 import { getPresenceHistory, setPresence } from "../functions/SetPresence.js";
-import { AnyRepliable, safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
+import {
+  AnyRepliable,
+  safeDeferReply,
+  safeReply,
+  safeUpdate,
+  sanitizeUserInput,
+} from "../functions/InteractionUtils.js";
 
 type ModHelpTopicId = "presence" | "presence-history";
 
@@ -91,6 +97,7 @@ export class Mod {
     const okToUseCommand: boolean = await isModerator(interaction);
 
     if (okToUseCommand) {
+      text = sanitizeUserInput(text, { preserveNewlines: false });
       await setPresence(
         interaction,
         text,

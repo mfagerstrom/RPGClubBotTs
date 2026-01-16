@@ -1,7 +1,7 @@
 import type { CommandInteraction } from "discord.js";
 import { ApplicationCommandOptionType, MessageFlags, type Channel } from "discord.js";
 import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
-import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { safeDeferReply, safeReply, sanitizeUserInput } from "../functions/InteractionUtils.js";
 import { isAdmin } from "./admin.command.js";
 import { addFeed, listFeeds, removeFeed, updateFeed } from "../classes/RssFeed.js";
 import { buildRssHelpResponse } from "./help.command.js";
@@ -74,12 +74,26 @@ export class RssCommand {
     if (!ok) return;
 
     try {
-      const includeKeywords = normalizeList(include);
-      const excludeKeywords = normalizeList(exclude);
+      url = sanitizeUserInput(url, { preserveNewlines: false });
+      const sanitizedName = feedName
+        ? sanitizeUserInput(feedName, { preserveNewlines: false })
+        : undefined;
+      const includeKeywords = normalizeList(
+        include ? sanitizeUserInput(include, { preserveNewlines: false }) : undefined,
+      );
+      const excludeKeywords = normalizeList(
+        exclude ? sanitizeUserInput(exclude, { preserveNewlines: false }) : undefined,
+      );
       const channelId = channel.id;
-      const id = await addFeed(feedName ?? null, url, channelId, includeKeywords, excludeKeywords);
+      const id = await addFeed(
+        sanitizedName ?? null,
+        url,
+        channelId,
+        includeKeywords,
+        excludeKeywords,
+      );
       await safeReply(interaction, {
-        content: `Added feed #${id} (${feedName ?? "unnamed"}) -> <#${channelId}> (url=${url}).`,
+        content: `Added feed #${id} (${sanitizedName ?? "unnamed"}) -> <#${channelId}> (url=${url}).`,
         flags: MessageFlags.Ephemeral,
       });
     } catch (err: any) {
@@ -188,15 +202,23 @@ export class RssCommand {
     }
 
     try {
-      const includeKeywords = include === undefined ? undefined : normalizeList(include);
-      const excludeKeywords = exclude === undefined ? undefined : normalizeList(exclude);
+      const sanitizedUrl = url ? sanitizeUserInput(url, { preserveNewlines: false }) : undefined;
+      const sanitizedName = feedName
+        ? sanitizeUserInput(feedName, { preserveNewlines: false })
+        : undefined;
+      const includeKeywords = include === undefined
+        ? undefined
+        : normalizeList(sanitizeUserInput(include, { preserveNewlines: false }));
+      const excludeKeywords = exclude === undefined
+        ? undefined
+        : normalizeList(sanitizeUserInput(exclude, { preserveNewlines: false }));
       const channelId = channel ? channel.id : undefined;
       const updated = await updateFeed(feedId, {
-        feedUrl: url,
+        feedUrl: sanitizedUrl,
         channelId: channelId,
         includeKeywords,
         excludeKeywords,
-        feedName: feedName ?? undefined,
+        feedName: sanitizedName ?? undefined,
       });
 
       await safeReply(interaction, {

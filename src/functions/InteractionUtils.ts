@@ -7,6 +7,100 @@ import type {
 
 export type AnyRepliable = RepliableInteraction | CommandInteraction;
 
+type SanitizeOptions = {
+  maxLength?: number;
+  preserveNewlines?: boolean;
+  allowPattern?: RegExp;
+  blockSql?: boolean;
+  blockSqlKeywords?: boolean;
+};
+
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHAR_REGEX = new RegExp("[\\u0000-\\u0008\\u000B\\u000C\\u000D\\u000E-\\u001F\\u007F-\\u009F]", "g");
+
+export function sanitizeUserInput(value: string, options?: SanitizeOptions): string {
+  const opts = {
+    maxLength: options?.maxLength,
+    preserveNewlines: options?.preserveNewlines ?? true,
+    allowPattern: options?.allowPattern,
+    blockSql: options?.blockSql ?? true,
+    blockSqlKeywords: options?.blockSqlKeywords ?? false,
+  };
+
+  let sanitized = value ?? "";
+  try {
+    sanitized = sanitized.normalize("NFKC");
+  } catch {
+    // ignore normalization errors
+  }
+
+  sanitized = sanitized.replace(/\r\n/g, "\n");
+  sanitized = sanitized.replace(CONTROL_CHAR_REGEX, "");
+  sanitized = sanitized.replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, "");
+  sanitized = sanitized.replace(/<\s*script[^>]*>[\s\S]*?<\s*\/\s*script\s*>/gi, "");
+  sanitized = sanitized.replace(/<[^>]+>/g, "");
+  sanitized = sanitized.replace(/```[\s\S]*?```/g, "");
+  sanitized = sanitized.replace(/`[^`]*`/g, "");
+  sanitized = sanitized.replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1");
+  sanitized = sanitized.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  sanitized = sanitized.replace(/(^|\n)\s{0,3}#+\s?/g, "$1");
+  sanitized = sanitized.replace(/(^|\n)\s*>\s?/g, "$1");
+  sanitized = sanitized.replace(/(^|\n)\s*[-*+]\s+/g, "$1");
+  sanitized = sanitized.replace(/[*_~]/g, "");
+  sanitized = sanitized.replace(/<@!?(\d+)>/g, "");
+  sanitized = sanitized.replace(/<@&(\d+)>/g, "");
+  sanitized = sanitized.replace(/<#(\d+)>/g, "");
+  sanitized = sanitized.replace(/@(everyone|here)/gi, "");
+
+  if (opts.blockSql) {
+    sanitized = sanitized.replace(/--/g, "");
+    sanitized = sanitized.replace(/\/\*/g, "");
+    sanitized = sanitized.replace(/\*\//g, "");
+    sanitized = sanitized.replace(/;/g, "");
+  }
+  if (opts.blockSqlKeywords) {
+    sanitized = sanitized.replace(
+      /\b(select|insert|update|delete|drop|alter|create|truncate|exec|union|merge)\b/gi,
+      "",
+    );
+  }
+
+  if (opts.allowPattern) {
+    const pattern = new RegExp(opts.allowPattern.source, opts.allowPattern.flags.replace("g", ""));
+    sanitized = sanitized.split("").filter((ch) => pattern.test(ch)).join("");
+  }
+
+  if (opts.preserveNewlines) {
+    sanitized = sanitized
+      .split("\n")
+      .map((line) => line.trim().replace(/[ \t]+/g, " "))
+      .join("\n");
+    sanitized = sanitized.replace(/\n{3,}/g, "\n\n");
+  } else {
+    sanitized = sanitized.replace(/\s+/g, " ");
+  }
+
+  sanitized = sanitized.trim();
+  if (opts.maxLength && sanitized.length > opts.maxLength) {
+    sanitized = sanitized.slice(0, opts.maxLength);
+  }
+
+  return sanitized.trim();
+}
+
+export function sanitizeOptionalInput(
+  value: string | null | undefined,
+  options?: SanitizeOptions,
+): string | undefined {
+  if (value == null) return undefined;
+  const sanitized = sanitizeUserInput(value, options);
+  return sanitized.length ? sanitized : undefined;
+}
+
+export function stripModalInput(value: string): string {
+  return sanitizeUserInput(value);
+}
+
 function normalizeOptions(options: any): any {
   if (typeof options === "string" || options === null || options === undefined) {
     return options;

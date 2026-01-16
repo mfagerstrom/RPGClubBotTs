@@ -7,7 +7,7 @@ import {
 import { DateTime } from "luxon";
 import { ButtonComponent, Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import Reminder, { type IReminderRecord } from "../classes/Reminder.js";
-import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { safeDeferReply, safeReply, sanitizeUserInput } from "../functions/InteractionUtils.js";
 import {
   buildReminderButtons,
   formatReminderTime,
@@ -43,6 +43,8 @@ export class RemindMeCommand {
     noisy: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
+    when = sanitizeUserInput(when, { preserveNewlines: false });
+    note = note ? sanitizeUserInput(note, { preserveNewlines: true }) : undefined;
     const ephemeral = true;
     await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
@@ -123,6 +125,7 @@ export class RemindMeCommand {
     until: string,
     interaction: CommandInteraction,
   ): Promise<void> {
+    until = sanitizeUserInput(until, { preserveNewlines: false });
     const ephemeral = true;
     await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 

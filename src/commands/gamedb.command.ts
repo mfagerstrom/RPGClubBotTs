@@ -33,7 +33,12 @@ import {
   SlashGroup,
   SlashOption,
 } from "discordx";
-import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import {
+  safeDeferReply,
+  safeReply,
+  sanitizeUserInput,
+  stripModalInput,
+} from "../functions/InteractionUtils.js";
 import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import Game, { type IGameAssociationSummary } from "../classes/Game.js";
 import { getThreadsByGameId, setThreadGameLink, upsertThreadRecord } from "../classes/Thread.js";
@@ -140,9 +145,16 @@ export class GameDb {
       return;
     }
 
-    const parsedBulk =
-      bulkTitles?.split(",").map((t) => t.trim()).filter(Boolean) ?? [];
-    const singleTitle = title?.trim() ?? "";
+    const sanitizedTitle = title
+      ? sanitizeUserInput(title, { preserveNewlines: false })
+      : "";
+    const sanitizedBulk = bulkTitles
+      ? sanitizeUserInput(bulkTitles, { preserveNewlines: false })
+      : "";
+    const parsedBulk = sanitizedBulk
+      ? sanitizedBulk.split(",").map((t) => t.trim()).filter(Boolean)
+      : [];
+    const singleTitle = sanitizedTitle.trim();
     const allTitles =
       (singleTitle ? [singleTitle] : []).concat(parsedBulk).filter(Boolean);
 
@@ -260,6 +272,7 @@ export class GameDb {
     await safeDeferReply(interaction);
 
     try {
+      title = sanitizeUserInput(title, { preserveNewlines: false });
       const searchRes = await igdbService.searchGames(title, 50, true);
       const results = searchRes.results;
       if (!results?.length) {
@@ -547,7 +560,9 @@ export class GameDb {
       return;
     }
 
-    const searchTerm = (query ?? "").trim();
+    const searchTerm = query
+      ? sanitizeUserInput(query, { preserveNewlines: false })
+      : "";
     if (!searchTerm) {
       await this.runSearchFlow(interaction, "");
       return;
@@ -994,7 +1009,9 @@ export class GameDb {
       return;
     }
 
-    const noteRaw = interaction.fields.getTextInputValue("gamedb-nowplaying-note").trim();
+    const noteRaw = stripModalInput(
+      interaction.fields.getTextInputValue("gamedb-nowplaying-note"),
+    );
     if (noteRaw.length > MAX_NOW_PLAYING_NOTE_LEN) {
       await interaction.editReply({
         content: `Note must be ${MAX_NOW_PLAYING_NOTE_LEN} characters or fewer.`,
@@ -1491,7 +1508,9 @@ export class GameDb {
     await safeDeferReply(interaction);
 
     try {
-      const searchTerm = (query ?? "").trim();
+      const searchTerm = query
+        ? sanitizeUserInput(query, { preserveNewlines: false })
+        : "";
       await this.runSearchFlow(interaction, searchTerm, query);
     } catch (error: any) {
       await safeReply(interaction, {

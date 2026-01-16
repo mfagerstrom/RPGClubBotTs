@@ -1,6 +1,6 @@
 You may only edit files in the current working directory.
 You may only use non-destructive git commands.
-After every changeset you make, run npm run lint and npm run compile with a 30 second timeout (only when you stop working on a command).
+After every changeset you make, run npm run lint and npm run compile and npm run test with a 30 second timeout (only when you stop working on a command).
 Every time a new session is started, update COMMIT-HISTORY.md using git history.
 never edit existing .sql files.  They have already been run.  Just add new files with changes.
 name sql files starting with today's date with datestamp (ie 20251210_sql_script_name) YYYYMMDD_name_format

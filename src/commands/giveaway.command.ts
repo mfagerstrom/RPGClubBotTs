@@ -25,6 +25,7 @@ import {
   safeDeferReply,
   safeReply,
   safeUpdate,
+  stripModalInput,
 } from "../functions/InteractionUtils.js";
 import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import {
@@ -565,6 +566,9 @@ export class GiveawayCommand {
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+    title = sanitizeUserInput(title, { preserveNewlines: false });
+    platform = sanitizeUserInput(platform, { preserveNewlines: false });
+    keyValue = sanitizeUserInput(keyValue, { preserveNewlines: false });
     const created = await handleDonation(interaction, title, platform, keyValue);
     if (created) {
       await recreateGiveawayHubMessage(interaction.client).catch(() => {});
@@ -1018,9 +1022,11 @@ export class GiveawayCommand {
   @ModalComponent({ id: GIVEAWAY_DONATE_MODAL_ID })
   async handleDonateModal(interaction: ModalSubmitInteraction): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-    const title = interaction.fields.getTextInputValue(GIVEAWAY_DONATE_TITLE_ID);
-    const platform = interaction.fields.getTextInputValue(GIVEAWAY_DONATE_PLATFORM_ID);
-    const keyValue = interaction.fields.getTextInputValue(GIVEAWAY_DONATE_KEY_ID);
+    const title = stripModalInput(interaction.fields.getTextInputValue(GIVEAWAY_DONATE_TITLE_ID));
+    const platform = stripModalInput(
+      interaction.fields.getTextInputValue(GIVEAWAY_DONATE_PLATFORM_ID),
+    );
+    const keyValue = stripModalInput(interaction.fields.getTextInputValue(GIVEAWAY_DONATE_KEY_ID));
 
     const created = await handleDonation(interaction, title, platform, keyValue);
     if (created) {
@@ -1031,7 +1037,9 @@ export class GiveawayCommand {
   @ModalComponent({ id: GIVEAWAY_REVOKE_MODAL_ID })
   async handleRevokeModal(interaction: ModalSubmitInteraction): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-    const keyIdInput = interaction.fields.getTextInputValue(GIVEAWAY_REVOKE_KEY_ID);
+    const keyIdInput = stripModalInput(
+      interaction.fields.getTextInputValue(GIVEAWAY_REVOKE_KEY_ID),
+    );
     const keyId = Number(keyIdInput);
     if (Number.isNaN(keyId)) {
       await safeReply(interaction, {

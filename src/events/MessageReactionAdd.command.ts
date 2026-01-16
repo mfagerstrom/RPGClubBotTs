@@ -21,6 +21,7 @@ import Member from "../classes/Member.js";
 import { COMPLETION_TYPES, type CompletionType } from "../commands/profile.command.js";
 import { createIgdbSession, type IgdbSelectOption } from "../services/IgdbSelectService.js";
 import { igdbService, type IGDBGameDetails } from "../services/IgdbService.js";
+import { stripModalInput } from "../functions/InteractionUtils.js";
 
 const PUSH_PIN_EMOJI = "📌";
 const PLUS_EMOJI = "➕";
@@ -383,9 +384,9 @@ export class MessageReactionAdd {
       return;
     }
 
-    const newTitle = interaction.fields
-      .getTextInputValue("completion-react-title-input")
-      .trim();
+    const newTitle = stripModalInput(
+      interaction.fields.getTextInputValue("completion-react-title-input"),
+    );
     if (!newTitle) {
       await interaction.reply({
         content: "Game title is required.",

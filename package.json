@@ -16,7 +16,8 @@
     "start:prod": "pm2 start build/RPGClubBotTS.js",
     "watch": "nodemon --exec npm run dev --watch src --ext ts",
     "compile": "npx tsc --noEmit",
-    "lint": "npx eslint"
+    "lint": "npx eslint",
+    "test": "node --no-warnings=ExperimentalWarning --loader ts-node/esm --test src/tests/**/*.test.ts"
   },
   "dependencies": {
     "@discordx/importer": "^1.3.1",

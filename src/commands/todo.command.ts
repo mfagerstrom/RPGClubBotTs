@@ -19,7 +19,12 @@ import {
   SlashGroup,
   SlashOption,
 } from "discordx";
-import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
+import {
+  safeDeferReply,
+  safeReply,
+  safeUpdate,
+  sanitizeUserInput,
+} from "../functions/InteractionUtils.js";
 import { isSuperAdmin } from "./superadmin.command.js";
 import {
   completeTodo,
@@ -602,7 +607,9 @@ export class TodoCommand {
     const filteredTodosBySize = size
       ? todos.filter((item) => item.todoSize === size)
       : todos;
-    const trimmedQuery = normalizeTodoQuery(query);
+    const trimmedQuery = normalizeTodoQuery(
+      query ? sanitizeUserInput(query, { preserveNewlines: false }) : "",
+    );
     const filteredTodos = filterTodosByQuery(filteredTodosBySize, trimmedQuery);
     const response = buildTodoListEmbed(
       filteredTodos,
@@ -840,7 +847,7 @@ export class TodoCommand {
     const ok = await isSuperAdmin(interaction);
     if (!ok) return;
 
-    const trimmedTitle = title.trim();
+    const trimmedTitle = sanitizeUserInput(title, { preserveNewlines: false });
     if (!trimmedTitle) {
       await safeReply(interaction, {
         content: "Title cannot be empty.",
@@ -857,7 +864,9 @@ export class TodoCommand {
       return;
     }
 
-    const trimmedDetails = details?.trim();
+    const trimmedDetails = details
+      ? sanitizeUserInput(details, { preserveNewlines: true })
+      : undefined;
     const finalSize = size;
     const todo = await createTodo(
       trimmedTitle,
@@ -935,7 +944,9 @@ export class TodoCommand {
       return;
     }
 
-    const trimmedTitle = title?.trim();
+    const trimmedTitle = title === undefined
+      ? undefined
+      : sanitizeUserInput(title, { preserveNewlines: false });
     if (title !== undefined && !trimmedTitle) {
       await safeReply(interaction, {
         content: "Title cannot be empty when provided.",
@@ -952,7 +963,9 @@ export class TodoCommand {
       return;
     }
 
-    const trimmedDetails = details === undefined ? undefined : details.trim();
+    const trimmedDetails = details === undefined
+      ? undefined
+      : sanitizeUserInput(details, { preserveNewlines: true });
     const finalDetails = trimmedDetails === "" ? null : trimmedDetails;
     const updated = await updateTodo(todoId, trimmedTitle, finalDetails, category, size);
     const updatedTodo = updated ? await fetchTodoById(todoId) : null;

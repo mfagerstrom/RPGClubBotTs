@@ -22,7 +22,7 @@ import Member, {
   type IMemberRecord,
   type IMemberSearchFilters,
 } from "../classes/Member.js";
-import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { safeDeferReply, safeReply, sanitizeUserInput } from "../functions/InteractionUtils.js";
 
 
 export const COMPLETION_TYPES = [
@@ -651,6 +651,27 @@ export class ProfileCommand {
     const ephemeral = !showInChat;
     await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
+    userId = userId ? sanitizeUserInput(userId, { preserveNewlines: false }) : undefined;
+    username = username ? sanitizeUserInput(username, { preserveNewlines: false }) : undefined;
+    globalName = globalName ? sanitizeUserInput(globalName, { preserveNewlines: false }) : undefined;
+    completionator = completionator
+      ? sanitizeUserInput(completionator, { preserveNewlines: false })
+      : undefined;
+    steam = steam ? sanitizeUserInput(steam, { preserveNewlines: false }) : undefined;
+    psn = psn ? sanitizeUserInput(psn, { preserveNewlines: false }) : undefined;
+    xbl = xbl ? sanitizeUserInput(xbl, { preserveNewlines: false }) : undefined;
+    nsw = nsw ? sanitizeUserInput(nsw, { preserveNewlines: false }) : undefined;
+    joinedAfter = joinedAfter ? sanitizeUserInput(joinedAfter, { preserveNewlines: false }) : undefined;
+    joinedBefore = joinedBefore
+      ? sanitizeUserInput(joinedBefore, { preserveNewlines: false })
+      : undefined;
+    lastSeenAfter = lastSeenAfter
+      ? sanitizeUserInput(lastSeenAfter, { preserveNewlines: false })
+      : undefined;
+    lastSeenBefore = lastSeenBefore
+      ? sanitizeUserInput(lastSeenBefore, { preserveNewlines: false })
+      : undefined;
+
     const joinedAfterDate = parseDateInput(joinedAfter);
     const joinedBeforeDate = parseDateInput(joinedBefore);
     const lastSeenAfterDate = parseDateInput(lastSeenAfter);
@@ -825,6 +846,14 @@ export class ProfileCommand {
     const isSelf = target.id === interaction.user.id;
     const ephemeral = true;
     await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
+
+    completionator = completionator
+      ? sanitizeUserInput(completionator, { preserveNewlines: false })
+      : undefined;
+    psn = psn ? sanitizeUserInput(psn, { preserveNewlines: false }) : undefined;
+    xbl = xbl ? sanitizeUserInput(xbl, { preserveNewlines: false }) : undefined;
+    nsw = nsw ? sanitizeUserInput(nsw, { preserveNewlines: false }) : undefined;
+    steam = steam ? sanitizeUserInput(steam, { preserveNewlines: false }) : undefined;
 
     if (!isSelf && !isAdmin) {
       await safeReply(interaction, {

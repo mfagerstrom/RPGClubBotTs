@@ -41,7 +41,13 @@ import {
 } from "@discordjs/builders";
 import { SeparatorSpacingSize } from "discord-api-types/v10";
 import Member, { type IMemberNowPlayingEntry } from "../classes/Member.js";
-import { safeDeferReply, safeReply, type AnyRepliable } from "../functions/InteractionUtils.js";
+import {
+  safeDeferReply,
+  safeReply,
+  sanitizeUserInput,
+  stripModalInput,
+  type AnyRepliable,
+} from "../functions/InteractionUtils.js";
 import Game from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
 import {
@@ -244,7 +250,7 @@ export class NowPlayingCommand {
     showInChat: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    const query = title.trim();
+    const query = sanitizeUserInput(title, { preserveNewlines: false });
     const ephemeral = !showInChat;
     await safeDeferReply(interaction, { flags: buildComponentsV2Flags(ephemeral) });
 
@@ -319,8 +325,12 @@ export class NowPlayingCommand {
 
   @ModalComponent({ id: NOW_PLAYING_ADD_MODAL_ID })
   async handleAddNowPlayingModal(interaction: ModalSubmitInteraction): Promise<void> {
-    const query = interaction.fields.getTextInputValue(NOW_PLAYING_ADD_TITLE_INPUT_ID).trim();
-    const noteRaw = interaction.fields.getTextInputValue(NOW_PLAYING_ADD_NOTE_INPUT_ID).trim();
+    const query = stripModalInput(
+      interaction.fields.getTextInputValue(NOW_PLAYING_ADD_TITLE_INPUT_ID),
+    );
+    const noteRaw = stripModalInput(
+      interaction.fields.getTextInputValue(NOW_PLAYING_ADD_NOTE_INPUT_ID),
+    );
     if (!query) {
       const container = new ContainerBuilder().addTextDisplayComponents(
         new TextDisplayBuilder().setContent("Please provide a title to search."),
@@ -687,15 +697,15 @@ export class NowPlayingCommand {
       return;
     }
 
-    const completionDateInput = interaction.fields
-      .getTextInputValue(NOW_PLAYING_COMPLETE_DATE_INPUT_ID)
-      .trim();
-    const finalPlaytimeRaw = interaction.fields
-      .getTextInputValue(NOW_PLAYING_COMPLETE_HOURS_INPUT_ID)
-      .trim();
-    const noteInput = interaction.fields
-      .getTextInputValue(NOW_PLAYING_COMPLETE_NOTE_INPUT_ID)
-      .trim();
+    const completionDateInput = stripModalInput(
+      interaction.fields.getTextInputValue(NOW_PLAYING_COMPLETE_DATE_INPUT_ID),
+    );
+    const finalPlaytimeRaw = stripModalInput(
+      interaction.fields.getTextInputValue(NOW_PLAYING_COMPLETE_HOURS_INPUT_ID),
+    );
+    const noteInput = stripModalInput(
+      interaction.fields.getTextInputValue(NOW_PLAYING_COMPLETE_NOTE_INPUT_ID),
+    );
 
     let completedAt: Date | null = null;
     try {
@@ -1489,7 +1499,9 @@ export class NowPlayingCommand {
       return;
     }
 
-    const noteInput = interaction.fields.getTextInputValue(NOW_PLAYING_NOTE_INPUT_ID);
+    const noteInput = stripModalInput(
+      interaction.fields.getTextInputValue(NOW_PLAYING_NOTE_INPUT_ID),
+    );
     const note = noteInput.trim();
     const nextNote = note ? note : null;
     if (note && note.length > MAX_NOW_PLAYING_NOTE_LEN) {

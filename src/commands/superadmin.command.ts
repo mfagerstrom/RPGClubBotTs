@@ -24,7 +24,13 @@ import {
   setPresence,
   type IPresenceHistoryEntry,
 } from "../functions/SetPresence.js";
-import { AnyRepliable, safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
+import {
+  AnyRepliable,
+  safeDeferReply,
+  safeReply,
+  safeUpdate,
+  sanitizeUserInput,
+} from "../functions/InteractionUtils.js";
 import Gotm, {
   updateGotmGameFieldInDatabase,
 } from "../classes/Gotm.js";
@@ -228,9 +234,10 @@ export class SuperAdmin {
     if (!okToUseCommand) return;
 
     if (text && text.trim()) {
-      await setPresence(interaction, text.trim());
+      const sanitizedText = sanitizeUserInput(text, { preserveNewlines: false });
+      await setPresence(interaction, sanitizedText);
       await safeReply(interaction, {
-        content: `I'm now playing: ${text.trim()}!`,
+        content: `I'm now playing: ${sanitizedText}!`,
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -304,9 +311,14 @@ export class SuperAdmin {
       return;
     }
 
+    const searchTerm = sanitizeUserInput(query, { preserveNewlines: false });
+    const normalizedDate = completionDate
+      ? sanitizeUserInput(completionDate, { preserveNewlines: false })
+      : undefined;
+
     let completedAt: Date | null;
     try {
-      completedAt = parseCompletionDateInput(completionDate ?? "today");
+      completedAt = parseCompletionDateInput(normalizedDate ?? "today");
     } catch (err: any) {
       await safeReply(interaction, {
         content: err?.message ?? "Invalid completion date.",
@@ -327,8 +339,6 @@ export class SuperAdmin {
     }
 
     const playtime = finalPlaytimeHours === undefined ? null : finalPlaytimeHours;
-
-    const searchTerm = query.trim();
 
     await this.promptCompletionSelection(interaction, searchTerm, {
       targetUserId: user.id,

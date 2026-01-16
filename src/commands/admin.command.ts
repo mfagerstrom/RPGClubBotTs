@@ -16,7 +16,13 @@ import {
 import type { CommandInteraction, User } from "discord.js";
 import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption } from "discordx";
 import { DateTime } from "luxon";
-import { AnyRepliable, safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
+import {
+  AnyRepliable,
+  safeDeferReply,
+  safeReply,
+  safeUpdate,
+  sanitizeUserInput,
+} from "../functions/InteractionUtils.js";
 import { bot } from "../RPGClubBotTS.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
 import Gotm, {
@@ -265,6 +271,7 @@ export class Admin {
   ): Promise<void> {
     // Run publicly; avoid default ephemeral deferral for admin commands
     await safeDeferReply(interaction, { ephemeral: false });
+    dateText = sanitizeUserInput(dateText, { preserveNewlines: false });
 
     const okToUseCommand: boolean = await isAdmin(interaction);
     if (!okToUseCommand) {
@@ -329,6 +336,7 @@ export class Admin {
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction);
+    reason = sanitizeUserInput(reason, { preserveNewlines: true });
 
     const okToUseCommand: boolean = await isAdmin(interaction);
     if (!okToUseCommand) {
@@ -390,6 +398,7 @@ export class Admin {
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction);
+    reason = sanitizeUserInput(reason, { preserveNewlines: true });
 
     const okToUseCommand: boolean = await isAdmin(interaction);
     if (!okToUseCommand) {

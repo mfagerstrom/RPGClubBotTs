@@ -1,7 +1,7 @@
 import type { Channel, CommandInteraction } from "discord.js";
 import { ApplicationCommandOptionType, MessageFlags } from "discord.js";
 import { Discord, Slash, SlashChoice, SlashGroup, SlashOption } from "discordx";
-import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { safeDeferReply, safeReply, sanitizeUserInput } from "../functions/InteractionUtils.js";
 import { isAdmin } from "./admin.command.js";
 import {
   createReminder,
@@ -76,6 +76,9 @@ export class PublicReminderCommand {
     const ok = await isAdmin(interaction);
     if (!ok) return;
 
+    date = sanitizeUserInput(date, { preserveNewlines: false });
+    time = sanitizeUserInput(time, { preserveNewlines: false });
+    message = sanitizeUserInput(message, { preserveNewlines: true });
     const dateTimeString = `${date} ${time}`;
     const formatsToTry = [
       "M/d/yyyy h:mm a",

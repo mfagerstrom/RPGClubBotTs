@@ -27,7 +27,7 @@ import {
   SlashChoice,
 } from "discordx";
 import Member from "../classes/Member.js";
-import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { safeDeferReply, safeReply, sanitizeUserInput } from "../functions/InteractionUtils.js";
 import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import Game from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
@@ -198,6 +198,12 @@ export class GameCompletionCommands {
       return;
     }
 
+    query = query ? sanitizeUserInput(query, { preserveNewlines: false }) : undefined;
+    note = note ? sanitizeUserInput(note, { preserveNewlines: true }) : undefined;
+    completionDate = completionDate
+      ? sanitizeUserInput(completionDate, { preserveNewlines: false })
+      : undefined;
+
     let completedAt: Date | null;
     try {
       completedAt = parseCompletionDateInput(completionDate);
@@ -327,14 +333,21 @@ export class GameCompletionCommands {
     const ephemeral = !showInChat;
     await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
+    const sanitizedQuery = query
+      ? sanitizeUserInput(query, { preserveNewlines: false })
+      : undefined;
+    const sanitizedYearRaw = yearRaw
+      ? sanitizeUserInput(yearRaw, { preserveNewlines: false })
+      : undefined;
+
     if (showAll) {
-      await this.renderCompletionLeaderboard(interaction, ephemeral, query);
+      await this.renderCompletionLeaderboard(interaction, ephemeral, sanitizedQuery);
       return;
     }
 
     let yearFilter: number | "unknown" | null = null;
-    if (yearRaw) {
-      const trimmed = yearRaw.trim();
+    if (sanitizedYearRaw) {
+      const trimmed = sanitizedYearRaw.trim();
       if (trimmed.toLowerCase() === "unknown") {
         yearFilter = "unknown";
       } else {
@@ -351,7 +364,14 @@ export class GameCompletionCommands {
     }
 
     const targetUserId = member ? member.id : interaction.user.id;
-    await this.renderCompletionPage(interaction, targetUserId, 0, yearFilter, ephemeral, query);
+    await this.renderCompletionPage(
+      interaction,
+      targetUserId,
+      0,
+      yearFilter,
+      ephemeral,
+      sanitizedQuery,
+    );
   }
 
   @Slash({ description: "Edit one of your completion records", name: "edit" })
@@ -373,13 +393,16 @@ export class GameCompletionCommands {
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+    const sanitizedQuery = query
+      ? sanitizeUserInput(query, { preserveNewlines: false })
+      : undefined;
     await this.renderSelectionPage(
       interaction,
       interaction.user.id,
       0,
       "edit",
       year ?? null,
-      query,
+      sanitizedQuery,
     );
   }
 
@@ -395,13 +418,16 @@ export class GameCompletionCommands {
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+    const sanitizedQuery = query
+      ? sanitizeUserInput(query, { preserveNewlines: false })
+      : undefined;
     await this.renderSelectionPage(
       interaction,
       interaction.user.id,
       0,
       "delete",
       null,
-      query,
+      sanitizedQuery,
     );
   }
 

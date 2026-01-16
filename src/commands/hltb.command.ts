@@ -3,7 +3,7 @@ import { ApplicationCommandOptionType, MessageFlags } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import { EmbedBuilder } from "discord.js";
 import { searchHltb } from "../functions/SearchHltb.js";
-import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { safeDeferReply, safeReply, sanitizeUserInput } from "../functions/InteractionUtils.js";
 
 @Discord()
 export class hltb {
@@ -25,6 +25,7 @@ export class hltb {
     showInChat: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
+    title = sanitizeUserInput(title, { preserveNewlines: false });
     const ephemeral = !showInChat;
     await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 

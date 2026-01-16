@@ -1,7 +1,7 @@
 import type { CommandInteraction } from "discord.js";
 import { ApplicationCommandOptionType, MessageFlags } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
-import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
+import { safeDeferReply, safeReply, sanitizeUserInput } from "../functions/InteractionUtils.js";
 import { createSuggestion } from "../classes/Suggestion.js";
 
 const BOT_DEV_CHANNEL_ID = "549603388334014464";
@@ -29,7 +29,7 @@ export class SuggestionCommand {
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
-    const trimmedTitle = title.trim();
+    const trimmedTitle = sanitizeUserInput(title, { preserveNewlines: false });
     if (!trimmedTitle) {
       await safeReply(interaction, {
         content: "Title cannot be empty.",
@@ -38,7 +38,9 @@ export class SuggestionCommand {
       return;
     }
 
-    const trimmedDetails = details?.trim();
+    const trimmedDetails = details
+      ? sanitizeUserInput(details, { preserveNewlines: true })
+      : undefined;
     const suggestion = await createSuggestion(
       trimmedTitle,
       trimmedDetails ?? null,
