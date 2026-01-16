@@ -22,9 +22,12 @@ import { startPublicReminderService } from "./services/PublicReminderService.js"
 import { startThreadSyncService } from "./services/ThreadSyncService.js";
 import { startThreadLinkPromptService } from "./services/ThreadLinkPromptService.js";
 import { recreateGiveawayHubMessage } from "./services/GiveawayHubService.js";
+import { startGamedbAutoImageAuditService } from "./services/GamedbAuditService.js";
 installConsoleLogging();
 
 const PRESENCE_CHECK_INTERVAL_MS: number = 30 * 60 * 1000;
+const GAMEDB_AUTO_IMAGE_AUDIT_INTERVAL_MS: number = 60 * 60 * 1000;
+const GAMEDB_AUTO_IMAGE_AUDIT_CHANNEL_ID = "1439333324547035428";
 
 export const bot: Client = new Client({
   // To use only guild command
@@ -102,6 +105,11 @@ bot.once("clientReady", async () => {
   await joinAllTargetForumThreads(bot);
   startRssFeedService(bot);
   await recreateGiveawayHubMessage(bot);
+  startGamedbAutoImageAuditService(
+    bot,
+    GAMEDB_AUTO_IMAGE_AUDIT_CHANNEL_ID,
+    GAMEDB_AUTO_IMAGE_AUDIT_INTERVAL_MS,
+  );
   console.log("Startup sequence completed.");
 });
 

@@ -20,6 +20,7 @@ import {
   SlashOption,
 } from "discordx";
 import { safeDeferReply, safeReply, safeUpdate, sanitizeUserInput } from "../functions/InteractionUtils.js";
+import { performAutoAcceptImages } from "../services/GamedbAuditService.js";
 import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import { isAdmin } from "./admin.command.js";
 import Game, { IGame } from "../classes/Game.js";
@@ -574,10 +575,38 @@ export class GameDbAdmin {
   }
 
   private async runAutoAcceptImages(interaction: CommandInteraction, isPublic: boolean): Promise<void> {
-    const games = await Game.getGamesForAudit(true, false);
-    const candidates = games.filter(g => !g.imageData && g.igdbId);
+    const embed = new EmbedBuilder()
+      .setTitle("Auto-Accept IGDB Images")
+      .setDescription("Starting auto accept run...")
+      .setColor(0x0099ff);
 
-    if (candidates.length === 0) {
+    await safeReply(interaction, {
+      embeds: [embed],
+      flags: isPublic ? undefined : MessageFlags.Ephemeral,
+    });
+
+    const logLines: string[] = [];
+    const updateEmbed = async (log?: string) => {
+      if (log) {
+        logLines.push(log);
+      }
+
+      let content = logLines.join("\n");
+      while (content.length > 3500) {
+        logLines.shift();
+        content = logLines.join("\n");
+      }
+
+      embed.setDescription(content || "Processing...");
+      try {
+        await interaction.editReply({ embeds: [embed] });
+      } catch {
+        // ignore
+      }
+    };
+
+    const { updated, skipped, failed, logs } = await performAutoAcceptImages(updateEmbed);
+    if (!logs.length) {
       await safeReply(interaction, {
         content: "No games found with missing images and valid IGDB IDs.",
         flags: isPublic ? undefined : MessageFlags.Ephemeral,
@@ -585,72 +614,9 @@ export class GameDbAdmin {
       return;
     }
 
-    const embed = new EmbedBuilder()
-        .setTitle("Auto-Accept IGDB Images")
-        .setDescription(`Found ${candidates.length} candidate(s). Starting process...`)
-        .setColor(0x0099ff);
-
-    await safeReply(interaction, {
-        embeds: [embed],
-        flags: isPublic ? undefined : MessageFlags.Ephemeral,
-    });
-
-    const logLines: string[] = [];
-    const updateEmbed = async (log?: string) => {
-        if (log) {
-            logLines.push(log);
-        }
-        
-        let content = logLines.join("\n");
-        while (content.length > 3500) {
-            logLines.shift();
-            content = logLines.join("\n");
-        }
-        
-        embed.setDescription(content || "Processing...");
-        try {
-             await interaction.editReply({ embeds: [embed] });
-        } catch {
-            // ignore
-        }
-    };
-
-    let success = 0;
-    let skipped = 0;
-    let failed = 0;
-
-    for (const game of candidates) {
-      try {
-        if (!game.igdbId) {
-            skipped++;
-            continue;
-        }
-
-        const details = await igdbService.getGameDetails(game.igdbId);
-        if (!details || !details.cover?.image_id) {
-          skipped++;
-          await updateEmbed(`⏭️ Skipped **${game.title}** (No IGDB cover found)`);
-          continue;
-        }
-
-        const imageUrl = `https://images.igdb.com/igdb/image/upload/t_cover_big/${details.cover.image_id}.jpg`;
-        const resp = await axios.get(imageUrl, { responseType: "arraybuffer" });
-        const buffer = Buffer.from(resp.data);
-
-        await Game.updateGameImage(game.id, buffer);
-        success++;
-        await updateEmbed(`✅ Updated **${game.title}**`);
-
-      } catch (err: any) {
-        failed++;
-        await updateEmbed(`❌ Failed **${game.title}**: ${err.message}`);
-      }
-
-      // Delay to respect rate limits and allow reading
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    const summary = `\n**Run Complete**\n✅ Updated: ${success}\n⏭️ Skipped: ${skipped}\n❌ Failed: ${failed}`;
+    const summary =
+      `\n**Run Complete**\n✅ Updated: ${updated}\n` +
+      `⏭️ Skipped: ${skipped}\n❌ Failed: ${failed}`;
     await updateEmbed(summary);
     embed.setColor(0x2ecc71);
     await interaction.editReply({ embeds: [embed] });
