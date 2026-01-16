@@ -37,6 +37,7 @@ export const bot: Client = new Client({
     IntentsBitField.Flags.GuildMessages,
     IntentsBitField.Flags.GuildMessageReactions,
     IntentsBitField.Flags.GuildVoiceStates,
+    IntentsBitField.Flags.GuildPresences,
     IntentsBitField.Flags.MessageContent,
   ],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],

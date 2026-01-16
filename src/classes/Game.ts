@@ -1,6 +1,6 @@
 import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
-import { IGDBGameDetails } from "../services/IgdbService.js";
+import { IGDBGameDetails, igdbService } from "../services/IgdbService.js";
 
 // Interfaces
 export interface IGame {
@@ -398,6 +398,32 @@ export default class Game {
     } finally {
       await connection.close();
     }
+  }
+
+  static async importGameFromIgdb(
+    igdbId: number,
+  ): Promise<{ gameId: number; title: string }> {
+    const existing = await Game.getGameByIgdbId(igdbId);
+    if (existing) {
+      return { gameId: existing.id, title: existing.title };
+    }
+
+    const details = await igdbService.getGameDetails(igdbId);
+    if (!details) {
+      throw new Error("Failed to load game details from IGDB.");
+    }
+
+    const newGame = await Game.createGame(
+      details.name,
+      details.summary ?? "",
+      null,
+      details.id,
+      details.slug ?? null,
+      details.total_rating ?? null,
+      details.url ?? null,
+    );
+    await Game.saveFullGameMetadata(newGame.id, details);
+    return { gameId: newGame.id, title: details.name };
   }
 
   // --- Metadata Handlers ---
