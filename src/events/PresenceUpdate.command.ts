@@ -248,11 +248,16 @@ export class PresenceUpdate {
     }
 
     await PresencePromptHistory.markResolved(sessionId, "DECLINED");
-    await interaction.update({
-      content:
-        `<@${session.userId}>, no problem. You can opt out of these prompts by using one of the buttons below.`,
-      components: [buildOptOutButtons(sessionId)],
-    });
+    await interaction.deferUpdate();
+    await interaction.message.delete().catch(() => {});
+    const channel = interaction.channel;
+    if (channel && "send" in channel) {
+      await (channel as any).send({
+        content:
+          `<@${session.userId}>, no problem. You can opt out of these prompts by using one of the buttons below.`,
+        components: [buildOptOutButtons(sessionId)],
+      });
+    }
   }
 
   @ButtonComponent({ id: /^presence-np-optout-game:.+$/ })
