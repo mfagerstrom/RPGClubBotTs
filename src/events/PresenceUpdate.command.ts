@@ -12,6 +12,7 @@ import { ButtonComponent, Discord, On } from "discordx";
 import Game from "../classes/Game.js";
 import Member from "../classes/Member.js";
 import PresencePromptOptOut, { normalizePresenceGameTitle } from "../classes/PresencePromptOptOut.js";
+import PresencePromptHistory from "../classes/PresencePromptHistory.js";
 import { igdbService } from "../services/IgdbService.js";
 
 const PRESENCE_PROMPT_CHANNEL_ID = "1295063765154533397";
@@ -19,6 +20,8 @@ const YES_PREFIX = "presence-np-yes";
 const NO_PREFIX = "presence-np-no";
 const OPT_OUT_GAME_PREFIX = "presence-np-optout-game";
 const OPT_OUT_ALL_PREFIX = "presence-np-optout-all";
+const UNANSWERED_GAME_LIMIT = 3;
+const UNANSWERED_USER_LIMIT = 6;
 
 type PresencePromptSession = {
   userId: string;
@@ -35,6 +38,10 @@ function getPresenceGameTitle(presence?: Presence | null): string | null {
   const activity = presence.activities.find((entry) => entry.type === ActivityType.Playing);
   const name = activity?.name?.trim();
   return name ? name : null;
+}
+
+function isSameUtcDay(a: Date, b: Date): boolean {
+  return a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
 }
 
 async function resolvePresenceGame(
@@ -122,6 +129,22 @@ export class PresenceUpdate {
     const optedOutGame = await PresencePromptOptOut.isOptedOutGame(user.id, newGame);
     if (optedOutGame) return;
 
+    const pendingForGame = await PresencePromptHistory.countPendingForGame(user.id, newGame);
+    if (pendingForGame >= UNANSWERED_GAME_LIMIT) {
+      await PresencePromptOptOut.addOptOutGame(user.id, newGame);
+      return;
+    }
+    const pendingForUser = await PresencePromptHistory.countPendingForUser(user.id);
+    if (pendingForUser >= UNANSWERED_USER_LIMIT) {
+      await PresencePromptOptOut.addOptOutAll(user.id);
+      return;
+    }
+
+    const lastPromptDate = await PresencePromptHistory.getLastPromptDateForGame(user.id, newGame);
+    if (lastPromptDate && isSameUtcDay(lastPromptDate, new Date())) {
+      return;
+    }
+
     const current = await Member.getNowPlaying(user.id).catch(() => []);
     if (current.some((entry) => normalizePresenceGameTitle(entry.title) === newNorm)) {
       return;
@@ -139,6 +162,7 @@ export class PresenceUpdate {
       gameTitleNorm: newNorm,
       messageId: null,
     });
+    await PresencePromptHistory.createPrompt(sessionId, user.id, newGame);
 
     const content =
       `<@${user.id}>, I see that you started playing **${newGame}**. ` +
@@ -174,6 +198,7 @@ export class PresenceUpdate {
     }
 
     try {
+      await PresencePromptHistory.markResolved(sessionId, "ACCEPTED");
       const resolved = await resolvePresenceGame(session.gameTitle);
       if (!resolved) {
         await interaction.update({
@@ -193,6 +218,7 @@ export class PresenceUpdate {
       });
       presencePromptSessions.delete(sessionId);
     } catch (err: any) {
+      await PresencePromptHistory.markResolved(sessionId, "DECLINED");
       const msg = err?.message ?? "Failed to add that game.";
       await interaction.update({
         content: msg,
@@ -221,9 +247,10 @@ export class PresenceUpdate {
       return;
     }
 
+    await PresencePromptHistory.markResolved(sessionId, "DECLINED");
     await interaction.update({
       content:
-        `<@${session.userId}>, no problem. Choose when I should stop asking.`,
+        `<@${session.userId}>, no problem. You can opt out of these prompts by using one of the buttons below.`,
       components: [buildOptOutButtons(sessionId)],
     });
   }
@@ -248,6 +275,7 @@ export class PresenceUpdate {
     }
 
     await PresencePromptOptOut.addOptOutGame(session.userId, session.gameTitle);
+    await PresencePromptHistory.markResolved(sessionId, "OPT_OUT_GAME");
     await interaction.update({
       content: `<@${session.userId}>, got it. I won't ask again about **${session.gameTitle}**.`,
       components: [],
@@ -275,6 +303,7 @@ export class PresenceUpdate {
     }
 
     await PresencePromptOptOut.addOptOutAll(session.userId);
+    await PresencePromptHistory.markResolved(sessionId, "OPT_OUT_ALL");
     await interaction.update({
       content: `<@${session.userId}>, got it. I won't ask again about any games.`,
       components: [],
