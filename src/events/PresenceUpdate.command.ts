@@ -78,10 +78,6 @@ function buildPromptButtons(sessionId: string): ActionRowBuilder<ButtonBuilder> 
     .setCustomId(`${NO_PREFIX}:${sessionId}`)
     .setLabel("No")
     .setStyle(ButtonStyle.Secondary);
-  return new ActionRowBuilder<ButtonBuilder>().addComponents(yes, no);
-}
-
-function buildOptOutButtons(sessionId: string): ActionRowBuilder<ButtonBuilder> {
   const optOutGame = new ButtonBuilder()
     .setCustomId(`${OPT_OUT_GAME_PREFIX}:${sessionId}`)
     .setLabel("Don't ask again for this game")
@@ -90,7 +86,7 @@ function buildOptOutButtons(sessionId: string): ActionRowBuilder<ButtonBuilder> 
     .setCustomId(`${OPT_OUT_ALL_PREFIX}:${sessionId}`)
     .setLabel("Don't ask again for any game")
     .setStyle(ButtonStyle.Danger);
-  return new ActionRowBuilder<ButtonBuilder>().addComponents(optOutGame, optOutAll);
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(yes, no, optOutGame, optOutAll);
 }
 
 @Discord()
@@ -166,7 +162,7 @@ export class PresenceUpdate {
 
     const content =
       `<@${user.id}>, I see that you started playing **${newGame}**. ` +
-      "Would you like me to add it to your Now Playing list?";
+      "Would you like me to add it to your Now Playing list? Choose an option below.";
     const message = await sendableChannel.send({
       content,
       components: [buildPromptButtons(sessionId)],
@@ -248,16 +244,10 @@ export class PresenceUpdate {
     }
 
     await PresencePromptHistory.markResolved(sessionId, "DECLINED");
-    await interaction.deferUpdate();
-    await interaction.message.delete().catch(() => {});
-    const channel = interaction.channel;
-    if (channel && "send" in channel) {
-      await (channel as any).send({
-        content:
-          `<@${session.userId}>, no problem. You can opt out of these prompts by using one of the buttons below.`,
-        components: [buildOptOutButtons(sessionId)],
-      });
-    }
+    await interaction.update({
+      content: `<@${session.userId}>, no problem. I won't add it.`,
+      components: [],
+    });
   }
 
   @ButtonComponent({ id: /^presence-np-optout-game:.+$/ })
