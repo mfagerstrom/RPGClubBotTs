@@ -3463,6 +3463,7 @@ export class GameCompletionCommands {
       details.slug ?? null,
       details.total_rating ?? null,
       details.url ?? null,
+      Game.getFeaturedVideoUrl(details),
     ).catch(async (err: any) => {
       const message = String(err?.message ?? "");
       if (!message.includes("ORA-00001")) {

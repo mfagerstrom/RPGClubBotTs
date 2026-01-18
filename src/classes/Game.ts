@@ -13,6 +13,7 @@ export interface IGame {
   slug: string | null;
   totalRating: number | null;
   igdbUrl: string | null;
+  featuredVideoUrl: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -118,6 +119,7 @@ function mapGameRow(row: any): IGame {
     slug: row.SLUG ? String(row.SLUG) : null,
     totalRating: row.TOTAL_RATING ? Number(row.TOTAL_RATING) : null,
     igdbUrl: row.IGDB_URL ? String(row.IGDB_URL) : null,
+    featuredVideoUrl: row.FEATURED_VIDEO_URL ? String(row.FEATURED_VIDEO_URL) : null,
     createdAt: row.CREATED_AT instanceof Date ? row.CREATED_AT : new Date(row.CREATED_AT),
     updatedAt: row.UPDATED_AT instanceof Date ? row.UPDATED_AT : new Date(row.UPDATED_AT),
   };
@@ -161,15 +163,16 @@ export default class Game {
     igdbId: number | null = null,
     slug: string | null = null,
     totalRating: number | null = null,
-    igdbUrl: string | null = null
+    igdbUrl: string | null = null,
+    featuredVideoUrl: string | null = null
   ): Promise<IGame> {
     const pool = getOraclePool();
     const connection = await pool.getConnection();
 
     try {
       const result = await connection.execute<{ GAME_ID: number }>(
-        `INSERT INTO GAMEDB_GAMES (TITLE, DESCRIPTION, IMAGE_DATA, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL)
-         VALUES (:title, :description, :imageData, :igdbId, :slug, :totalRating, :igdbUrl)
+        `INSERT INTO GAMEDB_GAMES (TITLE, DESCRIPTION, IMAGE_DATA, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, FEATURED_VIDEO_URL)
+         VALUES (:title, :description, :imageData, :igdbId, :slug, :totalRating, :igdbUrl, :featuredVideoUrl)
          RETURNING GAME_ID INTO :id`,
         {
           title,
@@ -179,6 +182,7 @@ export default class Game {
           slug: slug || null,
           totalRating: totalRating || null,
           igdbUrl: igdbUrl || null,
+          featuredVideoUrl: featuredVideoUrl || null,
           id: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT },
         },
         { autoCommit: true },
@@ -214,10 +218,11 @@ export default class Game {
         SLUG: string | null;
         TOTAL_RATING: number | null;
         IGDB_URL: string | null;
+        FEATURED_VIDEO_URL: string | null;
         CREATED_AT: Date;
         UPDATED_AT: Date;
       }>(
-        `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, CREATED_AT, UPDATED_AT
+        `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, FEATURED_VIDEO_URL, CREATED_AT, UPDATED_AT
            FROM GAMEDB_GAMES
           WHERE GAME_ID = :id`,
         { id },
@@ -263,11 +268,12 @@ export default class Game {
         SLUG: string | null;
         TOTAL_RATING: number | null;
         IGDB_URL: string | null;
+        FEATURED_VIDEO_URL: string | null;
         CREATED_AT: Date;
         UPDATED_AT: Date;
       }>(
         `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, IGDB_ID, SLUG, TOTAL_RATING,
-                IGDB_URL, CREATED_AT, UPDATED_AT
+                IGDB_URL, FEATURED_VIDEO_URL, CREATED_AT, UPDATED_AT
            FROM GAMEDB_GAMES
           WHERE GAME_ID IN (${placeholders.join(", ")})`,
         binds,
@@ -293,11 +299,12 @@ export default class Game {
         SLUG: string | null;
         TOTAL_RATING: number | null;
         IGDB_URL: string | null;
+        FEATURED_VIDEO_URL: string | null;
         CREATED_AT: Date;
         UPDATED_AT: Date;
       }>(
         `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, IGDB_ID, SLUG, TOTAL_RATING,
-                IGDB_URL, CREATED_AT, UPDATED_AT
+                IGDB_URL, FEATURED_VIDEO_URL, CREATED_AT, UPDATED_AT
            FROM GAMEDB_GAMES
           WHERE GAME_ID IN (
             SELECT CASE
@@ -377,10 +384,11 @@ export default class Game {
         SLUG: string | null;
         TOTAL_RATING: number | null;
         IGDB_URL: string | null;
+        FEATURED_VIDEO_URL: string | null;
         CREATED_AT: Date;
         UPDATED_AT: Date;
       }>(
-        `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL,
+        `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, FEATURED_VIDEO_URL,
                 CREATED_AT, UPDATED_AT
            FROM GAMEDB_GAMES
           WHERE IGDB_ID = :igdbId`,
@@ -399,6 +407,14 @@ export default class Game {
     } finally {
       await connection.close();
     }
+  }
+
+  static getFeaturedVideoUrl(details: IGDBGameDetails): string | null {
+    const videoId = details.videos?.[0]?.video_id;
+    if (!videoId) {
+      return null;
+    }
+    return `https://www.youtube.com/watch?v=${videoId}`;
   }
 
   static async importGameFromIgdb(
@@ -434,6 +450,7 @@ export default class Game {
       details.slug ?? null,
       details.total_rating ?? null,
       details.url ?? null,
+      Game.getFeaturedVideoUrl(details),
     );
     await Game.saveFullGameMetadata(newGame.id, details);
     return { gameId: newGame.id, title: details.name };
@@ -1256,10 +1273,11 @@ export default class Game {
         SLUG: string | null;
         TOTAL_RATING: number | null;
         IGDB_URL: string | null;
+        FEATURED_VIDEO_URL: string | null;
         CREATED_AT: Date;
         UPDATED_AT: Date;
       }>(
-        `SELECT GAME_ID, TITLE, DESCRIPTION, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, CREATED_AT, UPDATED_AT
+        `SELECT GAME_ID, TITLE, DESCRIPTION, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, FEATURED_VIDEO_URL, CREATED_AT, UPDATED_AT
            FROM GAMEDB_GAMES
           WHERE LOWER(TITLE) LIKE :searchQuery
              OR REGEXP_REPLACE(LOWER(TITLE), '[^a-z0-9]', '') LIKE :normalizedQuery
@@ -1281,6 +1299,7 @@ export default class Game {
         slug: row.SLUG ? String(row.SLUG) : null,
         totalRating: row.TOTAL_RATING ? Number(row.TOTAL_RATING) : null,
         igdbUrl: row.IGDB_URL ? String(row.IGDB_URL) : null,
+        featuredVideoUrl: row.FEATURED_VIDEO_URL ? String(row.FEATURED_VIDEO_URL) : null,
         createdAt: row.CREATED_AT instanceof Date ? row.CREATED_AT : new Date(row.CREATED_AT),
         updatedAt: row.UPDATED_AT instanceof Date ? row.UPDATED_AT : new Date(row.UPDATED_AT),
       }));
@@ -1387,10 +1406,11 @@ export default class Game {
         SLUG: string | null;
         TOTAL_RATING: number | null;
         IGDB_URL: string | null;
+        FEATURED_VIDEO_URL: string | null;
         CREATED_AT: Date;
         UPDATED_AT: Date;
       }>(
-        `SELECT g.GAME_ID, g.TITLE, g.DESCRIPTION, g.IMAGE_DATA, g.IGDB_ID, g.SLUG, g.TOTAL_RATING, g.IGDB_URL, g.CREATED_AT, g.UPDATED_AT
+        `SELECT g.GAME_ID, g.TITLE, g.DESCRIPTION, g.IMAGE_DATA, g.IGDB_ID, g.SLUG, g.TOTAL_RATING, g.IGDB_URL, g.FEATURED_VIDEO_URL, g.CREATED_AT, g.UPDATED_AT
            FROM GAMEDB_GAMES g
           WHERE ${whereClause}
           ORDER BY g.TITLE ASC`,

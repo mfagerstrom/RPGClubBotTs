@@ -565,6 +565,7 @@ async function importGameFromIgdb(
     details.slug,
     details.total_rating ?? null,
     igdbUrl,
+    Game.getFeaturedVideoUrl(details),
   );
 
   await Game.saveFullGameMetadata(newGame.id, details);

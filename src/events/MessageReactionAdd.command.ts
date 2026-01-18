@@ -546,6 +546,7 @@ export class MessageReactionAdd {
       details.slug ?? null,
       details.total_rating ?? null,
       details.url ?? null,
+      Game.getFeaturedVideoUrl(details),
     );
     await Game.saveFullGameMetadata(newGame.id, details);
     return { gameId: newGame.id, title: details.name };

@@ -24,6 +24,7 @@ export interface IGDBGame {
 export interface IGDBGameDetails extends IGDBGame {
   slug: string;
   genres?: { id: number; name: string }[];
+  videos?: { video_id: string; name?: string }[];
   themes?: { id: number; name: string }[];
   game_modes?: { id: number; name: string }[];
   player_perspectives?: { id: number; name: string }[];
@@ -234,6 +235,7 @@ class IgdbService {
       "involved_companies.company.name",
       "involved_companies.developer",
       "involved_companies.publisher",
+      "videos.video_id",
       "total_rating",
       "url",
     ].join(", ");

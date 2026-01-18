@@ -469,15 +469,16 @@ export class GameDb {
       || (details.slug ? `https://www.igdb.com/games/${details.slug}` : null);
     let newGame;
     try {
-      newGame = await Game.createGame(
-        details.name,
-        details.summary || null,
-        imageData,
-        details.id,
-        details.slug,
-        details.total_rating ?? null,
-        igdbUrl,
-      );
+    newGame = await Game.createGame(
+      details.name,
+      details.summary || null,
+      imageData,
+      details.id,
+      details.slug,
+      details.total_rating ?? null,
+      igdbUrl,
+      Game.getFeaturedVideoUrl(details),
+    );
     } catch (err: any) {
       if (isUniqueConstraintError(err)) {
         const msg = "This game has already been imported.";
@@ -582,7 +583,13 @@ export class GameDb {
       !interaction.isMessageComponent();
     const components = [...profile.components];
     if (includeActions) {
-      components.push(this.buildGameProfileActionRow(gameId, profile.hasThread));
+      components.push(
+        this.buildGameProfileActionRow(
+          gameId,
+          profile.hasThread,
+          profile.featuredVideoUrl,
+        ),
+      );
     }
 
     await safeReply(interaction, {
@@ -599,6 +606,7 @@ export class GameDb {
     components: Array<ContainerBuilder | ActionRowBuilder<ButtonBuilder>>;
     files: AttachmentBuilder[];
     hasThread: boolean;
+    featuredVideoUrl: string | null;
   } | null> {
     try {
       const game = await Game.getGameById(gameId);
@@ -773,6 +781,7 @@ export class GameDb {
         components: [container],
         files,
         hasThread: Boolean(threadId),
+        featuredVideoUrl: game.featuredVideoUrl ?? null,
       };
     } catch (error: any) {
       console.error("Failed to build game profile:", error);
@@ -819,6 +828,7 @@ export class GameDb {
   private buildGameProfileActionRow(
     gameId: number,
     hasThread: boolean,
+    featuredVideoUrl: string | null,
   ): ActionRowBuilder<ButtonBuilder> {
     const addNowPlaying = new ButtonBuilder()
       .setCustomId(`gamedb-action:nowplaying:${gameId}`)
@@ -828,11 +838,18 @@ export class GameDb {
       .setCustomId(`gamedb-action:completion:${gameId}`)
       .setLabel("Add Completion")
       .setStyle(ButtonStyle.Success);
+    const viewFeaturedVideo = new ButtonBuilder()
+      .setCustomId(`gamedb-action:video:${gameId}`)
+      .setLabel("View Featured Video")
+      .setStyle(ButtonStyle.Secondary);
 
     const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       addNowPlaying,
       addCompletion,
     );
+    if (featuredVideoUrl) {
+      actionRow.addComponents(viewFeaturedVideo);
+    }
     if (!hasThread) {
       const addThread = new ButtonBuilder()
         .setCustomId(`gamedb-action:thread:${gameId}`)
@@ -843,7 +860,7 @@ export class GameDb {
     return actionRow;
   }
 
-  @ButtonComponent({ id: /^gamedb-action:(nowplaying|completion|thread):\d+$/ })
+  @ButtonComponent({ id: /^gamedb-action:(nowplaying|completion|thread|video):\d+$/ })
   async handleGameDbAction(interaction: ButtonInteraction): Promise<void> {
     const [, action, gameIdRaw] = interaction.customId.split(":");
     const gameId = Number(gameIdRaw);
@@ -861,6 +878,22 @@ export class GameDb {
         content: `No game found with ID ${gameId}.`,
         flags: MessageFlags.Ephemeral,
       }).catch(() => {});
+      return;
+    }
+
+    if (action === "video") {
+      const videoUrl = game.featuredVideoUrl;
+      if (!videoUrl) {
+        await safeReply(interaction, {
+          content: "No featured video is available for this game.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      await safeReply(interaction, {
+        content: `Warning: videos may contain spoilers. ${videoUrl}`,
+        flags: MessageFlags.Ephemeral,
+      });
       return;
     }
 
@@ -1064,7 +1097,11 @@ export class GameDb {
 
       const profile = await this.buildGameProfile(gameId, interaction);
       if (profile) {
-        const actionRow = this.buildGameProfileActionRow(gameId, profile.hasThread);
+        const actionRow = this.buildGameProfileActionRow(
+          gameId,
+          profile.hasThread,
+          profile.featuredVideoUrl,
+        );
         const existingComponents = interaction.message?.components ?? [];
         const updatedComponents = existingComponents.length
           ? existingComponents.map((row) => {
@@ -1516,7 +1553,11 @@ export class GameDb {
     }
 
     const response = this.buildSearchResponse(sessionId, session, page, false);
-    const actionRow = this.buildGameProfileActionRow(gameId, profile.hasThread);
+    const actionRow = this.buildGameProfileActionRow(
+      gameId,
+      profile.hasThread,
+      profile.featuredVideoUrl,
+    );
 
     try {
       await interaction.editReply({

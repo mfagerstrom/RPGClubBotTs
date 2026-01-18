@@ -133,6 +133,7 @@ async function handleLinkButton(interaction: ButtonInteraction, threadId: string
         details.slug ?? null,
         details.total_rating ?? null,
         details.url ?? null,
+        Game.getFeaturedVideoUrl(details),
       );
       await Game.saveFullGameMetadata(newGame.id, details);
       chosenName = nameHint ?? details.name;

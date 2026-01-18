@@ -705,6 +705,7 @@ export class SuperAdmin {
       details.slug ?? null,
       details.total_rating ?? null,
       details.url ?? null,
+      Game.getFeaturedVideoUrl(details),
     );
     await Game.saveFullGameMetadata(newGame.id, details);
     return { gameId: newGame.id, title: details.name };
@@ -1332,6 +1333,7 @@ export class SuperAdmin {
       details.slug,
       details.total_rating ?? null,
       igdbUrl,
+      Game.getFeaturedVideoUrl(details),
     );
 
     await Game.saveFullGameMetadata(newGame.id, details);

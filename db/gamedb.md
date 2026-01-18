@@ -20,6 +20,7 @@ Game metadata ingested from IGDB and stored for bot lookups. Schema created by
 | SLUG | VARCHAR2(255) | Yes | IGDB slug. |
 | TOTAL_RATING | NUMBER | Yes | IGDB aggregated rating. |
 | IGDB_URL | VARCHAR2(512) | Yes | Canonical IGDB URL. |
+| FEATURED_VIDEO_URL | VARCHAR2(512) | Yes | Featured video URL from IGDB. |
 | COLLECTION_ID | NUMBER | Yes | FK to `GAMEDB_COLLECTIONS`. |
 | PARENT_IGDB_ID | NUMBER | Yes | Parent/series IGDB id (loose link). |
 | PARENT_GAME_NAME | VARCHAR2(255) | Yes | Parent/series display name. |
