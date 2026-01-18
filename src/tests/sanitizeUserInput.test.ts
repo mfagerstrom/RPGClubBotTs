@@ -12,7 +12,7 @@ describe("sanitizeUserInput", () => {
   it("strips markdown and links", () => {
     const input = "Use **bold** and [link](https://example.com)";
     const result = sanitizeUserInput(input, { preserveNewlines: false });
-    assert.equal(result, "Use bold and link");
+    assert.equal(result, "Use **bold** and link");
   });
 
   it("removes mentions and everyone", () => {
@@ -30,6 +30,6 @@ describe("sanitizeUserInput", () => {
   it("removes sql comment tokens by default", () => {
     const input = "select * from games -- comment";
     const result = sanitizeUserInput(input, { preserveNewlines: false });
-    assert.equal(result, "select from games comment");
+    assert.equal(result, "select * from games comment");
   });
 });

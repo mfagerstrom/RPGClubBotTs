@@ -28,6 +28,9 @@ export function sanitizeUserInput(value: string, options?: SanitizeOptions): str
   };
 
   let sanitized = value ?? "";
+  const boldPlaceholder = "BOLDMARKER";
+  const spoilerPlaceholder = "SPOILERMARKER";
+  const starPlaceholder = "STARMARKER";
   try {
     sanitized = sanitized.normalize("NFKC");
   } catch {
@@ -35,6 +38,9 @@ export function sanitizeUserInput(value: string, options?: SanitizeOptions): str
   }
 
   sanitized = sanitized.replace(/\r\n/g, "\n");
+  sanitized = sanitized.replace(/\*\*/g, boldPlaceholder);
+  sanitized = sanitized.replace(/\|\|/g, spoilerPlaceholder);
+  sanitized = sanitized.replace(/\*/g, starPlaceholder);
   sanitized = sanitized.replace(CONTROL_CHAR_REGEX, "");
   sanitized = sanitized.replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, "");
   sanitized = sanitized.replace(/<\s*script[^>]*>[\s\S]*?<\s*\/\s*script\s*>/gi, "");
@@ -79,6 +85,10 @@ export function sanitizeUserInput(value: string, options?: SanitizeOptions): str
   } else {
     sanitized = sanitized.replace(/\s+/g, " ");
   }
+
+  sanitized = sanitized.replace(new RegExp(boldPlaceholder, "g"), "**");
+  sanitized = sanitized.replace(new RegExp(spoilerPlaceholder, "g"), "||");
+  sanitized = sanitized.replace(new RegExp(starPlaceholder, "g"), "*");
 
   sanitized = sanitized.trim();
   if (opts.maxLength && sanitized.length > opts.maxLength) {

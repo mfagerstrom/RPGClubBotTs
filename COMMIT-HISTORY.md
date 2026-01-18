@@ -286,3 +286,8 @@
 2024-09-24 - Commit ID: b4b89e0 - feat: re-implemented HLTB functionality
 2024-09-20 - Commit ID: 836aabc - very much a WIP
 2024-09-20 - Commit ID: ee96c57 - feat: initial commit
+2026-01-17 - Commit ID: 809f09b - fix: turned off presence-based now-playing prompts
+2026-01-17 - Commit ID: b08674c - feat: added list of donated/active games to 'donor settings' button
+2026-01-17 - Commit ID: 864c077 - fix: improved UX for rich presence auto now-playing prompts
+2026-01-16 - Commit ID: 7219684 - ...
+2026-01-16 - Commit ID: e6ebdc9 - fix: now-playing should render after a successful addition

@@ -34,13 +34,19 @@ import {
   SlashOption,
 } from "discordx";
 import {
+  ContainerBuilder,
+  SectionBuilder,
+  TextDisplayBuilder,
+  ThumbnailBuilder,
+} from "@discordjs/builders";
+import {
   safeDeferReply,
   safeReply,
   sanitizeUserInput,
   stripModalInput,
 } from "../functions/InteractionUtils.js";
 import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
-import Game, { type IGameAssociationSummary } from "../classes/Game.js";
+import Game from "../classes/Game.js";
 import { getThreadsByGameId, setThreadGameLink, upsertThreadRecord } from "../classes/Thread.js";
 import axios from "axios"; // For downloading image attachments
 import { igdbService, type IGDBGame } from "../services/IgdbService.js";
@@ -59,6 +65,7 @@ import {
 const GAME_SEARCH_PAGE_SIZE = 25;
 const NOW_PLAYING_FORUM_ID = "1059875931356938240";
 const NOW_PLAYING_SIDEGAME_TAG_ID = "1059912719366635611";
+const COMPONENTS_V2_FLAG = 1 << 15;
 const GAME_SEARCH_SESSIONS = new Map<
   string,
   { userId: string; results: any[]; query: string }
@@ -72,6 +79,10 @@ function isUniqueConstraintError(err: any): boolean {
 function isUnknownWebhookError(err: any): boolean {
   const code = err?.code ?? err?.rawError?.code;
   return code === 10015;
+}
+
+function buildComponentsV2Flags(isEphemeral: boolean): number {
+  return (isEphemeral ? MessageFlags.Ephemeral : 0) | COMPONENTS_V2_FLAG;
 }
 
 const MAX_COMPLETION_NOTE_LEN = 500;
@@ -539,36 +550,17 @@ export class GameDb {
   @Slash({ description: "View details of a game", name: "view" })
   async view(
     @SlashOption({
-      description: "ID of the game to view",
-      name: "game_id",
-      required: false,
-      type: ApplicationCommandOptionType.Number,
-    })
-    gameId: number,
-    @SlashOption({
       description: "Search query (falls back to search flow if no ID provided)",
       name: "title",
-      required: false,
+      required: true,
       type: ApplicationCommandOptionType.String,
     })
-    query: string | undefined,
+    query: string,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction);
+    await safeDeferReply(interaction, { flags: buildComponentsV2Flags(false) });
 
-    if (Number.isFinite(gameId)) {
-      await this.showGameProfile(interaction, gameId);
-      return;
-    }
-
-    const searchTerm = query
-      ? sanitizeUserInput(query, { preserveNewlines: false })
-      : "";
-    if (!searchTerm) {
-      await this.runSearchFlow(interaction, "");
-      return;
-    }
-
+    const searchTerm = sanitizeUserInput(query, { preserveNewlines: false });
     await this.runSearchFlow(interaction, searchTerm);
   }
 
@@ -588,14 +580,15 @@ export class GameDb {
     const includeActions =
       !("isMessageComponent" in interaction) ||
       !interaction.isMessageComponent();
-    const components = includeActions
-      ? [this.buildGameProfileActionRow(gameId, profile.hasThread)]
-      : [];
+    const components = [...profile.components];
+    if (includeActions) {
+      components.push(this.buildGameProfileActionRow(gameId, profile.hasThread));
+    }
 
     await safeReply(interaction, {
-      embeds: profile.embeds,
       files: profile.files,
-      components: components.length ? components : undefined,
+      components,
+      flags: buildComponentsV2Flags(false),
     });
   }
 
@@ -603,7 +596,7 @@ export class GameDb {
     gameId: number,
     interaction?: CommandInteraction | StringSelectMenuInteraction | ButtonInteraction,
   ): Promise<{
-    embeds: EmbedBuilder[];
+    components: Array<ContainerBuilder | ActionRowBuilder<ButtonBuilder>>;
     files: AttachmentBuilder[];
     hasThread: boolean;
   } | null> {
@@ -626,45 +619,42 @@ export class GameDb {
       const regionMap = new Map(regions.map((r) => [r.id, r.name]));
 
       const description = game.description || "No description available.";
+      const container = new ContainerBuilder();
 
-      const embed = new EmbedBuilder()
-        .setTitle(`${game.title} (GameDB #${game.id})`)
-        .setColor(0x0099ff);
-
-      if (game.igdbUrl) {
-        embed.setURL(game.igdbUrl);
+      const files: AttachmentBuilder[] = [];
+      if (game.imageData) {
+        files.push(new AttachmentBuilder(game.imageData, { name: "game_image.png" }));
       }
 
-      // Keep the win/round info up top in the single embed
+      const rpgClubSections: string[] = [];
+      const pushRpgClubSection = (title: string, value: string | null): void => {
+        if (!value) return;
+        rpgClubSections.push(`**${title}**\n${value}`);
+      };
+
       if (associations.gotmWins.length) {
         const lines = associations.gotmWins.map((win) => `Round ${win.round}`);
-        embed.addFields({ name: "GOTM Round(s)", value: lines.join("\n"), inline: true });
+        pushRpgClubSection("GOTM Round(s)", lines.join("\n"));
       }
 
       if (associations.nrGotmWins.length) {
         const lines = associations.nrGotmWins.map((win) => `Round ${win.round}`);
-        embed.addFields({ name: "NR-GOTM Round(s)", value: lines.join("\n"), inline: true });
+        pushRpgClubSection("NR-GOTM Round(s)", lines.join("\n"));
       }
 
-      // Thread / Reddit links as their own fields
+      // Thread / Reddit links as their own sections
       const threadId =
         associations.gotmWins.find((w) => w.threadId)?.threadId ??
         associations.nrGotmWins.find((w) => w.threadId)?.threadId ??
         nowPlayingMembers.find((p) => p.threadId)?.threadId ??
         linkedThreads[0] ??
         null;
-      if (threadId) {
-        const threadLabel = await this.buildThreadLink(
-          threadId,
-          interaction?.guildId ?? null,
-          interaction?.client as any,
-        );
-        embed.addFields({
-          name: "Game Discussion Thread",
-          value: threadLabel ?? `[Thread Link](https://discord.com/channels/@me/${threadId})`,
-          inline: true,
-        });
-      }
+      const headerLink = threadId
+        ? `https://discord.com/channels/${interaction?.guildId ?? "@me"}/${threadId}`
+        : null;
+      const headerLines = [
+        `## ${headerLink ? `[${game.title}](${headerLink})` : game.title}`,
+      ];
 
       const redditUrlRaw =
         associations.gotmWins.find((w) => w.redditUrl)?.redditUrl ??
@@ -672,18 +662,14 @@ export class GameDb {
         null;
       const redditUrl = redditUrlRaw === "__NO_VALUE__" ? null : redditUrlRaw;
       if (redditUrl) {
-        embed.addFields({
-          name: "Reddit Discussion Thread",
-          value: `[Reddit Link](${redditUrl})`,
-          inline: true,
-        });
+        pushRpgClubSection("Reddit Discussion Thread", `[Reddit Link](${redditUrl})`);
       }
 
       if (nowPlayingMembers.length) {
         const MAX_NOW_PLAYING_DISPLAY = 12;
         const lines = nowPlayingMembers.slice(0, MAX_NOW_PLAYING_DISPLAY).map((member) => {
           const name = member.globalName ?? member.username ?? member.userId;
-          return `${name} (<@${member.userId}>)`;
+          return name;
         });
 
         if (nowPlayingMembers.length > MAX_NOW_PLAYING_DISPLAY) {
@@ -691,11 +677,7 @@ export class GameDb {
           lines.push(`…and ${remaining} more playing now.`);
         }
 
-        embed.addFields({
-          name: "Now Playing",
-          value: lines.join("\n"),
-          inline: true,
-        });
+        pushRpgClubSection("Now Playing", lines.join(", "));
       }
 
       if (completions.length) {
@@ -709,7 +691,7 @@ export class GameDb {
         const uniqueList = Array.from(uniqueCompletions.values());
         const lines = uniqueList.slice(0, MAX_COMPLETIONS_DISPLAY).map((member) => {
           const name = member.globalName ?? member.username ?? member.userId;
-          return `${name} (<@${member.userId}>)`;
+          return name;
         });
 
         if (uniqueList.length > MAX_COMPLETIONS_DISPLAY) {
@@ -717,29 +699,25 @@ export class GameDb {
           lines.push(`…and ${remaining} more completed this.`);
         }
 
-        embed.addFields({
-          name: "Completed By",
-          value: lines.join("\n"),
-          inline: true,
-        });
+        pushRpgClubSection("Completed By", lines.join(", "));
       }
 
-      // Remaining association info (nominations) goes here before description
-      this.appendAssociationFields(embed, {
-        ...associations,
-        gotmWins: [],
-        nrGotmWins: [],
-      });
+      if (associations.gotmNominations.length) {
+        const lines = associations.gotmNominations.map(
+          (nom) => `Round ${nom.round} - ${nom.username}`,
+        );
+        pushRpgClubSection("GOTM Nominations", lines.join(", "));
+      }
 
-      // Description comes after rounds/links/nominations to keep those at the top
-      const descChunks = this.chunkText(description, 1024);
-      descChunks.forEach((chunk, idx) => {
-        embed.addFields({
-          name: idx === 0 ? "Description" : `Description (cont. ${idx + 1})`,
-          value: chunk,
-          inline: false,
-        });
-      });
+      if (associations.nrGotmNominations.length) {
+        const lines = associations.nrGotmNominations.map(
+          (nom) => `Round ${nom.round} - ${nom.username}`,
+        );
+        pushRpgClubSection("NR-GOTM Nominations", lines.join(", "));
+      }
+
+      const bodyParts: string[] = [];
+      bodyParts.push(`**Description**\n${description}`);
 
       if (releases.length > 0) {
         const releaseField = releases
@@ -747,84 +725,55 @@ export class GameDb {
             const platformName = platformMap.get(r.platformId) || "Unknown Platform";
             const regionName = regionMap.get(r.regionId) || "Unknown Region";
             const releaseDate = r.releaseDate ? r.releaseDate.toLocaleDateString() : "TBD";
-          const format = r.format ? `(${r.format})` : "";
-          return `• **${platformName}** (${regionName}) ${format} - ${releaseDate}`;
-        })
+            const format = r.format ? `(${r.format})` : "";
+            return `• **${platformName}** (${regionName}) ${format} - ${releaseDate}`;
+          })
           .join("\n");
-        embed.addFields({ name: "Releases", value: releaseField, inline: false });
-      }
-
-      const developers = await Game.getGameDevelopers(gameId);
-      if (developers.length) {
-        embed.addFields({ name: "Developers", value: developers.join(", "), inline: true });
-      }
-
-      const publishers = await Game.getGamePublishers(gameId);
-      if (publishers.length) {
-        embed.addFields({ name: "Publishers", value: publishers.join(", "), inline: true });
-      }
-
-      const genres = await Game.getGameGenres(gameId);
-      if (genres.length) {
-        embed.addFields({ name: "Genres", value: genres.join(", "), inline: true });
-      }
-
-      const themes = await Game.getGameThemes(gameId);
-      if (themes.length) {
-        embed.addFields({ name: "Themes", value: themes.join(", "), inline: true });
-      }
-
-      const modes = await Game.getGameModes(gameId);
-      if (modes.length) {
-        embed.addFields({ name: "Game Modes", value: modes.join(", "), inline: true });
-      }
-
-      const perspectives = await Game.getGamePerspectives(gameId);
-      if (perspectives.length) {
-        embed.addFields({
-          name: "Player Perspectives",
-          value: perspectives.join(", "),
-          inline: true,
-        });
-      }
-
-      const engines = await Game.getGameEngines(gameId);
-      if (engines.length) {
-        embed.addFields({ name: "Game Engines", value: engines.join(", "), inline: true });
-      }
-
-      const franchises = await Game.getGameFranchises(gameId);
-      if (franchises.length) {
-        embed.addFields({ name: "Franchises", value: franchises.join(", "), inline: true });
+        bodyParts.push(`**Releases**\n${releaseField}`);
       }
 
       const series = await Game.getGameSeries(gameId);
+      const detailSections: string[] = [];
+
       if (series) {
-        embed.addFields({ name: "Series / Collection", value: series, inline: true });
+        detailSections.push(`**Series / Collection**\n${series}`);
       }
 
       if (alternateVersions.length) {
         const lines = alternateVersions.map(
           (alt) => `• **${alt.title}** (GameDB #${alt.id})`,
         );
-        const value = this.buildListFieldValue(lines, 1024);
-        embed.addFields({ name: "Alternate Versions", value, inline: false });
+        const value = this.buildListFieldValue(lines, 2000);
+        detailSections.push(`**Alternate Versions**\n${value}`);
       }
 
-      if (game.totalRating) {
-        embed.addFields({
-          name: "IGDB Rating",
-          value: `${Math.round(game.totalRating)}/100`,
-          inline: true,
-        });
+      if (detailSections.length) {
+        bodyParts.push(detailSections.join("\n\n"));
       }
 
-      const files: AttachmentBuilder[] = [];
+      if (rpgClubSections.length) {
+        bodyParts.push(rpgClubSections.join("\n\n"));
+      }
+
+      const content = this.trimTextDisplayContent(
+        [headerLines.join("\n"), bodyParts.join("\n\n")].filter(Boolean).join("\n"),
+      );
       if (game.imageData) {
-        files.push(new AttachmentBuilder(game.imageData, { name: "game_image.png" }));
+        const headerSection = new SectionBuilder()
+          .addTextDisplayComponents(new TextDisplayBuilder().setContent(content))
+          .setThumbnailAccessory(
+            new ThumbnailBuilder().setURL("attachment://game_image.png"),
+          );
+        container.addSectionComponents(headerSection);
+      } else {
+        container.addTextDisplayComponents(new TextDisplayBuilder().setContent(content));
       }
 
-      return { embeds: [embed], files, hasThread: Boolean(threadId) };
+      return {
+        components: [container],
+        files,
+        hasThread: Boolean(threadId),
+      };
     } catch (error: any) {
       console.error("Failed to build game profile:", error);
       return null;
@@ -860,21 +809,11 @@ export class GameDb {
     return output.join("\n");
   }
 
-  private async buildThreadLink(
-    threadId: string,
-    guildId: string | null,
-    client: any,
-  ): Promise<string | null> {
-    if (!client || !guildId) {
-      return null;
+  private trimTextDisplayContent(content: string): string {
+    if (content.length <= 4000) {
+      return content;
     }
-    try {
-      const channel = await client.channels.fetch(threadId);
-      const name = (channel as any)?.name || "Thread Link";
-      return `[${name}](https://discord.com/channels/${guildId}/${threadId})`;
-    } catch {
-      return null;
-    }
+    return `${content.slice(0, 3997)}...`;
   }
 
   private buildGameProfileActionRow(
@@ -1138,9 +1077,9 @@ export class GameDb {
             })
           : [actionRow];
         await interaction.editReply({
-          embeds: profile.embeds,
           files: profile.files,
           components: updatedComponents,
+          flags: buildComponentsV2Flags(false),
         }).catch(() => {});
       }
     } catch (err: any) {
@@ -1460,40 +1399,6 @@ export class GameDb {
     }
   }
 
-  private appendAssociationFields(embed: EmbedBuilder, assoc: IGameAssociationSummary): void {
-    if (assoc.gotmWins.length) {
-      const lines = assoc.gotmWins.map((win) => {
-        const thread = win.threadId ? ` — Thread: <#${win.threadId}>` : "";
-        const reddit = win.redditUrl ? ` — [Reddit](${win.redditUrl})` : "";
-        return `Round ${win.round}${thread}${reddit}`;
-      });
-      embed.addFields({ name: "GOTM Round(s)", value: lines.join("\n"), inline: true });
-    }
-
-    if (assoc.nrGotmWins.length) {
-      const lines = assoc.nrGotmWins.map((win) => {
-        const thread = win.threadId ? ` — Thread: <#${win.threadId}>` : "";
-        const reddit = win.redditUrl ? ` — [Reddit](${win.redditUrl})` : "";
-        return `Round ${win.round}${thread}${reddit}`;
-      });
-      embed.addFields({ name: "NR-GOTM Round(s)", value: lines.join("\n"), inline: true });
-    }
-
-    if (assoc.gotmNominations.length) {
-      const lines = assoc.gotmNominations.map(
-        (nom) => `Round ${nom.round} — ${nom.username} (<@${nom.userId}>)`,
-      );
-      embed.addFields({ name: "GOTM Nominations", value: lines.join("\n"), inline: true });
-    }
-
-    if (assoc.nrGotmNominations.length) {
-      const lines = assoc.nrGotmNominations.map(
-        (nom) => `Round ${nom.round} — ${nom.username} (<@${nom.userId}>)`,
-      );
-      embed.addFields({ name: "NR-GOTM Nominations", value: lines.join("\n"), inline: true });
-    }
-  }
-
   @Slash({ description: "Search for a game", name: "search" })
   async search(
     @SlashOption({
@@ -1505,7 +1410,7 @@ export class GameDb {
     query: string | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction);
+    await safeDeferReply(interaction, { flags: buildComponentsV2Flags(false) });
 
     try {
       const searchTerm = query
@@ -1544,7 +1449,12 @@ export class GameDb {
       query: searchTerm,
     });
 
-    const response = this.buildSearchResponse(sessionId, GAME_SEARCH_SESSIONS.get(sessionId)!, 0);
+    const response = this.buildSearchResponse(
+      sessionId,
+      GAME_SEARCH_SESSIONS.get(sessionId)!,
+      0,
+      true,
+    );
 
     await safeReply(interaction, response);
   }
@@ -1605,15 +1515,14 @@ export class GameDb {
       return;
     }
 
-    const response = this.buildSearchResponse(sessionId, session, page);
+    const response = this.buildSearchResponse(sessionId, session, page, false);
     const actionRow = this.buildGameProfileActionRow(gameId, profile.hasThread);
 
     try {
       await interaction.editReply({
-        embeds: profile.embeds,
         files: profile.files,
-        components: [actionRow, ...response.components],
-        content: null as any,
+        components: [...profile.components, actionRow, ...response.components],
+        flags: response.flags,
       });
     } catch {
       // ignore update failures
@@ -1662,13 +1571,10 @@ export class GameDb {
       // ignore
     }
 
-    const response = this.buildSearchResponse(sessionId, session, newPage);
+    const response = this.buildSearchResponse(sessionId, session, newPage, true);
 
     try {
-      await interaction.editReply({
-        ...response,
-        content: null as any,
-      });
+      await interaction.editReply(response);
     } catch {
       // ignore
     }
@@ -1678,7 +1584,8 @@ export class GameDb {
     sessionId: string,
     session: { userId: string; results: any[]; query: string },
     page: number,
-  ): { embeds: EmbedBuilder[]; components: any[] } {
+    includeList: boolean,
+  ): { components: Array<ContainerBuilder | ActionRowBuilder<any>>; flags: number } {
     const totalPages = Math.max(
       1,
       Math.ceil(session.results.length / GAME_SEARCH_PAGE_SIZE),
@@ -1694,13 +1601,6 @@ export class GameDb {
     const title = session.query
       ? `Search Results for "${session.query}" (Page ${safePage + 1}/${totalPages})`
       : `All Games (Page ${safePage + 1}/${totalPages})`;
-
-    const embed = new EmbedBuilder()
-      .setTitle(title)
-      .setDescription(resultList || "No results.")
-      .setFooter({
-        text: `${session.results.length} results total`,
-      });
 
     const selectCustomId = `gamedb-search-select:${sessionId}:${session.userId}:${safePage}`;
     const options = displayedResults.map((g) => ({
@@ -1732,15 +1632,26 @@ export class GameDb {
       .setDisabled(nextDisabled);
 
     const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(prevButton, nextButton);
-    const components: ActionRowBuilder<any>[] = [selectRow];
+    const components: Array<ContainerBuilder | ActionRowBuilder<any>> = [];
+    if (includeList) {
+      const listText = resultList || "No results.";
+      const content = this.trimTextDisplayContent(
+        `## ${title}\n\n${listText}\n\n*${session.results.length} results total*`,
+      );
+      const container = new ContainerBuilder().addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(content),
+      );
+      components.push(container);
+    }
+    components.push(selectRow);
 
     if (shouldRenderPrevNextButtons(prevDisabled, nextDisabled)) {
       components.push(buttonRow);
     }
 
     return {
-      embeds: [embed],
       components,
+      flags: buildComponentsV2Flags(false),
     };
   }
 }
