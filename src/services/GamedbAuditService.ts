@@ -16,7 +16,7 @@ const MAX_LOG_CHARS = 3500;
 async function performAutoAcceptImages(
   onProgress?: (line: string) => Promise<void>,
 ): Promise<AutoAcceptResult> {
-  const games = await Game.getGamesForAudit(true, false, false);
+  const games = await Game.getGamesForAudit(true, false, false, false);
   const candidates = games.filter((game) => !game.imageData && game.igdbId);
 
   if (!candidates.length) {
@@ -70,7 +70,7 @@ async function performAutoAcceptImages(
 async function performAutoAcceptVideos(
   onProgress?: (line: string) => Promise<void>,
 ): Promise<AutoAcceptResult> {
-  const games = await Game.getGamesForAudit(false, false, true);
+  const games = await Game.getGamesForAudit(false, false, true, false);
   const candidates = games.filter((game) => !game.featuredVideoUrl && game.igdbId);
 
   if (!candidates.length) {

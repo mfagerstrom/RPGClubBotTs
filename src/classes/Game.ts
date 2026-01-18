@@ -1357,6 +1357,7 @@ export default class Game {
     missingImage: boolean,
     missingThread: boolean,
     missingFeaturedVideo: boolean,
+    missingDescription: boolean,
   ): Promise<IGame[]> {
     const pool = getOraclePool();
     const connection = await pool.getConnection();
@@ -1387,6 +1388,9 @@ export default class Game {
       }
       if (missingFeaturedVideo) {
         whereClauses.push("FEATURED_VIDEO_URL IS NULL");
+      }
+      if (missingDescription) {
+        whereClauses.push("DESCRIPTION IS NULL");
       }
 
       if (whereClauses.length === 0) {
@@ -1463,6 +1467,24 @@ export default class Game {
                 UPDATED_AT = SYSTIMESTAMP
           WHERE GAME_ID = :gameId`,
         { featuredVideoUrl, gameId },
+        { autoCommit: true },
+      );
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async updateGameDescription(gameId: number, description: string | null): Promise<void> {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.execute(
+        `UPDATE GAMEDB_GAMES
+            SET DESCRIPTION = :description,
+                UPDATED_AT = SYSTIMESTAMP
+          WHERE GAME_ID = :gameId`,
+        { description, gameId },
         { autoCommit: true },
       );
     } finally {

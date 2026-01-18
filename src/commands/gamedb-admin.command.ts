@@ -36,13 +36,15 @@ import { igdbService } from "../services/IgdbService.js";
 const AUDIT_PAGE_SIZE = 20;
 const AUDIT_VIDEO_MODAL_ID = "audit-video-modal";
 const AUDIT_VIDEO_INPUT_ID = "audit-video-url";
+const AUDIT_DESCRIPTION_MODAL_ID = "audit-description-modal";
+const AUDIT_DESCRIPTION_INPUT_ID = "audit-description";
 const AUDIT_SESSIONS = new Map<
   string,
   {
     userId: string;
     games: IGame[];
     page: number;
-    filter: "all" | "image" | "thread" | "video" | "mixed";
+    filter: "all" | "image" | "thread" | "video" | "description" | "mixed";
   }
 >();
 
@@ -81,6 +83,13 @@ export class GameDbAdmin {
       type: ApplicationCommandOptionType.Boolean,
     })
     missingFeaturedVideo: boolean | undefined,
+    @SlashOption({
+      description: "Filter for missing descriptions",
+      name: "missing_descriptions",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    missingDescriptions: boolean | undefined,
     @SlashOption({
       description: "Automatically accept IGDB images for all missing ones",
       name: "auto_accept_images",
@@ -127,20 +136,23 @@ export class GameDbAdmin {
     let checkImages = true;
     let checkThreads = true;
     let checkFeaturedVideo = true;
+    let checkDescriptions = true;
 
     if (
       missingImages !== undefined ||
       missingThreads !== undefined ||
-      missingFeaturedVideo !== undefined
+      missingFeaturedVideo !== undefined ||
+      missingDescriptions !== undefined
     ) {
       checkImages = !!missingImages;
       checkThreads = !!missingThreads;
       checkFeaturedVideo = !!missingFeaturedVideo;
+      checkDescriptions = !!missingDescriptions;
     }
 
-    if (!checkImages && !checkThreads && !checkFeaturedVideo) {
+    if (!checkImages && !checkThreads && !checkFeaturedVideo && !checkDescriptions) {
       await safeReply(interaction, {
-        content: "You must check for at least one thing (images, threads, or videos).",
+        content: "You must check for at least one thing (images, threads, videos, or descriptions).",
         flags: MessageFlags.Ephemeral, // Always ephemeral for errors/warnings? Or match showInChat? 
         // Typically warnings like this are okay to be ephemeral even if requested public, but let's stick to consistent visibility or force ephemeral for errors.
         // Actually, previous code forced ephemeral. Let's force ephemeral for validation errors to reduce spam.
@@ -148,7 +160,12 @@ export class GameDbAdmin {
       return;
     }
 
-    const games = await Game.getGamesForAudit(checkImages, checkThreads, checkFeaturedVideo);
+    const games = await Game.getGamesForAudit(
+      checkImages,
+      checkThreads,
+      checkFeaturedVideo,
+      checkDescriptions,
+    );
 
     if (games.length === 0) {
       await safeReply(interaction, {
@@ -163,6 +180,7 @@ export class GameDbAdmin {
       checkImages,
       checkThreads,
       checkFeaturedVideo,
+      checkDescriptions,
     );
 
     AUDIT_SESSIONS.set(sessionId, {
@@ -556,6 +574,29 @@ export class GameDbAdmin {
     await interaction.showModal(modal).catch(() => {});
   }
 
+  @ButtonComponent({ id: /^audit-description:[^:]+:\d+$/ })
+  async handleAuditDescription(interaction: ButtonInteraction): Promise<void> {
+    const [, sessionId, gameIdStr] = interaction.customId.split(":");
+    const session = AUDIT_SESSIONS.get(sessionId);
+    if (!session || session.userId !== interaction.user.id) return;
+
+    const modal = new ModalBuilder()
+      .setCustomId(`${AUDIT_DESCRIPTION_MODAL_ID}:${sessionId}:${gameIdStr}`)
+      .setTitle("Add Description")
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId(AUDIT_DESCRIPTION_INPUT_ID)
+            .setLabel("Description")
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true)
+            .setMaxLength(2000),
+        ),
+      );
+
+    await interaction.showModal(modal).catch(() => {});
+  }
+
   @ModalComponent({ id: /^audit-video-modal:[^:]+:\d+$/ })
   async handleAuditVideoModal(interaction: ModalSubmitInteraction): Promise<void> {
     const [, sessionId, gameIdStr] = interaction.customId.split(":");
@@ -591,17 +632,54 @@ export class GameDbAdmin {
     await interaction.deleteReply().catch(() => {});
   }
 
+  @ModalComponent({ id: /^audit-description-modal:[^:]+:\d+$/ })
+  async handleAuditDescriptionModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const [, sessionId, gameIdStr] = interaction.customId.split(":");
+    const gameId = Number(gameIdStr);
+    const session = AUDIT_SESSIONS.get(sessionId);
+    if (!session || session.userId !== interaction.user.id) return;
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+
+    const rawDescription = interaction.fields.getTextInputValue(AUDIT_DESCRIPTION_INPUT_ID);
+    const description = sanitizeUserInput(rawDescription, { preserveNewlines: true });
+    if (!description) {
+      await interaction.editReply({ content: "Please provide a valid description." });
+      return;
+    }
+
+    await Game.updateGameDescription(gameId, description);
+
+    const sessionGame = session.games.find((game) => game.id === gameId);
+    if (sessionGame) {
+      sessionGame.description = description;
+    }
+    if (session.filter === "description") {
+      session.games = session.games.filter((entry) => entry.id !== gameId);
+    }
+
+    const refreshed = await Game.getGameById(gameId);
+    if (refreshed && interaction.message) {
+      const response = await this.buildAuditDetailResponse(sessionId, refreshed);
+      await interaction.message.edit(response).catch(() => {});
+    }
+
+    await interaction.deleteReply().catch(() => {});
+  }
+
   private buildAuditFilterLabel(
     checkImages: boolean,
     checkThreads: boolean,
     checkFeaturedVideo: boolean,
-  ): "all" | "image" | "thread" | "video" | "mixed" {
-    const enabled = [checkImages, checkThreads, checkFeaturedVideo].filter(Boolean).length;
-    if (enabled === 3) return "all";
+    checkDescriptions: boolean,
+  ): "all" | "image" | "thread" | "video" | "description" | "mixed" {
+    const enabled = [checkImages, checkThreads, checkFeaturedVideo, checkDescriptions].filter(Boolean).length;
+    if (enabled === 4) return "all";
     if (enabled === 1) {
       if (checkImages) return "image";
       if (checkThreads) return "thread";
-      return "video";
+      if (checkFeaturedVideo) return "video";
+      return "description";
     }
     return "mixed";
   }
@@ -622,7 +700,8 @@ export class GameDbAdmin {
         slice.map((g) => {
           const imageStatus = g.imageData ? "✅Img" : "❌Img";
           const videoStatus = g.featuredVideoUrl ? "✅Vid" : "❌Vid";
-          return `• **${g.title}** (ID: ${g.id}) ${imageStatus} ${videoStatus}`;
+          const descStatus = g.description ? "✅Desc" : "❌Desc";
+          return `• **${g.title}** (ID: ${g.id}) ${imageStatus} ${videoStatus} ${descStatus}`;
         }).join("\n")
       )
       .setFooter({ text: `Page ${page + 1}/${totalPages}` });
@@ -719,6 +798,12 @@ export class GameDbAdmin {
         embed.addFields({ name: "Featured Video", value: "❌ Missing", inline: true });
     }
 
+    if (game.description) {
+        embed.addFields({ name: "Description", value: "✅ Present", inline: true });
+    } else {
+        embed.addFields({ name: "Description", value: "❌ Missing", inline: true });
+    }
+
     // Check thread link
     const associations = await Game.getGameAssociations(game.id);
     const nowPlaying = await Game.getNowPlayingMembers(game.id); // Also checks for thread links in its query
@@ -767,12 +852,20 @@ export class GameDbAdmin {
     }
 
     const session = AUDIT_SESSIONS.get(sessionId);
-    if (!game.featuredVideoUrl && session) {
-      if (["video", "mixed", "all"].includes(session.filter)) {
+    if (session) {
+      if (!game.featuredVideoUrl && ["video", "mixed", "all"].includes(session.filter)) {
         actionRow.addComponents(
           new ButtonBuilder()
             .setCustomId(`audit-video:${sessionId}:${game.id}`)
             .setLabel("Add YouTube Video")
+            .setStyle(ButtonStyle.Primary),
+        );
+      }
+      if (!game.description && ["description", "mixed", "all"].includes(session.filter)) {
+        actionRow.addComponents(
+          new ButtonBuilder()
+            .setCustomId(`audit-description:${sessionId}:${game.id}`)
+            .setLabel("Add Description")
             .setStyle(ButtonStyle.Primary),
         );
       }
