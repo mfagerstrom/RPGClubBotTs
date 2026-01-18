@@ -20,7 +20,7 @@ import {
   SlashOption,
 } from "discordx";
 import { safeDeferReply, safeReply, safeUpdate, sanitizeUserInput } from "../functions/InteractionUtils.js";
-import { performAutoAcceptImages } from "../services/GamedbAuditService.js";
+import { performAutoAcceptImages, performAutoAcceptVideos } from "../services/GamedbAuditService.js";
 import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import { isAdmin } from "./admin.command.js";
 import Game, { IGame } from "../classes/Game.js";
@@ -35,7 +35,7 @@ const AUDIT_SESSIONS = new Map<
     userId: string;
     games: IGame[];
     page: number;
-    filter: "both" | "image" | "thread";
+    filter: "all" | "image" | "thread" | "video" | "mixed";
   }
 >();
 
@@ -51,7 +51,7 @@ function parseGameIdList(raw: string): number[] {
 @SlashGroup({ description: "Game Database Commands", name: "gamedb" })
 @SlashGroup("gamedb")
 export class GameDbAdmin {
-  @Slash({ description: "Audit GameDB for missing images or threads (Admin only)", name: "audit" })
+  @Slash({ description: "Audit GameDB for missing images, threads, or videos (Admin only)", name: "audit" })
   async audit(
     @SlashOption({
       description: "Filter for missing images",
@@ -68,12 +68,26 @@ export class GameDbAdmin {
     })
     missingThreads: boolean | undefined,
     @SlashOption({
+      description: "Filter for missing featured videos",
+      name: "missing_featured_video",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    missingFeaturedVideo: boolean | undefined,
+    @SlashOption({
       description: "Automatically accept IGDB images for all missing ones",
       name: "auto_accept_images",
       required: false,
       type: ApplicationCommandOptionType.Boolean,
     })
     autoAcceptImages: boolean | undefined,
+    @SlashOption({
+      description: "Automatically accept IGDB featured videos for all missing ones",
+      name: "auto_accept_videos",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    autoAcceptVideos: boolean | undefined,
     @SlashOption({
       description: "Show in chat (public) instead of ephemeral",
       name: "showinchat",
@@ -88,8 +102,13 @@ export class GameDbAdmin {
 
     if (!(await isAdmin(interaction))) return;
 
-    if (autoAcceptImages) {
-      await this.runAutoAcceptImages(interaction, isPublic);
+    if (autoAcceptImages || autoAcceptVideos) {
+      if (autoAcceptImages) {
+        await this.runAutoAcceptImages(interaction, isPublic, Boolean(autoAcceptVideos));
+      }
+      if (autoAcceptVideos) {
+        await this.runAutoAcceptVideos(interaction, isPublic, Boolean(autoAcceptImages));
+      }
       return;
     }
 
@@ -100,15 +119,21 @@ export class GameDbAdmin {
     
     let checkImages = true;
     let checkThreads = true;
+    let checkFeaturedVideo = true;
 
-    if (missingImages !== undefined || missingThreads !== undefined) {
+    if (
+      missingImages !== undefined ||
+      missingThreads !== undefined ||
+      missingFeaturedVideo !== undefined
+    ) {
       checkImages = !!missingImages;
       checkThreads = !!missingThreads;
+      checkFeaturedVideo = !!missingFeaturedVideo;
     }
 
-    if (!checkImages && !checkThreads) {
+    if (!checkImages && !checkThreads && !checkFeaturedVideo) {
       await safeReply(interaction, {
-        content: "You must check for at least one thing (images or threads).",
+        content: "You must check for at least one thing (images, threads, or videos).",
         flags: MessageFlags.Ephemeral, // Always ephemeral for errors/warnings? Or match showInChat? 
         // Typically warnings like this are okay to be ephemeral even if requested public, but let's stick to consistent visibility or force ephemeral for errors.
         // Actually, previous code forced ephemeral. Let's force ephemeral for validation errors to reduce spam.
@@ -116,7 +141,7 @@ export class GameDbAdmin {
       return;
     }
 
-    const games = await Game.getGamesForAudit(checkImages, checkThreads);
+    const games = await Game.getGamesForAudit(checkImages, checkThreads, checkFeaturedVideo);
 
     if (games.length === 0) {
       await safeReply(interaction, {
@@ -127,11 +152,17 @@ export class GameDbAdmin {
     }
 
     const sessionId = interaction.id;
+    const filterLabel = this.buildAuditFilterLabel(
+      checkImages,
+      checkThreads,
+      checkFeaturedVideo,
+    );
+
     AUDIT_SESSIONS.set(sessionId, {
       userId: interaction.user.id,
       games,
       page: 0,
-      filter: checkImages && checkThreads ? "both" : checkImages ? "image" : "thread",
+      filter: filterLabel,
     });
 
     const response = this.buildAuditListResponse(sessionId);
@@ -429,6 +460,64 @@ export class GameDbAdmin {
     }
   }
 
+  @ButtonComponent({ id: /^audit-accept-video:[^:]+:\d+$/ })
+  async handleAuditAcceptVideo(interaction: ButtonInteraction): Promise<void> {
+    const [, sessionId, gameIdStr] = interaction.customId.split(":");
+    const gameId = Number(gameIdStr);
+
+    const session = AUDIT_SESSIONS.get(sessionId);
+    if (!session || session.userId !== interaction.user.id) return;
+
+    const game = session.games.find(g => g.id === gameId);
+    if (!game || !game.igdbId) {
+      await safeReply(interaction, { content: "Invalid game or missing IGDB ID.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    try {
+      await interaction.deferUpdate();
+    } catch {
+      // ignore
+    }
+
+    try {
+      const details = await igdbService.getGameDetails(game.igdbId);
+      const videoUrl = details ? Game.getFeaturedVideoUrl(details) : null;
+      if (!videoUrl) {
+        await safeReply(interaction, { content: "No featured video found on IGDB.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      await Game.updateFeaturedVideoUrl(gameId, videoUrl);
+      game.featuredVideoUrl = videoUrl;
+
+      const refreshed = await Game.getGameById(gameId);
+      if (refreshed) {
+        const response = await this.buildAuditDetailResponse(sessionId, refreshed);
+        await safeUpdate(interaction, response);
+      }
+
+      await safeReply(interaction, { content: "Featured video saved!", flags: MessageFlags.Ephemeral });
+    } catch (err: any) {
+      await safeReply(interaction, { content: `Error fetching featured video: ${err.message}`, flags: MessageFlags.Ephemeral });
+    }
+  }
+
+  private buildAuditFilterLabel(
+    checkImages: boolean,
+    checkThreads: boolean,
+    checkFeaturedVideo: boolean,
+  ): "all" | "image" | "thread" | "video" | "mixed" {
+    const enabled = [checkImages, checkThreads, checkFeaturedVideo].filter(Boolean).length;
+    if (enabled === 3) return "all";
+    if (enabled === 1) {
+      if (checkImages) return "image";
+      if (checkThreads) return "thread";
+      return "video";
+    }
+    return "mixed";
+  }
+
   private buildAuditListResponse(sessionId: string) {
     const session = AUDIT_SESSIONS.get(sessionId)!;
     const { games, page } = session;
@@ -442,7 +531,11 @@ export class GameDbAdmin {
       .setTitle(`GameDB Audit (${session.filter})`)
       .setDescription(
         `Showing items ${start + 1}-${Math.min(end, games.length)} of ${games.length}\n\n` +
-        slice.map(g => `• **${g.title}** (ID: ${g.id}) ${!g.imageData ? "❌Img" : "✅Img"}`).join("\n")
+        slice.map((g) => {
+          const imageStatus = g.imageData ? "✅Img" : "❌Img";
+          const videoStatus = g.featuredVideoUrl ? "✅Vid" : "❌Vid";
+          return `• **${g.title}** (ID: ${g.id}) ${imageStatus} ${videoStatus}`;
+        }).join("\n")
       )
       .setFooter({ text: `Page ${page + 1}/${totalPages}` });
 
@@ -497,19 +590,29 @@ export class GameDbAdmin {
 
     let igdbImageAvailable = false;
     let igdbImageUrl = "";
+    let igdbVideoUrl: string | null = null;
+    let igdbDetailsLoaded = false;
 
     // Check IGDB for image if missing
-    if (!game.imageData && game.igdbId) {
-       try {
-         const details = await igdbService.getGameDetails(game.igdbId);
-         if (details?.cover?.image_id) {
-             igdbImageAvailable = true;
-             igdbImageUrl = `https://images.igdb.com/igdb/image/upload/t_cover_big/${details.cover.image_id}.jpg`;
-             embed.addFields({ name: "IGDB Suggestion", value: "[Link to Image](" + igdbImageUrl + ")", inline: true });
-         }
-       } catch {
-         // ignore
-       }
+    if ((!game.imageData || !game.featuredVideoUrl) && game.igdbId) {
+      try {
+        const details = await igdbService.getGameDetails(game.igdbId);
+        igdbDetailsLoaded = true;
+        if (!game.imageData && details?.cover?.image_id) {
+          igdbImageAvailable = true;
+          igdbImageUrl = `https://images.igdb.com/igdb/image/upload/t_cover_big/${details.cover.image_id}.jpg`;
+          embed.addFields({
+            name: "IGDB Suggestion",
+            value: "[Link to Image](" + igdbImageUrl + ")",
+            inline: true,
+          });
+        }
+        if (details && !game.featuredVideoUrl) {
+          igdbVideoUrl = Game.getFeaturedVideoUrl(details);
+        }
+      } catch {
+        // ignore
+      }
     }
 
     if (game.imageData) {
@@ -520,6 +623,12 @@ export class GameDbAdmin {
         embed.setImage("attachment://cover.jpg");
     } else {
         embed.addFields({ name: "Image", value: "❌ Missing", inline: true });
+    }
+
+    if (game.featuredVideoUrl) {
+        embed.addFields({ name: "Featured Video", value: "✅ Present", inline: true });
+    } else {
+        embed.addFields({ name: "Featured Video", value: "❌ Missing", inline: true });
     }
 
     // Check thread link
@@ -556,6 +665,16 @@ export class GameDbAdmin {
         );
     }
 
+    if (!game.featuredVideoUrl && (igdbVideoUrl || igdbDetailsLoaded)) {
+        actionRow.addComponents(
+            new ButtonBuilder()
+                .setCustomId(`audit-accept-video:${sessionId}:${game.id}`)
+                .setLabel("Accept IGDB Video")
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(!igdbVideoUrl)
+        );
+    }
+
     actionRow.addComponents(
         new ButtonBuilder()
             .setCustomId(`audit-img:${sessionId}:${game.id}`)
@@ -574,7 +693,11 @@ export class GameDbAdmin {
     };
   }
 
-  private async runAutoAcceptImages(interaction: CommandInteraction, isPublic: boolean): Promise<void> {
+  private async runAutoAcceptImages(
+    interaction: CommandInteraction,
+    isPublic: boolean,
+    useFollowUp: boolean,
+  ): Promise<void> {
     const embed = new EmbedBuilder()
       .setTitle("Auto-Accept IGDB Images")
       .setDescription("Starting auto accept run...")
@@ -582,6 +705,7 @@ export class GameDbAdmin {
 
     await safeReply(interaction, {
       embeds: [embed],
+      __forceFollowUp: useFollowUp,
       flags: isPublic ? undefined : MessageFlags.Ephemeral,
     });
 
@@ -609,6 +733,60 @@ export class GameDbAdmin {
     if (!logs.length) {
       await safeReply(interaction, {
         content: "No games found with missing images and valid IGDB IDs.",
+        flags: isPublic ? undefined : MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const summary =
+      `\n**Run Complete**\n✅ Updated: ${updated}\n` +
+      `⏭️ Skipped: ${skipped}\n❌ Failed: ${failed}`;
+    await updateEmbed(summary);
+    embed.setColor(0x2ecc71);
+    await interaction.editReply({ embeds: [embed] });
+  }
+
+  private async runAutoAcceptVideos(
+    interaction: CommandInteraction,
+    isPublic: boolean,
+    useFollowUp: boolean,
+  ): Promise<void> {
+    const embed = new EmbedBuilder()
+      .setTitle("Auto-Accept IGDB Videos")
+      .setDescription("Starting auto accept run...")
+      .setColor(0x0099ff);
+
+    await safeReply(interaction, {
+      embeds: [embed],
+      __forceFollowUp: useFollowUp,
+      flags: isPublic ? undefined : MessageFlags.Ephemeral,
+    });
+
+    const logLines: string[] = [];
+    const updateEmbed = async (log?: string) => {
+      if (log) {
+        logLines.push(log);
+      }
+
+      let content = logLines.join("\n");
+      while (content.length > 3500) {
+        logLines.shift();
+        content = logLines.join("\n");
+      }
+
+      embed.setDescription(content || "Processing...");
+      try {
+        await interaction.editReply({ embeds: [embed] });
+      } catch {
+        // ignore
+      }
+    };
+
+    const { updated, skipped, failed, logs } = await performAutoAcceptVideos(updateEmbed);
+    if (!logs.length) {
+      await safeReply(interaction, {
+        content: "No games found with missing featured videos and valid IGDB IDs.",
+        __forceFollowUp: useFollowUp,
         flags: isPublic ? undefined : MessageFlags.Ephemeral,
       });
       return;

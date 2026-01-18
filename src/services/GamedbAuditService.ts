@@ -16,7 +16,7 @@ const MAX_LOG_CHARS = 3500;
 async function performAutoAcceptImages(
   onProgress?: (line: string) => Promise<void>,
 ): Promise<AutoAcceptResult> {
-  const games = await Game.getGamesForAudit(true, false);
+  const games = await Game.getGamesForAudit(true, false, false);
   const candidates = games.filter((game) => !game.imageData && game.igdbId);
 
   if (!candidates.length) {
@@ -54,6 +54,63 @@ async function performAutoAcceptImages(
       const buffer = Buffer.from(resp.data);
 
       await Game.updateGameImage(game.id, buffer);
+      updated++;
+      await addLog(`✅ Updated **${game.title}**`);
+    } catch (err: any) {
+      failed++;
+      await addLog(`❌ Failed **${game.title}**: ${err?.message ?? String(err)}`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  return { updated, skipped, failed, logs };
+}
+
+async function performAutoAcceptVideos(
+  onProgress?: (line: string) => Promise<void>,
+): Promise<AutoAcceptResult> {
+  const games = await Game.getGamesForAudit(false, false, true);
+  const candidates = games.filter((game) => !game.featuredVideoUrl && game.igdbId);
+
+  if (!candidates.length) {
+    return { updated: 0, skipped: 0, failed: 0, logs: [] };
+  }
+
+  const logs: string[] = [];
+  const addLog = async (line: string): Promise<void> => {
+    logs.push(line);
+    if (onProgress) {
+      await onProgress(line);
+    }
+  };
+
+  let updated = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const game of candidates) {
+    try {
+      if (!game.igdbId) {
+        skipped++;
+        continue;
+      }
+
+      const details = await igdbService.getGameDetails(game.igdbId);
+      if (!details) {
+        skipped++;
+        await addLog(`⏭️ Skipped **${game.title}** (No IGDB details)`);
+        continue;
+      }
+
+      const videoUrl = Game.getFeaturedVideoUrl(details);
+      if (!videoUrl) {
+        skipped++;
+        await addLog(`⏭️ Skipped **${game.title}** (No IGDB video found)`);
+        continue;
+      }
+
+      await Game.updateFeaturedVideoUrl(game.id, videoUrl);
       updated++;
       await addLog(`✅ Updated **${game.title}**`);
     } catch (err: any) {
@@ -157,4 +214,4 @@ export function startGamedbAutoImageAuditService(
   }, intervalMs);
 }
 
-export { performAutoAcceptImages };
+export { performAutoAcceptImages, performAutoAcceptVideos };
