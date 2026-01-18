@@ -8,12 +8,17 @@ import {
   CommandInteraction,
   EmbedBuilder,
   MessageFlags,
+  ModalSubmitInteraction,
+  ModalBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
+  TextInputBuilder,
+  TextInputStyle,
 } from "discord.js";
 import {
   ButtonComponent,
   Discord,
+  ModalComponent,
   SelectMenuComponent,
   Slash,
   SlashGroup,
@@ -29,6 +34,8 @@ import axios from "axios";
 import { igdbService } from "../services/IgdbService.js";
 
 const AUDIT_PAGE_SIZE = 20;
+const AUDIT_VIDEO_MODAL_ID = "audit-video-modal";
+const AUDIT_VIDEO_INPUT_ID = "audit-video-url";
 const AUDIT_SESSIONS = new Map<
   string,
   {
@@ -292,6 +299,26 @@ export class GameDbAdmin {
     await safeUpdate(interaction, response);
   }
 
+  @ButtonComponent({ id: /^audit-next:[^:]+:\d+$/ })
+  async handleAuditNext(interaction: ButtonInteraction): Promise<void> {
+    const [, sessionId, gameIdStr] = interaction.customId.split(":");
+    const gameId = Number(gameIdStr);
+    const session = AUDIT_SESSIONS.get(sessionId);
+    if (!session || session.userId !== interaction.user.id) return;
+
+    const currentIndex = session.games.findIndex((game) => game.id === gameId);
+    const nextIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
+    if (nextIndex >= session.games.length) {
+      const response = this.buildAuditListResponse(sessionId);
+      await safeUpdate(interaction, response);
+      return;
+    }
+
+    const nextGame = session.games[nextIndex];
+    const response = await this.buildAuditDetailResponse(sessionId, nextGame);
+    await safeUpdate(interaction, response);
+  }
+
   @ButtonComponent({ id: /^audit-accept-igdb:[^:]+:\d+$/ })
   async handleAuditAcceptIgdb(interaction: ButtonInteraction): Promise<void> {
     const [, sessionId, gameIdStr] = interaction.customId.split(":");
@@ -490,6 +517,9 @@ export class GameDbAdmin {
 
       await Game.updateFeaturedVideoUrl(gameId, videoUrl);
       game.featuredVideoUrl = videoUrl;
+      if (session.filter === "video") {
+        session.games = session.games.filter((entry) => entry.id !== gameId);
+      }
 
       const refreshed = await Game.getGameById(gameId);
       if (refreshed) {
@@ -497,10 +527,68 @@ export class GameDbAdmin {
         await safeUpdate(interaction, response);
       }
 
-      await safeReply(interaction, { content: "Featured video saved!", flags: MessageFlags.Ephemeral });
+      // no extra success message
     } catch (err: any) {
       await safeReply(interaction, { content: `Error fetching featured video: ${err.message}`, flags: MessageFlags.Ephemeral });
     }
+  }
+
+  @ButtonComponent({ id: /^audit-video:[^:]+:\d+$/ })
+  async handleAuditVideo(interaction: ButtonInteraction): Promise<void> {
+    const [, sessionId, gameIdStr] = interaction.customId.split(":");
+    const session = AUDIT_SESSIONS.get(sessionId);
+    if (!session || session.userId !== interaction.user.id) return;
+
+    const modal = new ModalBuilder()
+      .setCustomId(`${AUDIT_VIDEO_MODAL_ID}:${sessionId}:${gameIdStr}`)
+      .setTitle("Add YouTube Video")
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId(AUDIT_VIDEO_INPUT_ID)
+            .setLabel("YouTube URL")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setPlaceholder("https://www.youtube.com/watch?v=..."),
+        ),
+      );
+
+    await interaction.showModal(modal).catch(() => {});
+  }
+
+  @ModalComponent({ id: /^audit-video-modal:[^:]+:\d+$/ })
+  async handleAuditVideoModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const [, sessionId, gameIdStr] = interaction.customId.split(":");
+    const gameId = Number(gameIdStr);
+    const session = AUDIT_SESSIONS.get(sessionId);
+    if (!session || session.userId !== interaction.user.id) return;
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+
+    const rawUrl = interaction.fields.getTextInputValue(AUDIT_VIDEO_INPUT_ID);
+    const videoUrl = sanitizeUserInput(rawUrl, { preserveNewlines: false });
+    if (!videoUrl || !videoUrl.startsWith("http")) {
+      await interaction.editReply({ content: "Please provide a valid YouTube URL." });
+      return;
+    }
+
+    await Game.updateFeaturedVideoUrl(gameId, videoUrl);
+
+    const sessionGame = session.games.find((game) => game.id === gameId);
+    if (sessionGame) {
+      sessionGame.featuredVideoUrl = videoUrl;
+    }
+    if (session.filter === "video") {
+      session.games = session.games.filter((entry) => entry.id !== gameId);
+    }
+
+    const refreshed = await Game.getGameById(gameId);
+    if (refreshed && interaction.message) {
+      const response = await this.buildAuditDetailResponse(sessionId, refreshed);
+      await interaction.message.edit(response).catch(() => {});
+    }
+
+    await interaction.deleteReply().catch(() => {});
   }
 
   private buildAuditFilterLabel(
@@ -647,49 +735,70 @@ export class GameDbAdmin {
         embed.addFields({ name: "Thread", value: "❌ Missing", inline: true });
     }
 
-    const actionRow = new ActionRowBuilder<ButtonBuilder>();
-    
-    actionRow.addComponents(
-        new ButtonBuilder()
-            .setCustomId(`audit-back:${sessionId}`)
-            .setLabel("Back to List")
-            .setStyle(ButtonStyle.Secondary)
+    const navRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`audit-back:${sessionId}`)
+        .setLabel("Back to List")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`audit-next:${sessionId}:${game.id}`)
+        .setLabel("Go to Next Game")
+        .setStyle(ButtonStyle.Secondary),
     );
 
+    const actionRow = new ActionRowBuilder<ButtonBuilder>();
     if (!game.imageData && igdbImageAvailable) {
-        actionRow.addComponents(
-            new ButtonBuilder()
-                .setCustomId(`audit-accept-igdb:${sessionId}:${game.id}`)
-                .setLabel("Accept IGDB Image")
-                .setStyle(ButtonStyle.Success)
-        );
+      actionRow.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`audit-accept-igdb:${sessionId}:${game.id}`)
+          .setLabel("Accept IGDB Image")
+          .setStyle(ButtonStyle.Success),
+      );
     }
 
     if (!game.featuredVideoUrl && (igdbVideoUrl || igdbDetailsLoaded)) {
-        actionRow.addComponents(
-            new ButtonBuilder()
-                .setCustomId(`audit-accept-video:${sessionId}:${game.id}`)
-                .setLabel("Accept IGDB Video")
-                .setStyle(ButtonStyle.Secondary)
-                .setDisabled(!igdbVideoUrl)
-        );
+      actionRow.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`audit-accept-video:${sessionId}:${game.id}`)
+          .setLabel("Accept IGDB Video")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(!igdbVideoUrl),
+      );
     }
 
-    actionRow.addComponents(
-        new ButtonBuilder()
-            .setCustomId(`audit-img:${sessionId}:${game.id}`)
-            .setLabel("Upload Image")
+    const session = AUDIT_SESSIONS.get(sessionId);
+    if (!game.featuredVideoUrl && session) {
+      if (["video", "mixed", "all"].includes(session.filter)) {
+        actionRow.addComponents(
+          new ButtonBuilder()
+            .setCustomId(`audit-video:${sessionId}:${game.id}`)
+            .setLabel("Add YouTube Video")
             .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-            .setCustomId(`audit-thread:${sessionId}:${game.id}`)
-            .setLabel("Link Thread")
-            .setStyle(ButtonStyle.Success)
+        );
+      }
+    }
+
+    const editRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`audit-img:${sessionId}:${game.id}`)
+        .setLabel("Upload Image")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`audit-thread:${sessionId}:${game.id}`)
+        .setLabel("Link Thread")
+        .setStyle(ButtonStyle.Success),
     );
 
+    const components: ActionRowBuilder<ButtonBuilder>[] = [navRow];
+    if (actionRow.components.length) {
+      components.push(actionRow);
+    }
+    components.push(editRow);
+
     return {
-        embeds: [embed],
-        components: [actionRow],
-        files: files.length ? files : undefined,
+      embeds: [embed],
+      components,
+      files: files.length ? files : undefined,
     };
   }
 
