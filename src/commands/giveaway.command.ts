@@ -33,6 +33,7 @@ import {
   createGameKey,
   getGameKeyById,
   listAvailableGameKeys,
+  listKeysByDonor,
   revokeGameKey,
 } from "../classes/GameKey.js";
 import Member from "../classes/Member.js";
@@ -256,6 +257,20 @@ function buildClaimConfirmComponents(
     .setLabel("No")
     .setStyle(ButtonStyle.Secondary);
   return [new ActionRowBuilder<ButtonBuilder>().addComponents(yesButton, noButton)];
+}
+
+function buildDonorInventorySummary(keys: Awaited<ReturnType<typeof listKeysByDonor>>): string {
+  if (!keys.length) {
+    return "You have not donated any keys yet.";
+  }
+  const availableKeys = keys.filter((key) => !key.claimedByUserId);
+  if (!availableKeys.length) {
+    return "You do not have any available donated keys right now.";
+  }
+  const lines = availableKeys.map((key) => {
+    return `• **${key.gameTitle}** (${key.platform})`;
+  });
+  return lines.join("\n");
 }
 
 function formatDonorNotifyStatus(enabled: boolean): string {
@@ -665,10 +680,17 @@ export class GiveawayCommand {
   @ButtonComponent({ id: GIVEAWAY_DONOR_SETTINGS_ID })
   async handleDonorSettings(interaction: ButtonInteraction): Promise<void> {
     const enabled = await Member.getGiveawayDonorNotifySetting(interaction.user.id);
+    const donatedKeys = await listKeysByDonor(interaction.user.id);
+    const inventory = buildDonorInventorySummary(donatedKeys);
     await safeReply(interaction, {
       content:
-        "Notify you when your donated keys are claimed? " +
-        `Current setting: **${formatDonorNotifyStatus(enabled)}**.`,
+        [
+          "Your donated keys:",
+          inventory,
+          "",
+          "Notify you when your donated keys are claimed? " +
+            `Current setting: **${formatDonorNotifyStatus(enabled)}**.`,
+        ].join("\n"),
       components: [buildDonorSettingsRow(interaction.user.id, enabled)],
       flags: MessageFlags.Ephemeral,
     });
@@ -692,10 +714,17 @@ export class GiveawayCommand {
 
     const enabled = choice === "yes";
     await Member.setGiveawayDonorNotifySetting(interaction.user.id, enabled);
+    const donatedKeys = await listKeysByDonor(interaction.user.id);
+    const inventory = buildDonorInventorySummary(donatedKeys);
     await interaction.update({
       content:
-        "Notify you when your donated keys are claimed? " +
-        `Current setting: **${formatDonorNotifyStatus(enabled)}**.`,
+        [
+          "Your donated keys:",
+          inventory,
+          "",
+          "Notify you when your donated keys are claimed? " +
+            `Current setting: **${formatDonorNotifyStatus(enabled)}**.`,
+        ].join("\n"),
       components: [buildDonorSettingsRow(interaction.user.id, enabled)],
     }).catch(() => {});
   }

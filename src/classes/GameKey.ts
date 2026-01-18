@@ -175,6 +175,41 @@ export async function listAvailableGameKeys(
   }
 }
 
+export async function listKeysByDonor(userId: string): Promise<IGameKey[]> {
+  const connection = await getOraclePool().getConnection();
+  try {
+    const result = await connection.execute<{
+      KEY_ID: number;
+      GAME_TITLE: string;
+      PLATFORM: string;
+      KEY_VALUE: string;
+      DONOR_USER_ID: string;
+      CLAIMED_BY_USER_ID: string | null;
+      CLAIMED_AT: Date | string | null;
+      CREATED_AT: Date | string;
+      UPDATED_AT: Date | string;
+    }>(
+      `SELECT KEY_ID,
+              GAME_TITLE,
+              PLATFORM,
+              KEY_VALUE,
+              DONOR_USER_ID,
+              CLAIMED_BY_USER_ID,
+              CLAIMED_AT,
+              CREATED_AT,
+              UPDATED_AT
+         FROM RPG_CLUB_GAME_KEYS
+        WHERE DONOR_USER_ID = :userId
+        ORDER BY CREATED_AT DESC, KEY_ID DESC`,
+      { userId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+    );
+    return (result.rows ?? []).map(mapGameKeyRow);
+  } finally {
+    await connection.close();
+  }
+}
+
 export async function claimGameKey(
   keyId: number,
   userId: string,
