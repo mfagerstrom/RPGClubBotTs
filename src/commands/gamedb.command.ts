@@ -530,22 +530,8 @@ export class GameDb {
       return;
     }
 
-    // 7. Final Success Message with embed left in chat
-    const embed = new EmbedBuilder()
-      .setTitle(`Added to GameDB: ${newGame.title}`)
-      .setDescription(`GameDB ID: ${newGame.id}${igdbUrl ? `\nIGDB: ${igdbUrl}` : ""}`)
-      .setColor(0x0099ff);
-    const attachments: AttachmentBuilder[] = [];
-    if (imageData) {
-      embed.setImage("attachment://cover.jpg");
-      attachments.push(new AttachmentBuilder(imageData, { name: "cover.jpg" }));
-    }
-    await safeReply(interaction, {
-      content: `Successfully added **${newGame.title}** (ID: ${newGame.id}) to the database!`,
-      embeds: [embed],
-      files: attachments.length ? attachments : undefined,
-      __forceFollowUp: true,
-    });
+    // 7. Show the /gamedb view for the newly added game
+    await this.showGameProfile(interaction, newGame.id);
   }
 
   @Slash({ description: "View details of a game", name: "view" })
@@ -593,6 +579,7 @@ export class GameDb {
     }
 
     await safeReply(interaction, {
+      embeds: [],
       files: profile.files,
       components,
       flags: buildComponentsV2Flags(false),
@@ -1114,6 +1101,7 @@ export class GameDb {
             })
           : [actionRow];
         await interaction.editReply({
+          embeds: [],
           files: profile.files,
           components: updatedComponents,
           flags: buildComponentsV2Flags(false),
@@ -1561,6 +1549,7 @@ export class GameDb {
 
     try {
       await interaction.editReply({
+        embeds: [],
         files: profile.files,
         components: [...profile.components, actionRow, ...response.components],
         flags: response.flags,
