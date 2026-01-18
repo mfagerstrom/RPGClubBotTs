@@ -22,6 +22,8 @@ const OPT_OUT_GAME_PREFIX = "presence-np-optout-game";
 const OPT_OUT_ALL_PREFIX = "presence-np-optout-all";
 const UNANSWERED_GAME_LIMIT = 3;
 const UNANSWERED_USER_LIMIT = 6;
+const RICH_PRESENCE_PROMPTS_ENABLED =
+  process.env.RICH_PRESENCE_NOW_PLAYING_PROMPTS_ENABLED === "true";
 
 type PresencePromptSession = {
   userId: string;
@@ -96,6 +98,7 @@ export class PresenceUpdate {
     [oldPresence, newPresence]: ArgsOf<"presenceUpdate">,
     client: Client,
   ): Promise<void> {
+    if (!RICH_PRESENCE_PROMPTS_ENABLED) return;
     const member = newPresence?.member;
     const user = member?.user;
     if (!user || user.bot) return;
