@@ -298,3 +298,9 @@
 2026-01-17 - Commit ID: 864c077 - fix: improved UX for rich presence auto now-playing prompts
 2026-01-16 - Commit ID: 7219684 - ...
 2026-01-16 - Commit ID: e6ebdc9 - fix: now-playing should render after a successful addition
+2026-01-18 - Commit ID: 886bf50 - refactor: removed more deprecated commands
+2026-01-18 - Commit ID: 98cba4e - refactor: removed old, deprecated commands
+2026-01-18 - Commit ID: e3a9382 - even more...
+2026-01-18 - Commit ID: b7f5c15 - more log tweaks
+2026-01-18 - Commit ID: 0cded86 - fix: logging tweak
+2026-01-18 - Commit ID: 184c7ce - issue-51: added channel name to message-related logs

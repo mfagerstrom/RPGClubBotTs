@@ -7,6 +7,7 @@ yarn.lock
 
 # folders
 node_modules
+snapshots
 build
 .qodo
 .node
