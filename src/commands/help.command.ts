@@ -265,19 +265,19 @@ const HELP_TOPICS: HelpTopic[] = [
   {
     id: "admin",
     label: "/admin",
-    summary: "Admin tools for presence and GOTM/NR-GOTM management.",
+    summary: "Admin tools for GOTM/NR-GOTM management.",
     syntax: "Use /admin help to see the subcommands and details.",
   },
   {
     id: "mod",
     label: "/mod",
-    summary: "Moderator tools for presence and NR-GOTM management.",
+    summary: "Moderator tools for NR-GOTM management.",
     syntax: "Use /mod help to see the subcommands and details.",
   },
   {
     id: "superadmin",
     label: "/superadmin",
-    summary: "Server owner tools for GOTM/NR-GOTM and presence management.",
+    summary: "Server owner tools for GOTM/NR-GOTM management.",
     syntax: "Use /superadmin help to see the subcommands and details.",
   },
   {

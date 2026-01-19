@@ -1,14 +1,12 @@
 import {
   ActionRowBuilder,
   ApplicationCommandOptionType,
-  ButtonBuilder,
-  ButtonStyle,
   EmbedBuilder,
   MessageFlags,
   StringSelectMenuBuilder,
   type StringSelectMenuInteraction,
 } from "discord.js";
-import type { ButtonInteraction, CommandInteraction, Message, User } from "discord.js";
+import type { ButtonInteraction, CommandInteraction, User } from "discord.js";
 import axios from "axios";
 import {
   ButtonComponent,
@@ -20,26 +18,16 @@ import {
   SlashChoice,
 } from "discordx";
 import {
-  getPresenceHistory,
-  setPresence,
-  type IPresenceHistoryEntry,
-} from "../functions/SetPresence.js";
-import {
   AnyRepliable,
   safeDeferReply,
   safeReply,
   safeUpdate,
   sanitizeUserInput,
 } from "../functions/InteractionUtils.js";
-import Gotm from "../classes/Gotm.js";
-import NrGotm from "../classes/NrGotm.js";
 import Member, { type IMemberRecord } from "../classes/Member.js";
 import { getOraclePool } from "../db/oracleClient.js";
 import Game, { type IGame } from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
-import { loadGotmFromDb } from "../classes/Gotm.js";
-import { loadNrGotmFromDb } from "../classes/NrGotm.js";
-import { setThreadGameLink } from "../classes/Thread.js";
 import {
   createIgdbSession,
   type IgdbSelectOption,
@@ -66,8 +54,6 @@ const superadminCompletionAddSessions = new Map<string, CompletionAddContext>();
 
 type SuperAdminHelpTopicId =
   | "memberscan"
-  | "thread-game-link-backfill"
-  | "presence"
   | "completion-add-other"
   | "say";
 
@@ -80,7 +66,6 @@ type SuperAdminHelpTopic = {
   notes?: string;
 };
 
-const SUPERADMIN_PRESENCE_CHOICES = new Map<string, string[]>();
 export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
   {
     id: "completion-add-other",
@@ -95,20 +80,6 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
     summary: "Scan the server and refresh member records in the database.",
     syntax: "Syntax: /superadmin memberscan",
     notes: "Runs in the current server. Make sure env role IDs are set so roles classify correctly.",
-  },
-  {
-    id: "thread-game-link-backfill",
-    label: "/superadmin thread-game-link-backfill",
-    summary: "Backfill thread-to-GameDB links using existing GOTM/NR-GOTM data.",
-    syntax: "Syntax: /superadmin thread-game-link-backfill",
-    notes: "Uses GOTM/NR-GOTM tables to set missing GameDB IDs on threads.",
-  },
-  {
-    id: "presence",
-    label: "/superadmin presence",
-    summary: "Set the bot's 'Now Playing' text (owner override).",
-    syntax: "Syntax: /superadmin presence [text:<string>]",
-    notes: "Leave text empty to browse/restore history.",
   },
   {
     id: "say",
@@ -165,73 +136,10 @@ export function buildSuperAdminHelpEmbed(topic: SuperAdminHelpTopic): EmbedBuild
   return embed;
 }
 
-async function showSuperAdminPresenceHistory(interaction: CommandInteraction): Promise<void> {
-  const limit = 5;
-  const entries = await getPresenceHistory(limit);
-
-  if (!entries.length) {
-    await safeReply(interaction, {
-      content: "No presence history found.",
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-
-  const embed = buildPresenceHistoryEmbed(entries as any);
-  const components = buildSuperAdminPresenceButtons(entries.length);
-
-  await safeReply(interaction, {
-    embeds: [embed],
-    components,
-          flags: MessageFlags.Ephemeral,  });
-
-  try {
-    const msg = (await interaction.fetchReply()) as Message | undefined;
-    if (msg?.id) {
-      SUPERADMIN_PRESENCE_CHOICES.set(
-        msg.id,
-        entries.map((e: any) => e.activityName ?? ""),
-      );
-    }
-  } catch {
-    // ignore
-  }
-}
-
 @Discord()
 @SlashGroup({ description: "Server Owner Commands", name: "superadmin" })
 @SlashGroup("superadmin")
 export class SuperAdmin {
-  @Slash({ description: "Set Presence", name: "presence" })
-  async presence(
-    @SlashOption({
-      description: "What should the 'Now Playing' value be? Leave empty to browse history.",
-      name: "text",
-      required: false,
-      type: ApplicationCommandOptionType.String,
-    })
-    text: string | undefined,
-    interaction: CommandInteraction,
-  ): Promise<void> {
-    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-
-    const okToUseCommand: boolean = await isSuperAdmin(interaction);
-
-    if (!okToUseCommand) return;
-
-    if (text && text.trim()) {
-      const sanitizedText = sanitizeUserInput(text, { preserveNewlines: false });
-      await setPresence(interaction, sanitizedText);
-      await safeReply(interaction, {
-        content: `I'm now playing: ${sanitizedText}!`,
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    await showSuperAdminPresenceHistory(interaction);
-  }
-
   @Slash({ description: "Add a game completion for another user", name: "completion-add-other" })
   async completionAddOther(
     @SlashOption({
@@ -707,57 +615,6 @@ export class SuperAdmin {
   }
 
 
-  @ButtonComponent({ id: /^superadmin-presence-restore-\d+$/ })
-  async handleSuperAdminPresenceRestore(interaction: ButtonInteraction): Promise<void> {
-    const okToUseCommand: boolean = await isSuperAdmin(interaction);
-    if (!okToUseCommand) return;
-
-    const messageId = interaction.message?.id;
-    const entries = messageId ? SUPERADMIN_PRESENCE_CHOICES.get(messageId) : undefined;
-    const idx = Number(interaction.customId.replace("superadmin-presence-restore-", ""));
-
-    if (!entries || !Number.isInteger(idx) || idx < 0 || idx >= entries.length) {
-      await safeUpdate(interaction, {
-        content: "Sorry, I couldn't find that presence entry. Please run `/superadmin presence` again.",
-        components: [],
-      });
-      if (messageId) SUPERADMIN_PRESENCE_CHOICES.delete(messageId);
-      return;
-    }
-
-    const presenceText = entries[idx];
-
-    try {
-      await setPresence(interaction, presenceText);
-      await safeUpdate(interaction, {
-        content: `Restored presence to: ${presenceText}`,
-        components: [],
-      });
-    } catch (err: any) {
-      const msg = err?.message ?? String(err);
-      await safeUpdate(interaction, {
-        content: `Failed to restore presence: ${msg}`,
-        components: [],
-      });
-    } finally {
-      if (messageId) SUPERADMIN_PRESENCE_CHOICES.delete(messageId);
-    }
-  }
-
-  @ButtonComponent({ id: "superadmin-presence-cancel" })
-  async handleSuperAdminPresenceCancel(interaction: ButtonInteraction): Promise<void> {
-    const okToUseCommand: boolean = await isSuperAdmin(interaction);
-    if (!okToUseCommand) return;
-
-    const messageId = interaction.message?.id;
-    if (messageId) SUPERADMIN_PRESENCE_CHOICES.delete(messageId);
-
-    await safeUpdate(interaction, {
-      content: "No presence was restored.",
-      components: [],
-    });
-  }
-
   @ButtonComponent({ id: /^(gotm|nr-gotm)-audit(img)?-(stop|skip|novalue).*-/ })
   async handleAuditButtons(interaction: ButtonInteraction): Promise<void> {
     if (!interaction.deferred && !interaction.replied) {
@@ -993,79 +850,6 @@ export class SuperAdmin {
     });
   }
 
-  @Slash({
-    description: "Backfill thread/game links from GOTM / NR-GOTM data",
-    name: "thread-game-link-backfill",
-  })
-  async threadGameLinkBackfill(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-
-    const okToUseCommand: boolean = await isSuperAdmin(interaction);
-    if (!okToUseCommand) return;
-
-    try {
-      await loadGotmFromDb();
-      await loadNrGotmFromDb();
-    } catch (err: any) {
-      const msg = err?.message ?? String(err);
-      await safeReply(interaction, {
-        content: `Failed to load GOTM/NR-GOTM data: ${msg}`,
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const assignments: { threadId: string; gamedbGameId: number; source: string }[] = [];
-
-    Gotm.all().forEach((entry) => {
-      entry.gameOfTheMonth.forEach((game) => {
-        if (game.threadId && game.gamedbGameId) {
-          assignments.push({ threadId: game.threadId, gamedbGameId: game.gamedbGameId, source: "GOTM" });
-        }
-      });
-    });
-
-    NrGotm.all().forEach((entry) => {
-      entry.gameOfTheMonth.forEach((game) => {
-        if (game.threadId && game.gamedbGameId) {
-          assignments.push({ threadId: game.threadId, gamedbGameId: game.gamedbGameId, source: "NR-GOTM" });
-        }
-      });
-    });
-
-    if (!assignments.length) {
-      await safeReply(interaction, {
-        content: "No GOTM or NR-GOTM entries have both thread id and GameDB id set.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    let success = 0;
-    const failures: string[] = [];
-
-    for (const a of assignments) {
-      try {
-        await setThreadGameLink(a.threadId, a.gamedbGameId);
-        success++;
-      } catch (err: any) {
-        failures.push(`${a.source} thread ${a.threadId} -> game ${a.gamedbGameId}: ${err?.message ?? err}`);
-      }
-    }
-
-    const lines: string[] = [`Updated ${success} thread link(s).`];
-    if (failures.length) {
-      lines.push("Failures:");
-      lines.push(...failures.map((f) => `• ${f}`));
-    }
-
-    await safeReply(interaction, {
-      content: lines.join("\n"),
-      flags: MessageFlags.Ephemeral,
-    });
-  }
-
-
   private async delay(ms: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -1129,51 +913,3 @@ export function buildSuperAdminHelpResponse(
   };
 }
 
-function buildPresenceHistoryEmbed(entries: IPresenceHistoryEntry[]): EmbedBuilder {
-  const descriptionLines: string[] = entries.map((entry, index) => {
-    const timestamp =
-      entry.setAt instanceof Date
-        ? entry.setAt.toLocaleString()
-        : entry.setAt
-          ? String(entry.setAt)
-          : "unknown date";
-    const userDisplay = entry.setByUsername ?? entry.setByUserId ?? "unknown user";
-    return `${index + 1}. ${entry.activityName} — ${timestamp} (by ${userDisplay})`;
-  });
-
-  descriptionLines.push("");
-  descriptionLines.push("Would you like to restore a previous presence?");
-
-  return new EmbedBuilder()
-    .setTitle("Presence History")
-    .setDescription(descriptionLines.join("\n"));
-}
-
-function buildSuperAdminPresenceButtons(count: number): ActionRowBuilder<ButtonBuilder>[] {
-  const buttons: ButtonBuilder[] = [];
-
-  for (let i = 0; i < count; i++) {
-    buttons.push(
-      new ButtonBuilder()
-        .setCustomId(`superadmin-presence-restore-${i}`)
-        .setLabel(String(i + 1))
-        .setStyle(ButtonStyle.Success),
-    );
-  }
-
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  for (let i = 0; i < buttons.length; i += 5) {
-    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(buttons.slice(i, i + 5)));
-  }
-
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId("superadmin-presence-cancel")
-        .setLabel("No")
-        .setStyle(ButtonStyle.Danger),
-    ),
-  );
-
-  return rows;
-}
