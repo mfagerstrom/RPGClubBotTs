@@ -112,7 +112,6 @@ type GameDbHelpTopicId =
   | "search"
   | "view"
   | "audit"
-  | "igdb_api_dump"
   | "link-versions";
 
 type GameDbHelpTopic = {
@@ -850,30 +849,21 @@ const GAMEDB_HELP_TOPICS: GameDbHelpTopic[] = [
       "Duplicate titles already in GameDB show an 'already imported' message.",
   },
   {
-    id: "igdb_api_dump",
-    label: "/gamedb igdb_api_dump",
-    summary: "Dump raw IGDB API data for a title (debug/dev).",
-    syntax: "Syntax: /gamedb igdb_api_dump title:<string>",
-    notes: "Fetches raw JSON from IGDB search endpoint and attaches it as a file.",
-  },
-  {
     id: "search",
     label: "/gamedb search",
     summary: "Search GameDB titles with paged dropdown navigation.",
-    syntax: "Syntax: /gamedb search [title:<string>]",
+    syntax: "Syntax: /gamedb search title:<string>",
     notes:
-      "Query is optional; omit to list all games. Results show a dropdown and Previous/Next " +
-      "buttons; selecting a game shows its profile.",
+      "Results show a dropdown and Previous/Next buttons; selecting a game shows its profile.",
   },
   {
     id: "view",
     label: "/gamedb view",
-    summary: "View a GameDB entry by id or search query.",
-    syntax: "Syntax: /gamedb view [game_id:<number>] [title:<string>]",
+    summary: "View a GameDB entry by title.",
+    syntax: "Syntax: /gamedb view title:<string>",
     notes:
-      "Shows cover art, metadata, releases, and IGDB link when available, plus GOTM/NR-GOTM " +
-      "associations: winning rounds (with thread/Reddit links) and nomination rounds with " +
-      "nominator mentions.",
+      "Shows cover art, metadata, releases, plus GOTM/NR-GOTM associations: winning rounds " +
+      "(with thread/Reddit links) and nomination rounds with nominator mentions.",
   },
   {
     id: "audit",

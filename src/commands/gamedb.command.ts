@@ -21,7 +21,6 @@ import {
   type ActionRow,
   type MessageActionRowComponent,
   AttachmentBuilder,
-  escapeCodeBlock,
   MessageFlags,
 } from "discord.js";
 import {
@@ -141,13 +140,6 @@ export class GameDb {
       type: ApplicationCommandOptionType.String,
     })
     bulkTitles: string | undefined,
-    @SlashOption({
-      description: "Include raw IGDB search JSON attachment",
-      name: "include_raw",
-      required: false,
-      type: ApplicationCommandOptionType.Boolean,
-    })
-    includeRaw: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction);
@@ -185,7 +177,7 @@ export class GameDb {
     }
 
     for (const t of allTitles) {
-      await this.processTitle(interaction, t, includeRaw ?? false);
+      await this.processTitle(interaction, t);
     }
   }
 
@@ -270,65 +262,13 @@ export class GameDb {
       });
     }
   }
-  @Slash({ description: "Dump raw IGDB API data for a title", name: "igdb_api_dump" })
-  async igdbApiDump(
-    @SlashOption({
-      description: "Title to query on IGDB",
-      name: "title",
-      required: true,
-      type: ApplicationCommandOptionType.String,
-    })
-    title: string,
-    interaction: CommandInteraction,
-  ): Promise<void> {
-    await safeDeferReply(interaction);
-
-    try {
-      title = sanitizeUserInput(title, { preserveNewlines: false });
-      const searchRes = await igdbService.searchGames(title, 50, true);
-      const results = searchRes.results;
-      if (!results?.length) {
-        await safeReply(interaction, {
-          content: `No IGDB results for "${title}".`,
-          __forceFollowUp: true,
-        });
-        return;
-      }
-
-      const json = JSON.stringify(results, null, 2);
-      const sanitized = escapeCodeBlock ? escapeCodeBlock(json) : json;
-      const attachment = new AttachmentBuilder(Buffer.from(json, "utf8"), {
-        name: "igdb-response.json",
-      });
-      const maxPreview = 1500;
-      const preview =
-        sanitized.length > maxPreview ? `${sanitized.slice(0, maxPreview)}...\n(truncated)` : sanitized;
-
-      await safeReply(interaction, {
-        content:
-          `Found ${results.length} IGDB result(s) for "${title}".\n` +
-          `\`\`\`json\n${preview}\n\`\`\`\nFull array attached as igdb-response.json.`,
-        files: [attachment],
-        __forceFollowUp: true,
-      });
-    } catch (err: any) {
-      await safeReply(interaction, {
-        content: `Failed to fetch IGDB data: ${err?.message ?? err}`,
-        __forceFollowUp: true,
-      });
-    }
-  }
-
   private async processTitle(
     interaction: CommandInteraction,
     title: string,
-    includeRaw: boolean = false,
   ): Promise<void> {
     try {
       // 1. Search IGDB
-      const searchRes = includeRaw
-        ? await igdbService.searchGames(title, undefined, true)
-        : await igdbService.searchGames(title);
+      const searchRes = await igdbService.searchGames(title);
       const results = searchRes.results;
 
       if (!results || results.length === 0) {
@@ -348,12 +288,6 @@ export class GameDb {
       // 2. Build Select Menu
       const opts: IgdbSelectOption[] = await this.buildIgdbSelectOptions(results);
 
-      const attachment = includeRaw && searchRes.raw
-        ? new AttachmentBuilder(Buffer.from(JSON.stringify(searchRes.raw, null, 2), "utf8"), {
-            name: "igdb-search.json",
-          })
-        : null;
-
       const { components } = createIgdbSession(
         interaction.user.id,
         opts,
@@ -368,7 +302,6 @@ export class GameDb {
       await safeReply(interaction, {
         content: `Found ${results.length} results for "${title}". Please select one:`,
         components,
-        files: attachment ? [attachment] : undefined,
         __forceFollowUp: true,
       });
 
@@ -1427,20 +1360,18 @@ export class GameDb {
   @Slash({ description: "Search for a game", name: "search" })
   async search(
     @SlashOption({
-      description: "Search query (game title). Leave empty to list all.",
+      description: "Search query (game title).",
       name: "title",
-      required: false,
+      required: true,
       type: ApplicationCommandOptionType.String,
     })
-    query: string | undefined,
+    query: string,
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: buildComponentsV2Flags(false) });
 
     try {
-      const searchTerm = query
-        ? sanitizeUserInput(query, { preserveNewlines: false })
-        : "";
+      const searchTerm = sanitizeUserInput(query, { preserveNewlines: false });
       await this.runSearchFlow(interaction, searchTerm, query);
     } catch (error: any) {
       await safeReply(interaction, {

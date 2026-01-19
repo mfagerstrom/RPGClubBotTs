@@ -31,22 +31,17 @@ import {
   safeUpdate,
   sanitizeUserInput,
 } from "../functions/InteractionUtils.js";
-import Gotm, {
-  updateGotmGameFieldInDatabase,
-} from "../classes/Gotm.js";
-import NrGotm, {
-  updateNrGotmGameFieldInDatabase,
-} from "../classes/NrGotm.js";
+import Gotm from "../classes/Gotm.js";
+import NrGotm from "../classes/NrGotm.js";
 import Member, { type IMemberRecord } from "../classes/Member.js";
 import { getOraclePool } from "../db/oracleClient.js";
 import Game, { type IGame } from "../classes/Game.js";
-import { igdbService, type IGDBGame, type IGDBGameDetails } from "../services/IgdbService.js";
+import { igdbService } from "../services/IgdbService.js";
 import { loadGotmFromDb } from "../classes/Gotm.js";
 import { loadNrGotmFromDb } from "../classes/NrGotm.js";
 import { setThreadGameLink } from "../classes/Thread.js";
 import {
   createIgdbSession,
-  deleteIgdbSession,
   type IgdbSelectOption,
 } from "../services/IgdbSelectService.js";
 import {
@@ -71,7 +66,6 @@ const superadminCompletionAddSessions = new Map<string, CompletionAddContext>();
 
 type SuperAdminHelpTopicId =
   | "memberscan"
-  | "gamedb-backfill"
   | "thread-game-link-backfill"
   | "presence"
   | "completion-add-other"
@@ -87,17 +81,6 @@ type SuperAdminHelpTopic = {
 };
 
 const SUPERADMIN_PRESENCE_CHOICES = new Map<string, string[]>();
-const GAMEDB_SESSION_LIMIT: number = 10;
-
-type GameDbSeed = {
-  title: string;
-  source: "GOTM" | "NR-GOTM";
-  round: number;
-  monthYear: string;
-  gameIndex: number;
-  gamedbGameId: number | null;
-};
-
 export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
   {
     id: "completion-add-other",
@@ -112,13 +95,6 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
     summary: "Scan the server and refresh member records in the database.",
     syntax: "Syntax: /superadmin memberscan",
     notes: "Runs in the current server. Make sure env role IDs are set so roles classify correctly.",
-  },
-  {
-    id: "gamedb-backfill",
-    label: "/superadmin gamedb-backfill",
-    summary: "Import all GOTM and NR-GOTM titles into GameDB with IGDB lookups.",
-    syntax: "Syntax: /superadmin gamedb-backfill",
-    notes: "Prompts if IGDB returns multiple matches; skips anything already in GameDB.",
   },
   {
     id: "thread-game-link-backfill",
@@ -1018,76 +994,6 @@ export class SuperAdmin {
   }
 
   @Slash({
-    description: "Import GOTM and NR-GOTM titles into the GameDB (interactive IGDB search)",
-    name: "gamedb-backfill",
-  })
-  async gamedbBackfill(
-    interaction: CommandInteraction,
-  ): Promise<void> {
-    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-
-    const okToUseCommand: boolean = await isSuperAdmin(interaction);
-    if (!okToUseCommand) return;
-
-    try {
-      await loadGotmFromDb();
-      await loadNrGotmFromDb();
-    } catch (err: any) {
-      const msg = err?.message ?? String(err);
-      await safeReply(interaction, {
-        content: `Failed to load GOTM data: ${msg}`,
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const seeds = this.buildGamedbSeeds();
-    const totalPending = seeds.length;
-    const sessionSeeds = seeds.slice(0, GAMEDB_SESSION_LIMIT);
-    if (!sessionSeeds.length) {
-      await safeReply(interaction, {
-        content: "No GOTM or NR-GOTM entries found to import.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const status = {
-      total: sessionSeeds.length,
-      processed: 0,
-      logs: [] as string[],
-      pendingTotal: totalPending,
-    };
-
-    const startMessage =
-      `Starting GameDB backfill for ${sessionSeeds.length} of ${totalPending} pending titles ` +
-      `(max ${GAMEDB_SESSION_LIMIT} per run)...`;
-
-    const statusMessage = await safeReply(interaction, {
-      content: startMessage,
-      embeds: [this.buildGamedbStatusEmbed(startMessage, status.logs, false)],
-
-      fetchReply: true,
-    });
-
-    for (const seed of sessionSeeds) {
-      const label = `${seed.source} Round ${seed.round} (${seed.monthYear})`;
-      try {
-        const line = await this.processGamedbSeed(interaction, seed, label);
-        if (line) status.logs.push(line);
-      } catch (err: any) {
-        const msg = err?.message ?? String(err);
-        status.logs.push(`[${label}] Error: ${msg}`);
-      }
-      status.processed++;
-      await this.editStatusMessage(interaction, statusMessage, status);
-      await this.delay(400);
-    }
-
-    await this.editStatusMessage(interaction, statusMessage, status, true);
-  }
-
-  @Slash({
     description: "Backfill thread/game links from GOTM / NR-GOTM data",
     name: "thread-game-link-backfill",
   })
@@ -1159,318 +1065,9 @@ export class SuperAdmin {
     });
   }
 
-  private buildGamedbSeeds(): GameDbSeed[] {
-    const seeds: GameDbSeed[] = [];
-
-    const gotmEntries = Gotm.all();
-    gotmEntries.forEach((entry) => {
-      entry.gameOfTheMonth.forEach((game, idx) => {
-        if (game.gamedbGameId) return;
-        if (!game.title) return;
-        seeds.push({
-          title: game.title,
-          source: "GOTM",
-          round: entry.round,
-          monthYear: entry.monthYear,
-          gameIndex: idx,
-          gamedbGameId: game.gamedbGameId ?? null,
-        });
-      });
-    });
-
-    const nrEntries = NrGotm.all();
-    nrEntries.forEach((entry) => {
-      entry.gameOfTheMonth.forEach((game, idx) => {
-        if (game.gamedbGameId) return;
-        if (!game.title) return;
-        seeds.push({
-          title: game.title,
-          source: "NR-GOTM",
-          round: entry.round,
-          monthYear: entry.monthYear,
-          gameIndex: idx,
-          gamedbGameId: game.gamedbGameId ?? null,
-        });
-      });
-    });
-
-    return seeds;
-  }
-
-  private async processGamedbSeed(
-    interaction: CommandInteraction,
-    seed: GameDbSeed,
-    label: string,
-  ): Promise<string | null> {
-    if (seed.gamedbGameId) {
-      return `[${label}] Skipped (already linked) ${seed.title}`;
-    }
-
-    const existingByTitle = await Game.searchGames(seed.title);
-    const exactMatch = existingByTitle.find(
-      (g) => g.title.toLowerCase() === seed.title.toLowerCase(),
-    );
-    if (exactMatch) {
-      await this.linkGameToSeed(seed, exactMatch.id);
-      return `[${label}] Linked existing GameDB #${exactMatch.id} to ${seed.title}`;
-    }
-
-    let igdbMatches: IGDBGame[] = [];
-    try {
-      const searchRes = await igdbService.searchGames(seed.title);
-      igdbMatches = searchRes.results;
-    } catch (err: any) {
-      const msg = err?.message ?? String(err);
-      return `[${label}] IGDB search failed: ${msg}`;
-    }
-
-    if (!igdbMatches.length) {
-      return `[${label}] No IGDB match for "${seed.title}"`;
-    }
-
-    const existingIgdb = await this.findExistingIgdbGame(igdbMatches);
-    if (existingIgdb) {
-      await this.linkGameToSeed(seed, existingIgdb.id);
-      return `[${label}] Linked existing GameDB #${existingIgdb.id} to ${seed.title}`;
-    }
-
-    if (igdbMatches.length === 1) {
-      return this.importGameFromIgdb(igdbMatches[0].id, label, seed);
-    }
-
-    const options: IgdbSelectOption[] = igdbMatches.map((game) => {
-      const year = game.first_release_date
-        ? new Date(game.first_release_date * 1000).getFullYear()
-        : "TBD";
-      const rating = game.total_rating ? ` | ${Math.round(game.total_rating)}/100` : "";
-      return {
-        id: game.id,
-        label: `${game.name} (${year})`.substring(0, 100),
-        description: `${rating} ${game.summary ?? "No summary"}`.substring(0, 95),
-      };
-    });
-
-    return await new Promise<string | null>((resolve) => {
-      const { components, sessionId } = createIgdbSession(
-        interaction.user.id,
-        options,
-        async (sel, igdbId) => {
-          const result = await this.importGameFromIgdb(igdbId, label, seed);
-          deleteIgdbSession(sessionId);
-          finish(result);
-          try {
-            await sel.update({ content: result, components: [] });
-          } catch {
-            // ignore
-          }
-        },
-      );
-
-      const timeout = setTimeout(async () => {
-        deleteIgdbSession(sessionId);
-        finish(`[${label}] Skipped (no selection): ${seed.title}`);
-        await safeReply(interaction, {
-          content: `[${label}] Import cancelled or timed out.`,
-          flags: MessageFlags.Ephemeral,
-        }).catch(() => {});
-      }, 120000);
-
-      const finish = (value: string | null) => {
-        clearTimeout(timeout);
-        resolve(value);
-      };
-
-      safeReply(interaction, {
-        content: `Multiple IGDB matches for ${seed.source} Round ${seed.round} (${seed.monthYear}).`,
-        components,
-  
-        __forceFollowUp: true,
-      });
-    });
-  }
-
-
-  private async findExistingIgdbGame(matches: IGDBGame[]): Promise<IGame | null> {
-    for (const match of matches) {
-      const existing = await Game.getGameByIgdbId(match.id);
-      if (existing) {
-        return existing;
-      }
-    }
-    return null;
-  }
-
-  private async importGameFromIgdb(igdbId: number, label: string, seed: GameDbSeed): Promise<string> {
-    const details: IGDBGameDetails | null = await igdbService.getGameDetails(igdbId);
-    if (!details) {
-      return `[${label}] IGDB details unavailable for id ${igdbId}`;
-    }
-
-    const existing = details.id ? await Game.getGameByIgdbId(details.id) : null;
-    if (existing) {
-      return `[${label}] Skipped (IGDB already in GameDB #${existing.id}): ${details.name}`;
-    }
-
-    let imageData: Buffer | null = null;
-    if (details.cover?.image_id) {
-      try {
-        const url =
-          `https://images.igdb.com/igdb/image/upload/t_cover_big/${details.cover.image_id}.jpg`;
-        const resp = await axios.get(url, { responseType: "arraybuffer" });
-        imageData = Buffer.from(resp.data);
-      } catch {
-        // ignore image failures
-      }
-    }
-
-    const igdbUrl =
-      details.url || (details.slug ? `https://www.igdb.com/games/${details.slug}` : null);
-
-    const newGame = await Game.createGame(
-      details.name,
-      details.summary ?? null,
-      imageData,
-      details.id,
-      details.slug,
-      details.total_rating ?? null,
-      igdbUrl,
-      Game.getFeaturedVideoUrl(details),
-    );
-
-    await Game.saveFullGameMetadata(newGame.id, details);
-    const igdbPlatformIds: number[] = (details.platforms ?? [])
-      .map((platform) => platform.id)
-      .filter((id) => Number.isInteger(id) && id > 0);
-    await Game.addGamePlatformsByIgdbIds(newGame.id, igdbPlatformIds);
-    await this.saveReleaseDates(newGame.id, details);
-    await this.linkGameToSeed(seed, newGame.id);
-
-    return `[${label}] Imported "${newGame.title}" -> GameDB #${newGame.id}`;
-  }
-
-  private async saveReleaseDates(gameId: number, details: IGDBGameDetails): Promise<void> {
-    const releaseDates = details.release_dates;
-    if (!releaseDates || !Array.isArray(releaseDates)) return;
-
-    const platformIds: number[] = [];
-    for (const release of releaseDates) {
-      const platformId: number | null =
-        typeof release.platform === "number"
-          ? release.platform
-          : (release.platform?.id ?? null);
-      if (platformId) {
-        platformIds.push(platformId);
-      }
-    }
-    const uniquePlatformIds: number[] = Array.from(new Set(platformIds));
-    const platformMap = await Game.getPlatformsByIgdbIds(uniquePlatformIds);
-    const missingPlatformIds = uniquePlatformIds.filter((id) => !platformMap.has(id));
-    if (missingPlatformIds.length) {
-      console.warn(
-        `[SuperAdmin] Missing IGDB platform IDs in GAMEDB_PLATFORMS: ${missingPlatformIds.join(", ")}`,
-      );
-    }
-
-    for (const release of releaseDates) {
-      const platformId: number | null =
-        typeof release.platform === "number"
-          ? release.platform
-          : (release.platform?.id ?? null);
-
-      if (!platformId || !release.region) continue;
-
-      const platform = platformMap.get(platformId);
-      const region = await Game.ensureRegion(release.region);
-      if (!platform || !region) continue;
-
-      try {
-        await Game.addReleaseInfo(
-          gameId,
-          platform.id,
-          region.id,
-          "Physical",
-          release.date ? new Date(release.date * 1000) : null,
-          null,
-        );
-      } catch {
-        // ignore duplicate inserts
-      }
-    }
-  }
-
-  private chunkLines(lines: string[]): string[] {
-    const chunks: string[] = [];
-    let current = "";
-    for (const line of lines) {
-      const addition = `${line}\n`;
-      if ((current + addition).length > 1800) {
-        chunks.push(current.trimEnd());
-        current = addition;
-      } else {
-        current += addition;
-      }
-    }
-    if (current.trim()) chunks.push(current.trimEnd());
-    return chunks;
-  }
 
   private async delay(ms: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  private async editStatusMessage(
-    interaction: CommandInteraction,
-    message: any,
-    status: { total: number; processed: number; logs: string[]; pendingTotal?: number },
-    done: boolean = false,
-  ): Promise<void> {
-    const progress = status.pendingTotal
-      ? `${status.processed}/${status.total} (of ${status.pendingTotal} pending)`
-      : `${status.processed}/${status.total}`;
-    const header = done
-      ? `GameDB backfill complete. Processed ${progress}. Audit complete.`
-      : `GameDB backfill in progress... (${progress})`;
-
-    const embed = this.buildGamedbStatusEmbed(header, status.logs, done);
-
-    try {
-      if (message && typeof message.edit === "function") {
-        await message.edit({ embeds: [embed] });
-      } else {
-        await safeReply(interaction, { embeds: [embed] });
-      }
-    } catch {
-      // ignore status update failures
-    }
-  }
-
-  private buildGamedbStatusEmbed(
-    header: string,
-    logs: string[],
-    done: boolean,
-  ): EmbedBuilder {
-    const recentLogs = this.chunkLines(logs).slice(-1);
-    const description = [header, ...recentLogs].join("\n\n").trim();
-
-    return new EmbedBuilder()
-      .setTitle("GameDB Backfill Audit")
-      .setDescription(description)
-      .setColor(done ? 0x2ecc71 : 0x3498db);
-  }
-
-  private async linkGameToSeed(seed: GameDbSeed, gameId: number): Promise<void> {
-    if (seed.source === "GOTM") {
-      await updateGotmGameFieldInDatabase(seed.round, seed.gameIndex, "gamedbGameId", gameId);
-      Gotm.updateGamedbIdByRound(seed.round, gameId, seed.gameIndex);
-    } else {
-      await updateNrGotmGameFieldInDatabase({
-        round: seed.round,
-        gameIndex: seed.gameIndex,
-        field: "gamedbGameId",
-        value: gameId,
-      });
-      NrGotm.updateGamedbIdByRound(seed.round, gameId, seed.gameIndex);
-    }
   }
 }
 
