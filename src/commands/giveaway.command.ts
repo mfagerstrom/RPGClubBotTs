@@ -125,7 +125,6 @@ async function logGiveawayClaim(
       .setTimestamp(new Date());
     await channel.send({ embeds: [embed] }).catch(() => {});
   }
-  console.log(`[Giveaway] ${message}`);
 }
 
 type ClaimResult =
