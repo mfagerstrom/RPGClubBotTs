@@ -75,7 +75,6 @@ async function sendToDiscord(level: ConsoleLevel, message: string): Promise<void
     const trimmed =
       text.length > MAX_DESCRIPTION_LENGTH ? text.slice(0, MAX_DESCRIPTION_LENGTH - 3) + "..." : text;
     const embed = new EmbedBuilder()
-      .setTitle(`Bot log: ${level.toUpperCase()}`)
       .setDescription(trimmed)
       .setColor(LEVEL_COLORS[level] ?? LEVEL_COLORS.log)
       .setTimestamp(new Date());
