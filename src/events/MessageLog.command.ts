@@ -78,8 +78,10 @@ export class MessageLog {
   ): Promise<void> {
     const resolvedNew = newMessage.partial ? await newMessage.fetch().catch(() => null) : newMessage;
     if (!resolvedNew || !resolvedNew.author || resolvedNew.author.bot) return;
+    const resolvedOld = oldMessage.partial ? await oldMessage.fetch().catch(() => null) : oldMessage;
+    if (!resolvedOld) return;
 
-    const beforeText = oldMessage.partial ? "" : (oldMessage.cleanContent ?? oldMessage.content ?? "");
+    const beforeText = resolvedOld.cleanContent ?? resolvedOld.content ?? "";
     const afterText = resolvedNew.cleanContent ?? resolvedNew.content ?? "";
     if (beforeText.trim() === afterText.trim()) {
       return;
