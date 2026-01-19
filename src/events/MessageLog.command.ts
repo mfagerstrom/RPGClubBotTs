@@ -91,6 +91,8 @@ export class MessageLog {
     const jumpUrl = resolvedNew.guildId
       ? `https://discord.com/channels/${resolvedNew.guildId}/${resolvedNew.channelId}/${resolvedNew.id}`
       : null;
+    const channelName = (resolvedNew.channel as { name?: string } | null)?.name ?? "channel";
+    const channelLabel = `#${channelName}`;
     const title = "Message edited";
     const embed = buildAuthorEmbed(
       resolvedNew,
@@ -100,7 +102,7 @@ export class MessageLog {
     embed.setFields([]);
     const beforeValue = truncate(beforeText || "No text content.");
     const afterValue = truncate(afterText || "No text content.");
-    const linkLine = jumpUrl ? `[Jump to message](${jumpUrl})` : "";
+    const linkLine = jumpUrl ? `[${channelLabel}](${jumpUrl})` : "";
     const description =
       `**Before:** ${beforeValue}\n**+After:** ${afterValue}` +
       (linkLine ? `\n${linkLine}` : "");

@@ -1,4 +1,14 @@
+import { EmbedBuilder } from "discord.js";
+
 const LOG_CHANNEL_ID = "1439333324547035428";
+const MAX_DESCRIPTION_LENGTH = 3900;
+const LEVEL_COLORS: Record<ConsoleLevel, number> = {
+  log: 0x95a5a6,
+  info: 0x3498db,
+  warn: 0xf39c12,
+  error: 0xe74c3c,
+  debug: 0x9b59b6,
+};
 
 type ConsoleLevel = "log" | "error" | "warn" | "info" | "debug";
 
@@ -62,10 +72,15 @@ async function sendToDiscord(level: ConsoleLevel, message: string): Promise<void
 
     const prefix = `[${level.toUpperCase()}] `;
     const text = prefix + message;
-    const maxLen = 1900;
-    const trimmed = text.length > maxLen ? text.slice(0, maxLen) + "…" : text;
+    const trimmed =
+      text.length > MAX_DESCRIPTION_LENGTH ? text.slice(0, MAX_DESCRIPTION_LENGTH - 3) + "..." : text;
+    const embed = new EmbedBuilder()
+      .setTitle(`Bot log: ${level.toUpperCase()}`)
+      .setDescription(trimmed)
+      .setColor(LEVEL_COLORS[level] ?? LEVEL_COLORS.log)
+      .setTimestamp(new Date());
 
-    await (channel as any).send(trimmed);
+    await (channel as any).send({ embeds: [embed] });
   } catch {
     // Swallow to avoid recursive console logging on failures
   }

@@ -1,3 +1,10 @@
+2026-01-18 - Commit ID: 497c471 - fix: also added descriptions to gamedb audit
+2026-01-18 - Commit ID: 339ccd0 - feat: updated gameDB audit to handle adding videos manually
+2026-01-18 - Commit ID: 110606d - feat: added missing videos to the gamedb audit
+2026-01-18 - Commit ID: 51374ac - feat: added missing video url import to /gamedb audit
+2026-01-18 - Commit ID: eacca2b - feat: added featured videos to gameDB games
+2026-01-18 - Commit ID: fe9b355 - fix: corrected images not getting imported from IGDB
+2026-01-18 - Commit ID: e8c1413 - gamedb view now rendered w/ components v2
 2026-01-16 - Commit ID: f1c00f1 - feat: added # of games per year to completion announcement
 2026-01-15 - Commit ID: da2d30a - fix: giveaway keys are dm'd to users
 2026-01-15 - Commit ID: b8633d7 - feat: complete overhaul of the /now-playing set of commands/functionality

@@ -118,7 +118,12 @@ async function logGiveawayClaim(
   const message =
     `<@${userId}> claimed **${keyTitle}** (${platform}) [Key ID: ${keyId}].`;
   if (channel && typeof channel.send === "function") {
-    await channel.send({ content: message }).catch(() => {});
+    const embed = new EmbedBuilder()
+      .setTitle("Giveaway claim")
+      .setDescription(message)
+      .setColor(0x2ecc71)
+      .setTimestamp(new Date());
+    await channel.send({ embeds: [embed] }).catch(() => {});
   }
   console.log(`[Giveaway] ${message}`);
 }

@@ -72,13 +72,15 @@ export class StarboardHandler {
 
     const content = getMessageContent(message);
     const imageUrl = getImageUrl(message);
+    const channelName = (message.channel as { name?: string } | null)?.name ?? "channel";
+    const channelLabel = `#${channelName}`;
     const embed = new EmbedBuilder()
       .setAuthor({
         name: message.author.globalName ?? message.author.username,
         iconURL: message.author.displayAvatarURL(),
       })
       .setDescription(content)
-      .addFields({ name: "Source", value: `[Jump!](${message.url})` })
+      .addFields({ name: "Source", value: `[${channelLabel}](${message.url})` })
       .setFooter({
         text: `${message.id} • ${formatTimestampWithDay(message.createdTimestamp)}`,
       })
