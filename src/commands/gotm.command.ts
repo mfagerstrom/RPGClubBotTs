@@ -1,6 +1,18 @@
-import type { CommandInteraction, Client, TextBasedChannel } from "discord.js";
+import type {
+  CommandInteraction,
+  Client,
+  TextBasedChannel,
+  StringSelectMenuInteraction,
+} from "discord.js";
 import { ApplicationCommandOptionType, EmbedBuilder, MessageFlags } from "discord.js";
-import { Discord, Slash, SlashChoice, SlashGroup, SlashOption } from "discordx";
+import {
+  Discord,
+  SelectMenuComponent,
+  Slash,
+  SlashChoice,
+  SlashGroup,
+  SlashOption,
+} from "discordx";
 // Use relative import with .js for ts-node ESM compatibility
 import Gotm, { IGotmEntry, IGotmGame } from "../classes/Gotm.js";
 import { safeDeferReply, safeReply, sanitizeUserInput } from "../functions/InteractionUtils.js";
@@ -26,6 +38,11 @@ import {
 import { AUDIT_NO_VALUE_SENTINEL } from "./superadmin.command.js";
 import axios from "axios";
 import Game, { type IGame } from "../classes/Game.js";
+import {
+  buildComponentsV2Flags,
+  buildNominationListPayload,
+} from "../functions/NominationListComponents.js";
+import { GameDb } from "./gamedb.command.js";
 
 const ANNOUNCEMENTS_CHANNEL_ID: string | undefined = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 
@@ -373,24 +390,46 @@ export class GotmSearch {
     name: "noms",
   })
   async listNominations(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction);
+    await safeDeferReply(interaction, { flags: buildComponentsV2Flags(false) });
 
     try {
       const window = await getUpcomingNominationWindow();
       const nominations = await listNominationsForRound("gotm", window.targetRound);
-      const embed = buildNominationEmbed(
+      const payload = await buildNominationListPayload(
         "GOTM",
         "/gotm nominate",
         window,
         nominations,
       );
-      await safeReply(interaction, { embeds: [embed] });
+      await safeReply(interaction, {
+        components: payload.components,
+        files: payload.files,
+        flags: buildComponentsV2Flags(false),
+        allowedMentions: { parse: [] },
+      });
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
         content: `Could not list nominations: ${msg}`,
+        flags: buildComponentsV2Flags(false),
       });
     }
+  }
+
+  @SelectMenuComponent({ id: /^gotm-nom-details:\d+$/ })
+  async showNominationDetails(
+    interaction: StringSelectMenuInteraction,
+  ): Promise<void> {
+    const gameId = Number(interaction.values?.[0]);
+    if (!Number.isInteger(gameId) || gameId <= 0) {
+      await safeReply(interaction, {
+        content: "Invalid GameDB id.",
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+    const gameDb = new GameDb();
+    await gameDb.showGameProfileFromNomination(interaction, gameId);
   }
 
 }

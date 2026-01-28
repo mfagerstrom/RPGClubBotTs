@@ -79,7 +79,7 @@ Vote and nominate games for Game of the Month and Non RPG of the Month.
 - **See current info**
   - Use `/round` or `/nextvote`.
 - **See nominations**
-  - Use `/noms`.
+  - Use `/gotm noms` or `/nr-gotm noms`.
 - **Nominate a game**
   - Use `/gotm nominate` or `/nr-gotm nominate`.
 

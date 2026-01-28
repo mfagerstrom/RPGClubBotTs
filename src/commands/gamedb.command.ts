@@ -519,6 +519,34 @@ export class GameDb {
     });
   }
 
+  public async showGameProfileFromNomination(
+    interaction: StringSelectMenuInteraction,
+    gameId: number,
+  ): Promise<void> {
+    const profile = await this.buildGameProfile(gameId, interaction);
+    if (!profile) {
+      await safeReply(interaction, {
+        content: `No game found with ID ${gameId}.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    const components = [
+      ...profile.components,
+      this.buildGameProfileActionRow(
+        gameId,
+        profile.hasThread,
+        profile.featuredVideoUrl,
+      ),
+    ];
+    await safeReply(interaction, {
+      embeds: [],
+      files: profile.files,
+      components,
+      flags: buildComponentsV2Flags(true),
+    });
+  }
+
   private async buildGameProfile(
     gameId: number,
     interaction?: CommandInteraction | StringSelectMenuInteraction | ButtonInteraction,

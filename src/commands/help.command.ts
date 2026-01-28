@@ -19,7 +19,6 @@ import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionU
 type HelpTopicId =
   | "gotm"
   | "nr-gotm"
-  | "noms"
   | "round"
   | "nextvote"
   | "hltb"
@@ -144,13 +143,6 @@ const HELP_TOPICS: HelpTopic[] = [
       "Search by round, month/year, or title. Set showinchat:true to share in channel; otherwise replies are private. Nominations are for the next round and close a day before voting.",
   },
   {
-    id: "noms",
-    label: "/noms",
-    summary: "Show the current GOTM and NR-GOTM nominations together (public).",
-    syntax: "Syntax: /noms",
-    notes: "Lists nominations for the upcoming round of each category.",
-  },
-  {
     id: "round",
     label: "/round",
     summary: "See the current round details and winners for GOTM and NR-GOTM.",
@@ -162,7 +154,7 @@ const HELP_TOPICS: HelpTopic[] = [
     label: "/nextvote",
     summary: "Check when the next GOTM/NR-GOTM vote happens.",
     syntax: "Syntax: /nextvote [showinchat:<boolean>]",
-    notes: "Replies privately by default; set showinchat:true to post in channel. See nominations with /noms; nominate with /gotm nominate or /nr-gotm nominate.",
+    notes: "Replies privately by default; set showinchat:true to post in channel. See nominations with /gotm noms or /nr-gotm noms; nominate with /gotm nominate or /nr-gotm nominate.",
   },
   {
     id: "hltb",
@@ -304,7 +296,7 @@ const HELP_CATEGORIES: { id: string; name: string; topicIds: HelpTopicId[] }[] =
   {
     id: "monthly-games",
     name: "Monthly Games",
-    topicIds: ["gotm", "nr-gotm", "noms", "round", "nextvote"],
+    topicIds: ["gotm", "nr-gotm", "round", "nextvote"],
   },
   {
     id: "members",
@@ -933,7 +925,6 @@ export function buildMainHelpResponse(): {
         "**Monthly Games**\n" +
         `${formatCommandLine("gotm", "GOTM history and nominations")}\n` +
         `${formatCommandLine("nr-gotm", "NR-GOTM history and nominations")}\n` +
-        `${formatCommandLine("noms", "See current GOTM and NR-GOTM nominations.")}\n` +
         `${formatCommandLine("round", "See the current round and winners.")}\n` +
         `${formatCommandLine("nextvote", "Check when the next vote happens.")}\n\n` +
         "**Members**\n" +
