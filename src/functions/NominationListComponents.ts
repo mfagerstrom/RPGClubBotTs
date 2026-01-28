@@ -6,6 +6,8 @@ import {
 } from "discord.js";
 import {
   ContainerBuilder,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
   SectionBuilder,
   SeparatorBuilder,
   TextDisplayBuilder,
@@ -41,6 +43,7 @@ export async function buildNominationListPayload(
   commandLabel: string,
   window: NominationWindow,
   nominations: INominationEntry[],
+  altLayout: boolean,
 ): Promise<NominationListPayload> {
   const { files, thumbnailsByGameId } = await buildNominationAttachments(
     nominations,
@@ -52,6 +55,7 @@ export async function buildNominationListPayload(
     window,
     nominations,
     thumbnailsByGameId,
+    altLayout,
   );
   return { components, files };
 }
@@ -62,6 +66,7 @@ function buildNominationContainers(
   window: NominationWindow,
   nominations: INominationEntry[],
   thumbnailsByGameId: Map<number, string>,
+  altLayout: boolean,
 ): Array<ContainerBuilder | ActionRowBuilder<StringSelectMenuBuilder>> {
   const containers: ContainerBuilder[] = [];
   let container = new ContainerBuilder();
@@ -105,11 +110,12 @@ function buildNominationContainers(
         new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true),
       );
     }
-    const section = buildNominationSection(
+    addNominationContent(
+      container,
       nomination,
       thumbnailsByGameId.get(nomination.gamedbGameId),
+      altLayout,
     );
-    container.addSectionComponents(section);
     sectionCount += 1;
   });
 
@@ -146,6 +152,37 @@ function buildNominationSection(
     section.setThumbnailAccessory(new ThumbnailBuilder().setURL(thumbnailUrl));
   }
   return section;
+}
+
+function addNominationContent(
+  container: ContainerBuilder,
+  nomination: INominationEntry,
+  thumbnailUrl: string | undefined,
+  altLayout: boolean,
+): void {
+  if (!altLayout) {
+    const section = buildNominationSection(nomination, thumbnailUrl);
+    container.addSectionComponents(section);
+    return;
+  }
+  if (thumbnailUrl) {
+    const galleryItem = new MediaGalleryItemBuilder()
+      .setURL(thumbnailUrl)
+      .setDescription(nomination.gameTitle);
+    container.addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(galleryItem),
+    );
+  }
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(buildNominationText(nomination)),
+  );
+}
+
+function buildNominationText(nomination: INominationEntry): string {
+  if (nomination.reason) {
+    return `### ${nomination.gameTitle}\n<@${nomination.userId}> ${trimReason(nomination.reason)}`;
+  }
+  return `### ${nomination.gameTitle}\n<@${nomination.userId}> nominated this title, but did not provide a reason.`;
 }
 
 function buildHeaderContent(

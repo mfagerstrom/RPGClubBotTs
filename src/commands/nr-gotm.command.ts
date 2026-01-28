@@ -424,7 +424,16 @@ export class NrGotmSearch {
     description: "List current NR-GOTM nominations for the upcoming round",
     name: "noms",
   })
-  async listNominations(interaction: CommandInteraction): Promise<void> {
+  async listNominations(
+    @SlashOption({
+      description: "Use the alternate layout (media on top, text below).",
+      name: "alt_layout",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    altLayout: boolean | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
     await safeDeferReply(interaction, { flags: buildComponentsV2Flags(false) });
 
     try {
@@ -435,6 +444,7 @@ export class NrGotmSearch {
         "/nr-gotm nominate",
         window,
         nominations,
+        Boolean(altLayout),
       );
       await safeReply(interaction, {
         components: payload.components,

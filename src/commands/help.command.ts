@@ -128,7 +128,7 @@ const HELP_TOPICS: HelpTopic[] = [
     summary:
       "Browse GOTM history, see current nominations, and add or change your nomination.",
     syntax:
-      "Syntax: /gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>] | /gotm noms | /gotm nominate title:<string> | /gotm delete-nomination",
+      "Syntax: /gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>] | /gotm noms [alt_layout:<bool>] | /gotm nominate title:<string> | /gotm delete-nomination",
     notes:
       "Search by round, month/year, or title. Set showinchat:true to share in channel; otherwise replies are private. Nominations are for the next round and close a day before voting.",
   },
@@ -138,7 +138,7 @@ const HELP_TOPICS: HelpTopic[] = [
     summary:
       "Browse NR-GOTM history, see current nominations, and add or change your nomination.",
     syntax:
-      "Syntax: /nr-gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>] | /nr-gotm noms | /nr-gotm nominate title:<string> | /nr-gotm delete-nomination",
+      "Syntax: /nr-gotm search [round:<int>] [year:<int>] [month:<string>] [title:<string>] [showinchat:<bool>] | /nr-gotm noms [alt_layout:<bool>] | /nr-gotm nominate title:<string> | /nr-gotm delete-nomination",
     notes:
       "Search by round, month/year, or title. Set showinchat:true to share in channel; otherwise replies are private. Nominations are for the next round and close a day before voting.",
   },
@@ -363,7 +363,7 @@ const GOTM_HELP_TOPICS: GotmHelpTopic[] = [
     id: "noms",
     label: "/gotm noms",
     summary: "Public list of current GOTM nominations for the upcoming round.",
-    syntax: "Syntax: /gotm noms",
+    syntax: "Syntax: /gotm noms [alt_layout:<bool>]",
   },
   {
     id: "nominate",
@@ -565,7 +565,7 @@ const NR_GOTM_HELP_TOPICS: NrGotmHelpTopic[] = [
     id: "noms",
     label: "/nr-gotm noms",
     summary: "Public list of current NR-GOTM nominations for the upcoming round.",
-    syntax: "Syntax: /nr-gotm noms",
+    syntax: "Syntax: /nr-gotm noms [alt_layout:<bool>]",
   },
   {
     id: "nominate",

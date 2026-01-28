@@ -89,6 +89,8 @@ export interface IMemberNowPlayingEntry {
   title: string;
   threadId: string | null;
   note: string | null;
+  addedAt: Date | null;
+  noteUpdatedAt: Date | null;
   sortOrder: number | null;
 }
 
@@ -176,6 +178,8 @@ export default class Member {
         TITLE: string;
         THREAD_ID: string | null;
         NOTE: string | null;
+        ADDED_AT: Date | string | null;
+        NOTE_UPDATED_AT: Date | string | null;
         SORT_ORDER: number | null;
       }>(
         `SELECT g.GAME_ID,
@@ -193,6 +197,8 @@ export default class Member {
                   )
                 ) AS THREAD_ID,
                 u.NOTE,
+                u.ADDED_AT,
+                u.NOTE_UPDATED_AT,
                 u.SORT_ORDER
            FROM USER_NOW_PLAYING u
            JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
@@ -208,6 +214,16 @@ export default class Member {
           title: r.TITLE,
           threadId: r.THREAD_ID ?? null,
           note: r.NOTE ?? null,
+          addedAt: r.ADDED_AT instanceof Date
+            ? r.ADDED_AT
+            : r.ADDED_AT
+              ? new Date(r.ADDED_AT as any)
+              : null,
+          noteUpdatedAt: r.NOTE_UPDATED_AT instanceof Date
+            ? r.NOTE_UPDATED_AT
+            : r.NOTE_UPDATED_AT
+              ? new Date(r.NOTE_UPDATED_AT as any)
+              : null,
           sortOrder: r.SORT_ORDER == null ? null : Number(r.SORT_ORDER),
         }))
         .slice(0, MAX_NOW_PLAYING);
@@ -227,6 +243,8 @@ export default class Member {
         TITLE: string;
         THREAD_ID: string | null;
         NOTE: string | null;
+        ADDED_AT: Date | string | null;
+        NOTE_UPDATED_AT: Date | string | null;
       }>(
         `SELECT u.USER_ID,
                 ru.USERNAME,
@@ -247,6 +265,7 @@ export default class Member {
                 ) AS THREAD_ID,
                 u.NOTE,
                 u.ADDED_AT,
+                u.NOTE_UPDATED_AT,
                 u.ENTRY_ID
            FROM USER_NOW_PLAYING u
            JOIN RPG_CLUB_USERS ru ON ru.USER_ID = u.USER_ID
@@ -279,6 +298,16 @@ export default class Member {
             title: row.TITLE,
             threadId: row.THREAD_ID ?? null,
             note: row.NOTE ?? null,
+            addedAt: row.ADDED_AT instanceof Date
+              ? row.ADDED_AT
+              : row.ADDED_AT
+                ? new Date(row.ADDED_AT as any)
+                : null,
+            noteUpdatedAt: row.NOTE_UPDATED_AT instanceof Date
+              ? row.NOTE_UPDATED_AT
+              : row.NOTE_UPDATED_AT
+                ? new Date(row.NOTE_UPDATED_AT as any)
+                : null,
             sortOrder: null,
           });
         }
@@ -374,16 +403,30 @@ export default class Member {
 
   static async getNowPlayingEntries(
     userId: string,
-  ): Promise<{ gameId: number; title: string; note: string | null; sortOrder: number | null }[]> {
+  ): Promise<{
+    gameId: number;
+    title: string;
+    note: string | null;
+    addedAt: Date | null;
+    noteUpdatedAt: Date | null;
+    sortOrder: number | null;
+  }[]> {
     const connection = await getOraclePool().getConnection();
     try {
       const res = await connection.execute<{
         GAME_ID: number;
         TITLE: string;
         NOTE: string | null;
+        ADDED_AT: Date | string | null;
+        NOTE_UPDATED_AT: Date | string | null;
         SORT_ORDER: number | null;
       }>(
-        `SELECT u.GAMEDB_GAME_ID AS GAME_ID, g.TITLE, u.NOTE, u.SORT_ORDER
+        `SELECT u.GAMEDB_GAME_ID AS GAME_ID,
+                g.TITLE,
+                u.NOTE,
+                u.ADDED_AT,
+                u.NOTE_UPDATED_AT,
+                u.SORT_ORDER
            FROM USER_NOW_PLAYING u
            JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
           WHERE u.USER_ID = :userId
@@ -396,6 +439,16 @@ export default class Member {
         gameId: Number(r.GAME_ID),
         title: r.TITLE,
         note: r.NOTE ?? null,
+        addedAt: r.ADDED_AT instanceof Date
+          ? r.ADDED_AT
+          : r.ADDED_AT
+            ? new Date(r.ADDED_AT as any)
+            : null,
+        noteUpdatedAt: r.NOTE_UPDATED_AT instanceof Date
+          ? r.NOTE_UPDATED_AT
+          : r.NOTE_UPDATED_AT
+            ? new Date(r.NOTE_UPDATED_AT as any)
+            : null,
         sortOrder: r.SORT_ORDER == null ? null : Number(r.SORT_ORDER),
       }));
     } finally {
@@ -448,14 +501,16 @@ export default class Member {
     const connection = await getOraclePool().getConnection();
     const normalizedNote = note?.trim();
     const noteValue = normalizedNote ? normalizedNote : null;
+    const noteUpdatedAt = noteValue ? new Date() : null;
 
     try {
       const res = await connection.execute(
         `UPDATE USER_NOW_PLAYING
-            SET NOTE = :note
+            SET NOTE = :note,
+                NOTE_UPDATED_AT = :noteUpdatedAt
           WHERE USER_ID = :userId
             AND GAMEDB_GAME_ID = :gameId`,
-        { userId, gameId, note: noteValue },
+        { userId, gameId, note: noteValue, noteUpdatedAt },
         { autoCommit: true },
       );
       return (res.rowsAffected ?? 0) > 0;
@@ -475,6 +530,7 @@ export default class Member {
     const connection = await getOraclePool().getConnection();
     const normalizedNote = note?.trim();
     const noteValue = normalizedNote ? normalizedNote : null;
+    const noteUpdatedAt = noteValue ? new Date() : null;
 
     try {
       const countRes = await connection.execute<{ CNT: number }>(
@@ -498,9 +554,10 @@ export default class Member {
       const nextSort = maxSort + 1;
 
       await connection.execute(
-        `INSERT INTO USER_NOW_PLAYING (USER_ID, GAMEDB_GAME_ID, NOTE, SORT_ORDER)
-         VALUES (:userId, :gameId, :note, :sortOrder)`,
-        { userId, gameId, note: noteValue, sortOrder: nextSort },
+        `INSERT INTO USER_NOW_PLAYING
+          (USER_ID, GAMEDB_GAME_ID, NOTE, NOTE_UPDATED_AT, SORT_ORDER)
+         VALUES (:userId, :gameId, :note, :noteUpdatedAt, :sortOrder)`,
+        { userId, gameId, note: noteValue, noteUpdatedAt, sortOrder: nextSort },
         { autoCommit: true },
       );
     } catch (err: any) {
