@@ -1,6 +1,7 @@
 import {
   ApplicationCommandOptionType,
   type Attachment,
+  AutocompleteInteraction,
   type CommandInteraction,
   EmbedBuilder,
   MessageFlags,
@@ -123,6 +124,28 @@ type CompletionatorThreadContext = {
 
 const completionatorThreadContexts: Map<string, CompletionatorThreadContext> = new Map();
 
+async function autocompleteGameCompletionTitle(
+  interaction: AutocompleteInteraction,
+): Promise<void> {
+  if (interaction.options.getSubcommand() !== "add") {
+    await interaction.respond([]);
+    return;
+  }
+  const focused = interaction.options.getFocused(true);
+  const rawQuery = focused?.value ? String(focused.value) : "";
+  const query = sanitizeUserInput(rawQuery, { preserveNewlines: false }).trim();
+  if (!query) {
+    await interaction.respond([]);
+    return;
+  }
+  const results = await Game.searchGames(query);
+  const options = results.slice(0, 25).map((game) => ({
+    name: game.title.slice(0, 100),
+    value: game.title,
+  }));
+  await interaction.respond(options);
+}
+
 @Discord()
 @SlashGroup({ description: "Manage game completions", name: "game-completion" })
 @SlashGroup("game-completion")
@@ -131,6 +154,14 @@ export class GameCompletionCommands {
 
   @Slash({ description: "Add a game completion", name: "add" })
   async completionAdd(
+    @SlashOption({
+      description: "Game title (autocomplete from GameDB)",
+      name: "title",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+      autocomplete: autocompleteGameCompletionTitle,
+    })
+    query: string,
     @SlashChoice(
       ...COMPLETION_TYPES.map((t) => ({
         name: t,
@@ -144,20 +175,6 @@ export class GameCompletionCommands {
       type: ApplicationCommandOptionType.String,
     })
     completionType: CompletionType,
-    @SlashOption({
-      description: "GameDB id (optional if using title)",
-      name: "game_id",
-      required: false,
-      type: ApplicationCommandOptionType.Integer,
-    })
-    gameId: number | undefined,
-    @SlashOption({
-      description: "Search text to find/import the game",
-      name: "title",
-      required: false,
-      type: ApplicationCommandOptionType.String,
-    })
-    query: string | undefined,
     @SlashOption({
       description: "Optional note for this completion",
       name: "note",
@@ -198,7 +215,7 @@ export class GameCompletionCommands {
       return;
     }
 
-    query = query ? sanitizeUserInput(query, { preserveNewlines: false }) : undefined;
+    query = sanitizeUserInput(query, { preserveNewlines: false });
     note = note ? sanitizeUserInput(note, { preserveNewlines: true }) : undefined;
     completionDate = completionDate
       ? sanitizeUserInput(completionDate, { preserveNewlines: false })
@@ -237,32 +254,37 @@ export class GameCompletionCommands {
       return;
     }
 
-    if (gameId) {
-      const game = await Game.getGameById(Number(gameId));
-      if (!game) {
-        await safeReply(interaction, {
-          content: `GameDB #${gameId} was not found.`,
-          flags: MessageFlags.Ephemeral,
-        });
-        return;
-      }
+    const searchTerm = query.trim();
+    if (!searchTerm) {
+      await safeReply(interaction, {
+        content: "Provide a game title to search.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const localResults = await Game.searchGames(searchTerm);
+    const exactMatch = localResults.find(
+      (game) => game.title.toLowerCase() === searchTerm.toLowerCase(),
+    );
+    if (exactMatch) {
       const removeFromNowPlaying = await resolveNowPlayingRemoval(
         interaction,
         userId,
-        game.id,
-        game.title,
+        exactMatch.id,
+        exactMatch.title,
         completedAt,
         false,
       );
       await saveCompletion(
         interaction,
         userId,
-        game.id,
+        exactMatch.id,
         completionType,
         completedAt,
         playtime,
         trimmedNote,
-        game.title,
+        exactMatch.title,
         announce,
         false,
         removeFromNowPlaying,
@@ -270,16 +292,7 @@ export class GameCompletionCommands {
       return;
     }
 
-    const searchTerm = (query ?? "").trim();
-    if (!searchTerm) {
-      await safeReply(interaction, {
-        content: "Provide a game_id or include a search query.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    await this.promptCompletionSelection(interaction, searchTerm, {
+    const sessionId = this.createCompletionSession({
       userId,
       completionType,
       completedAt,
@@ -289,6 +302,67 @@ export class GameCompletionCommands {
       query: searchTerm,
       announce,
     });
+    const confirmRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`completion-add-igdb-confirm:${sessionId}:yes`)
+        .setLabel("Yes, import from IGDB")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`completion-add-igdb-confirm:${sessionId}:cancel`)
+        .setLabel("Cancel")
+        .setStyle(ButtonStyle.Secondary),
+    );
+    await safeReply(interaction, {
+      content:
+        `No exact GameDB match found for "${searchTerm}". ` +
+        "Import it from IGDB.com?",
+      components: [confirmRow],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  @ButtonComponent({ id: /^completion-add-igdb-confirm:.+/ })
+  async handleCompletionAddIgdbConfirm(interaction: ButtonInteraction): Promise<void> {
+    const [, sessionId, action] = interaction.customId.split(":");
+    const ctx = completionAddSessions.get(sessionId);
+    if (!ctx) {
+      await interaction.reply({
+        content: "This completion prompt has expired.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    if (interaction.user.id !== ctx.userId) {
+      await interaction.reply({
+        content: "This completion prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (action !== "yes") {
+      completionAddSessions.delete(sessionId);
+      await interaction.update({
+        content: "Cancelled.",
+        components: [],
+      });
+      return;
+    }
+
+    if (!ctx.query) {
+      completionAddSessions.delete(sessionId);
+      await interaction.update({
+        content: "Search query missing. Please try again.",
+        components: [],
+      });
+      return;
+    }
+
+    try {
+      await this.promptIgdbSelection(interaction, ctx.query, ctx);
+    } finally {
+      completionAddSessions.delete(sessionId);
+    }
   }
 
   @Slash({ description: "List your completed games", name: "list" })
@@ -373,6 +447,7 @@ export class GameCompletionCommands {
       sanitizedQuery,
     );
   }
+
 
   @Slash({ description: "Edit one of your completion records", name: "edit" })
   async completionEdit(
@@ -3240,7 +3315,7 @@ export class GameCompletionCommands {
   }
 
   private async promptIgdbSelection(
-    interaction: CommandInteraction | StringSelectMenuInteraction,
+    interaction: CommandInteraction | StringSelectMenuInteraction | ButtonInteraction,
     searchTerm: string,
     ctx: CompletionAddContext,
   ): Promise<void> {
