@@ -1,3 +1,8 @@
+2026-01-28 - Commit ID: c0668f1 - feat: added automcomplete for game name to /game-completion add
+2026-01-28 - Commit ID: ed032eb - issue-52: fixed off by 1 day completion date bug
+2026-01-28 - Commit ID: 683a557 - feat: gave /now-playing a better UI/UX
+2026-01-28 - Commit ID: 3bd5178 - issue-55: updated UI/UX for /nomination commands
+2026-01-18 - Commit ID: 601f5a1 - feat: created a proof of concept that I can capture websites as images for future bot dev ideas
 2026-01-18 - Commit ID: 497c471 - fix: also added descriptions to gamedb audit
 2026-01-18 - Commit ID: 339ccd0 - feat: updated gameDB audit to handle adding videos manually
 2026-01-18 - Commit ID: 110606d - feat: added missing videos to the gamedb audit

@@ -747,9 +747,9 @@ const GAME_COMPLETION_HELP_TOPICS: GameCompletionHelpTopic[] = [
     label: "/game-completion add",
     summary: "Log that you completed a game (removes it from Now Playing if present).",
     syntax:
-      "Syntax: /game-completion add completion_type:<choice> title:<string> [completion_date:<date>] [final_playtime_hours:<number>] [note:<string>] [announce:<boolean>]",
+      "Syntax: /game-completion add title:<string> completion_type:<choice> [completion_date:<date>] [final_playtime_hours:<number>] [note:<string>] [announce:<boolean>]",
     notes:
-      "Completion type choices: Main Story, Main Story + Side Content, Completionist. Completion date defaults to today; playtime is optional (e.g., 42.5). Uses GameDB lookup/import if you provide a title. Set announce:true to post to the completions channel.",
+      "Completion type choices: Main Story, Main Story + Side Content, Completionist. Completion date defaults to today; playtime is optional (e.g., 42.5). Title autocompletes from GameDB. If no exact match, you can import from IGDB. Set announce:true to post to the completions channel.",
   },
   {
     id: "list",

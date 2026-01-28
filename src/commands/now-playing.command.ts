@@ -74,7 +74,6 @@ const NOW_PLAYING_ADD_MODAL_ID = "nowplaying-add-modal";
 const NOW_PLAYING_ADD_TITLE_INPUT_ID = "nowplaying-add-title";
 const NOW_PLAYING_ADD_NOTE_INPUT_ID = "nowplaying-add-note";
 const NOW_PLAYING_EDIT_NOTE_DIRECT_PREFIX = "nowplaying-edit-note-direct";
-const NOW_PLAYING_COMPLETE_DIRECT_PREFIX = "nowplaying-complete-direct";
 const NOW_PLAYING_COMPLETE_MODAL_ID = "nowplaying-complete-modal";
 const NOW_PLAYING_COMPLETE_DATE_INPUT_ID = "nowplaying-complete-date";
 const NOW_PLAYING_COMPLETE_HOURS_INPUT_ID = "nowplaying-complete-hours";
@@ -102,6 +101,7 @@ type NowPlayingCompletionWizardSession = {
   removeFromNowPlaying: boolean;
   announce: boolean;
   addCompletionNote: boolean;
+  returnToList: boolean;
 };
 const nowPlayingCompletionWizardSessions = new Map<string, NowPlayingCompletionWizardSession>();
 type NowPlayingListContext = {
@@ -115,7 +115,10 @@ function buildComponentsV2Flags(isEphemeral: boolean): number {
   return (isEphemeral ? MessageFlags.Ephemeral : 0) | COMPONENTS_V2_FLAG;
 }
 
-function createNowPlayingCompletionWizardSession(userId: string): string {
+function createNowPlayingCompletionWizardSession(
+  userId: string,
+  returnToList: boolean = false,
+): string {
   const sessionId = `np-comp-ui-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
   const defaultType = (COMPLETION_TYPES[0] ?? "Main Story") as CompletionType;
   nowPlayingCompletionWizardSessions.set(sessionId, {
@@ -125,6 +128,7 @@ function createNowPlayingCompletionWizardSession(userId: string): string {
     removeFromNowPlaying: true,
     announce: true,
     addCompletionNote: true,
+    returnToList,
   });
   return sessionId;
 }
@@ -671,40 +675,18 @@ export class NowPlayingCommand {
       return;
     }
 
-    const limit = 10;
-    const selection = current.slice(0, limit);
-    const lines = selection.map((entry) => {
-      if (!entry.note) {
-        return `- **${entry.title}**`;
-      }
-      return `- **${entry.title}**\n  - ${entry.note}`;
-    });
-
-    const buttons = selection.map((entry) =>
-      new ButtonBuilder()
-        .setCustomId(`${NOW_PLAYING_COMPLETE_PICK_PREFIX}:${sessionId}:${entry.gameId}`)
-        .setLabel(entry.title.slice(0, 80))
-        .setStyle(ButtonStyle.Primary),
+    const entries = getDisplayNowPlayingEntries(current);
+    const { files, thumbnailsByGameId } = await this.buildNowPlayingAttachments(
+      entries,
+      NOW_PLAYING_GALLERY_MAX,
     );
-    const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-    for (let i = 0; i < buttons.length; i += 5) {
-      rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(buttons.slice(i, i + 5)));
-    }
-
-    const contentLines = [
-      "## Add Completion",
-      "Select a game to log a completion:",
-      ...lines,
-    ];
-    if (current.length > selection.length) {
-      contentLines.push("", `Showing first ${selection.length} of ${current.length} games.`);
-    }
-    const content = this.trimTextDisplayContent(contentLines.join("\n"));
-    const container = new ContainerBuilder().addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(content),
+    const components = this.buildNowPlayingCompletionComponents(
+      entries,
+      ownerId,
+      sessionId,
+      thumbnailsByGameId,
     );
-    const cancelRow = this.buildNowPlayingCancelRow(ownerId);
-    await interaction.update({ components: [container, ...rows, cancelRow] });
+    await interaction.update(this.buildComponentPayload(components, files));
   }
 
   @ModalComponent({ id: /^nowplaying-complete-modal:[^:]+$/ })
@@ -844,6 +826,37 @@ export class NowPlayingCommand {
 
     if (session.removeFromNowPlaying) {
       await this.refreshNowPlayingListFromContext(interaction, session.userId).catch(() => {});
+    }
+
+    if (session.returnToList) {
+      const entries = getDisplayNowPlayingEntries(
+        await Member.getNowPlaying(session.userId),
+      );
+      if (!entries.length) {
+        const container = new ContainerBuilder().addTextDisplayComponents(
+          new TextDisplayBuilder().setContent("Your Now Playing list is empty."),
+        );
+        await safeReply(interaction, {
+          components: [container],
+          flags: buildComponentsV2Flags(true),
+        });
+      } else {
+        const { files, thumbnailsByGameId } = await this.buildNowPlayingAttachments(
+          entries,
+          NOW_PLAYING_GALLERY_MAX,
+        );
+        const components = this.buildNowPlayingCompletionComponents(
+          entries,
+          session.userId,
+          sessionId,
+          thumbnailsByGameId,
+        );
+        await safeReply(interaction, {
+          ...this.buildComponentPayload(components, files),
+          flags: buildComponentsV2Flags(true),
+        });
+      }
+      return;
     }
 
     const detailLines = [
@@ -1271,9 +1284,10 @@ export class NowPlayingCommand {
     if (mode === "reply") {
       await safeDeferReply(interaction, { flags: buildComponentsV2Flags(true) });
     }
+    const userId = interaction.user.id;
     try {
-      const current = await Member.getNowPlayingEntries(interaction.user.id);
-      if (!current.length) {
+      const entries = getDisplayNowPlayingEntries(await Member.getNowPlaying(userId));
+      if (!entries.length) {
         const container = new ContainerBuilder().addTextDisplayComponents(
           new TextDisplayBuilder().setContent("Your Now Playing list is empty."),
         );
@@ -1288,48 +1302,20 @@ export class NowPlayingCommand {
         return;
       }
 
-      const limit = 10;
-      const selection = current.slice(0, limit);
-      const lines = selection.map((entry) => {
-        if (!entry.note) {
-          return `- **${entry.title}**`;
-        }
-        return `- **${entry.title}**\n  - ${entry.note}`;
-      });
-
-      const buttons = selection.map((entry) =>
-        new ButtonBuilder()
-          .setCustomId(`np-remove:${interaction.user.id}:${entry.gameId}`)
-          .setLabel(entry.title.slice(0, 80))
-          .setStyle(ButtonStyle.Primary),
+      const { files, thumbnailsByGameId } = await this.buildNowPlayingAttachments(
+        entries,
+        NOW_PLAYING_GALLERY_MAX,
       );
-
-      const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-      for (let i = 0; i < buttons.length; i += 5) {
-        rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(buttons.slice(i, i + 5)));
-      }
-      rows.push(this.buildNowPlayingCancelRow(interaction.user.id));
-
-      const contentLines = [
-        "## Now Playing Remove",
-        "Select a game to remove from your Now Playing list:",
-        ...lines,
-      ];
-      if (current.length > selection.length) {
-        contentLines.push(
-          "",
-          `Showing first ${selection.length} of ${current.length} games.`,
-        );
-      }
-      const content = this.trimTextDisplayContent(contentLines.join("\n"));
-      const container = new ContainerBuilder().addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(content),
+      const components = this.buildNowPlayingRemoveComponents(
+        entries,
+        userId,
+        thumbnailsByGameId,
       );
       if (mode === "update" && "update" in interaction) {
-        await interaction.update({ components: [container, ...rows] });
+        await interaction.update(this.buildComponentPayload(components, files));
       } else {
         await safeReply(interaction, {
-          components: [container, ...rows],
+          ...this.buildComponentPayload(components, files),
           flags: buildComponentsV2Flags(true),
         });
       }
@@ -1363,7 +1349,7 @@ export class NowPlayingCommand {
       await interaction.update({ components: [container] });
       return;
     }
-    const { thumbnailsByGameId } = await this.buildNowPlayingAttachments(
+    const { files, thumbnailsByGameId } = await this.buildNowPlayingAttachments(
       entries,
       NOW_PLAYING_GALLERY_MAX,
     );
@@ -1372,7 +1358,7 @@ export class NowPlayingCommand {
       ownerId,
       thumbnailsByGameId,
     );
-    await interaction.update({ components });
+    await interaction.update(this.buildComponentPayload(components, files));
   }
 
   private parseNowPlayingCompletionDate(value: string): Date | null {
@@ -1606,7 +1592,7 @@ export class NowPlayingCommand {
     );
     const index = entries.findIndex((entry) => entry.gameId === gameId);
     if (index <= 0) {
-      const { thumbnailsByGameId } = await this.buildNowPlayingAttachments(
+      const { files, thumbnailsByGameId } = await this.buildNowPlayingAttachments(
         entries,
         NOW_PLAYING_GALLERY_MAX,
       );
@@ -1615,7 +1601,7 @@ export class NowPlayingCommand {
         ownerId,
         thumbnailsByGameId,
       );
-      await interaction.update({ components });
+      await interaction.update(this.buildComponentPayload(components, files));
       return;
     }
 
@@ -1631,7 +1617,7 @@ export class NowPlayingCommand {
       return;
     }
 
-    const { thumbnailsByGameId } = await this.buildNowPlayingAttachments(
+    const { files, thumbnailsByGameId } = await this.buildNowPlayingAttachments(
       reordered,
       NOW_PLAYING_GALLERY_MAX,
     );
@@ -1640,7 +1626,7 @@ export class NowPlayingCommand {
       ownerId,
       thumbnailsByGameId,
     );
-    await interaction.update({ components });
+    await interaction.update(this.buildComponentPayload(components, files));
   }
 
   @ButtonComponent({ id: /^nowplaying-sort-done:\d+$/ })
@@ -1875,31 +1861,25 @@ export class NowPlayingCommand {
         });
         return;
       }
-      const refreshed = await this.refreshNowPlayingListFromContext(interaction, ownerId);
-      if (refreshed) {
-        await interaction.deferUpdate().catch(() => {});
+
+      const entries = getDisplayNowPlayingEntries(await Member.getNowPlaying(ownerId));
+      if (!entries.length) {
+        const container = new ContainerBuilder().addTextDisplayComponents(
+          new TextDisplayBuilder().setContent("Your Now Playing list is empty."),
+        );
+        await interaction.update({ components: [container] });
         return;
       }
-      const list = await Member.getNowPlaying(ownerId);
-      const payload = await this.buildNowPlayingListPayload(
-        interaction.user,
-        list,
-        interaction.guildId,
-        "Your Now Playing List",
-        true,
-        true,
+      const { files, thumbnailsByGameId } = await this.buildNowPlayingAttachments(
+        entries,
+        NOW_PLAYING_GALLERY_MAX,
       );
-      const components = this.withNowPlayingActions(
-        "Your Now Playing List",
+      const components = this.buildNowPlayingRemoveComponents(
+        entries,
         ownerId,
-        payload.components,
-        list.length,
+        thumbnailsByGameId,
       );
-      await interaction.update({
-        components,
-        files: payload.files,
-        flags: buildComponentsV2Flags(true),
-      });
+      await interaction.update(this.buildComponentPayload(components, files));
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       const container = new ContainerBuilder().addTextDisplayComponents(
@@ -1968,13 +1948,13 @@ export class NowPlayingCommand {
       return;
     }
     setNowPlayingListContext(ownerId, interaction.message);
-    const sessionId = createNowPlayingCompletionWizardSession(ownerId);
+    const sessionId = createNowPlayingCompletionWizardSession(ownerId, true);
     await this.promptNowPlayingCompletionPick(interaction, ownerId, sessionId);
   }
 
-  @ButtonComponent({ id: /^nowplaying-complete-direct:\d+:\d+$/ })
-  async handleNowPlayingCompleteDirect(interaction: ButtonInteraction): Promise<void> {
-    const [, ownerId, gameIdRaw] = interaction.customId.split(":");
+  @ButtonComponent({ id: /^nowplaying-complete-done:\d+$/ })
+  async handleNowPlayingCompleteDone(interaction: ButtonInteraction): Promise<void> {
+    const [, ownerId] = interaction.customId.split(":");
     if (interaction.user.id !== ownerId) {
       await interaction.reply({
         content: "This completion prompt isn't for you.",
@@ -1982,27 +1962,28 @@ export class NowPlayingCommand {
       });
       return;
     }
-    const gameId = Number(gameIdRaw);
-    if (!Number.isInteger(gameId) || gameId <= 0) {
-      await interaction.reply({
-        content: "Invalid selection.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-    setNowPlayingListContext(ownerId, interaction.message);
-    const sessionId = createNowPlayingCompletionWizardSession(ownerId);
-    const session = nowPlayingCompletionWizardSessions.get(sessionId);
-    if (!session) {
-      await interaction.reply({
-        content: "Unable to start completion flow.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-    session.gameId = gameId;
-    await this.renderNowPlayingCompletionConfig(interaction, sessionId, session);
+    const list = await Member.getNowPlaying(ownerId);
+    const payload = await this.buildNowPlayingListPayload(
+      interaction.user,
+      list,
+      interaction.guildId,
+      "Your Now Playing List",
+      true,
+      true,
+    );
+    const components = this.withNowPlayingActions(
+      "Your Now Playing List",
+      ownerId,
+      payload.components,
+      list.length,
+    );
+    await interaction.update({
+      components,
+      files: payload.files,
+      flags: buildComponentsV2Flags(true),
+    });
   }
+
 
   @ButtonComponent({ id: /^nowplaying-list-remove:\d+$/ })
   async handleNowPlayingListRemove(interaction: ButtonInteraction): Promise<void> {
@@ -2019,6 +2000,38 @@ export class NowPlayingCommand {
     }
     setNowPlayingListContext(ownerId, interaction.message);
     await this.promptRemoveNowPlaying(interaction, "update");
+  }
+
+  @ButtonComponent({ id: /^nowplaying-remove-done:\d+$/ })
+  async handleNowPlayingRemoveDone(interaction: ButtonInteraction): Promise<void> {
+    const [, ownerId] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await interaction.reply({
+        content: "This remove prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    const list = await Member.getNowPlaying(ownerId);
+    const payload = await this.buildNowPlayingListPayload(
+      interaction.user,
+      list,
+      interaction.guildId,
+      "Your Now Playing List",
+      true,
+      true,
+    );
+    const components = this.withNowPlayingActions(
+      "Your Now Playing List",
+      ownerId,
+      payload.components,
+      list.length,
+    );
+    await interaction.update({
+      components,
+      files: payload.files,
+      flags: buildComponentsV2Flags(true),
+    });
   }
 
   @ButtonComponent({ id: /^nowplaying-list-cancel:\d+$/ })
@@ -2235,6 +2248,16 @@ export class NowPlayingCommand {
     return container;
   }
 
+  private buildComponentPayload(
+    components: Array<ContainerBuilder | ActionRowBuilder<ButtonBuilder>>,
+    files?: AttachmentBuilder[],
+  ): { components: Array<ContainerBuilder | ActionRowBuilder<ButtonBuilder>>; files?: AttachmentBuilder[] } {
+    if (files && files.length) {
+      return { components, files };
+    }
+    return { components };
+  }
+
   private async buildNowPlayingAttachments(
     entries: IMemberNowPlayingEntry[],
     maxImages: number = Number.POSITIVE_INFINITY,
@@ -2302,12 +2325,16 @@ export class NowPlayingCommand {
     if (listCount > 1) {
       buttons.push(
         new ButtonBuilder()
-        .setCustomId(`nowplaying-list-sort:${ownerId}`)
-        .setLabel("Sort")
-        .setStyle(ButtonStyle.Secondary),
+          .setCustomId(`nowplaying-list-sort:${ownerId}`)
+          .setLabel("Sort")
+          .setStyle(ButtonStyle.Secondary),
       );
     }
     buttons.push(
+      new ButtonBuilder()
+        .setCustomId(`nowplaying-list-complete:${ownerId}`)
+        .setLabel("Add Completion")
+        .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(`nowplaying-list-remove:${ownerId}`)
         .setLabel("Remove Game")
@@ -2325,6 +2352,167 @@ export class NowPlayingCommand {
     );
   }
 
+  private buildNowPlayingCompletionComponents(
+    entries: IMemberNowPlayingEntry[],
+    ownerId: string,
+    sessionId: string,
+    thumbnailsByGameId: Map<number, string>,
+  ): Array<ContainerBuilder | ActionRowBuilder<ButtonBuilder>> {
+    const container = new ContainerBuilder();
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        "## Add Completion\nClick Add Completion to log a game.",
+      ),
+    );
+
+    const galleryItems: MediaGalleryItemBuilder[] = [];
+    for (const entry of entries) {
+      if (galleryItems.length >= NOW_PLAYING_GALLERY_MAX) {
+        break;
+      }
+      if (!entry.gameId) {
+        continue;
+      }
+      const imageUrl = thumbnailsByGameId.get(entry.gameId);
+      if (!imageUrl) {
+        continue;
+      }
+      const item = new MediaGalleryItemBuilder()
+        .setURL(imageUrl)
+        .setDescription(entry.title);
+      galleryItems.push(item);
+    }
+
+    if (galleryItems.length) {
+      container.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(galleryItems));
+      container.addSeparatorComponents(
+        new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(false),
+      );
+    }
+
+    entries.forEach((entry, index) => {
+      if (index === 0) {
+        container.addSeparatorComponents(
+          new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(false),
+        );
+      }
+      const lines = [`### ${entry.title}`, entry.note ?? ""];
+      if (entry.addedAt) {
+        const addedLabel = `Added ${formatTableDate(entry.addedAt)}`;
+        if (entry.noteUpdatedAt) {
+          const updatedLabel = `last updated ${formatTableDate(entry.noteUpdatedAt)}`;
+          if (formatTableDate(entry.addedAt) === formatTableDate(entry.noteUpdatedAt)) {
+            lines.push(`-# *${addedLabel}.*`);
+          } else {
+            lines.push(`-# *${addedLabel}, ${updatedLabel}.*`);
+          }
+        } else {
+          lines.push(`-# *${addedLabel}.*`);
+        }
+      }
+      const section = new SectionBuilder().addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(
+          this.trimTextDisplayContent(lines.join("\n")),
+        ),
+      );
+      section.setButtonAccessory(
+        new V2ButtonBuilder()
+          .setCustomId(`${NOW_PLAYING_COMPLETE_PICK_PREFIX}:${sessionId}:${entry.gameId}`)
+          .setLabel("Add Completion")
+          .setStyle(ButtonStyle.Primary),
+      );
+      container.addSectionComponents(section);
+    });
+
+    const doneRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`nowplaying-complete-done:${ownerId}`)
+        .setLabel("Done")
+        .setStyle(ButtonStyle.Success),
+    );
+    return [container, doneRow];
+  }
+
+  private buildNowPlayingRemoveComponents(
+    entries: IMemberNowPlayingEntry[],
+    ownerId: string,
+    thumbnailsByGameId: Map<number, string>,
+  ): Array<ContainerBuilder | ActionRowBuilder<ButtonBuilder>> {
+    const container = new ContainerBuilder();
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        "## Now Playing Remove\nClick Remove Game to delete an entry.",
+      ),
+    );
+
+    const galleryItems: MediaGalleryItemBuilder[] = [];
+    for (const entry of entries) {
+      if (galleryItems.length >= NOW_PLAYING_GALLERY_MAX) {
+        break;
+      }
+      if (!entry.gameId) {
+        continue;
+      }
+      const imageUrl = thumbnailsByGameId.get(entry.gameId);
+      if (!imageUrl) {
+        continue;
+      }
+      const item = new MediaGalleryItemBuilder()
+        .setURL(imageUrl)
+        .setDescription(entry.title);
+      galleryItems.push(item);
+    }
+
+    if (galleryItems.length) {
+      container.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(galleryItems));
+      container.addSeparatorComponents(
+        new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(false),
+      );
+    }
+
+    entries.forEach((entry, index) => {
+      if (index === 0) {
+        container.addSeparatorComponents(
+          new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(false),
+        );
+      }
+      const lines = [`### ${entry.title}`, entry.note ?? ""];
+      if (entry.addedAt) {
+        const addedLabel = `Added ${formatTableDate(entry.addedAt)}`;
+        if (entry.noteUpdatedAt) {
+          const updatedLabel = `last updated ${formatTableDate(entry.noteUpdatedAt)}`;
+          if (formatTableDate(entry.addedAt) === formatTableDate(entry.noteUpdatedAt)) {
+            lines.push(`-# *${addedLabel}.*`);
+          } else {
+            lines.push(`-# *${addedLabel}, ${updatedLabel}.*`);
+          }
+        } else {
+          lines.push(`-# *${addedLabel}.*`);
+        }
+      }
+      const section = new SectionBuilder().addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(
+          this.trimTextDisplayContent(lines.join("\n")),
+        ),
+      );
+      section.setButtonAccessory(
+        new V2ButtonBuilder()
+          .setCustomId(`np-remove:${ownerId}:${entry.gameId}`)
+          .setLabel("Remove Game")
+          .setStyle(ButtonStyle.Danger),
+      );
+      container.addSectionComponents(section);
+    });
+
+    const doneRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`nowplaying-remove-done:${ownerId}`)
+        .setLabel("Done")
+        .setStyle(ButtonStyle.Success),
+    );
+    return [container, doneRow];
+  }
+
   private buildNowPlayingSortComponents(
     entries: IMemberNowPlayingEntry[],
     ownerId: string,
@@ -2332,9 +2520,8 @@ export class NowPlayingCommand {
   ): Array<ContainerBuilder | ActionRowBuilder<ButtonBuilder>> {
     const container = new ContainerBuilder();
     container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent("## Sort Your Now Playing List"),
       new TextDisplayBuilder().setContent(
-        "Click Move Up to raise a game. Press Done when finished.",
+        "## Sort Your Now Playing List\nClick Move Up to raise a game. Press Done when finished.",
       ),
     );
 
@@ -2364,11 +2551,6 @@ export class NowPlayingCommand {
     }
 
     entries.forEach((entry, index) => {
-      if (index > 0) {
-        container.addSeparatorComponents(
-          new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true),
-        );
-      }
       const lines = [`### ${entry.title}`];
       if (entry.note) {
         lines.push(entry.note);
@@ -2523,48 +2705,41 @@ export class NowPlayingCommand {
     }
 
     const showEditButton = isOwnList && isEphemeral;
-    const showCompletionButton = isOwnList && isEphemeral;
     entries.forEach((entry, index) => {
-      if (index > 0) {
+      if (index === 0) {
         container.addSeparatorComponents(
-          new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true),
+          new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(false),
         );
       }
       const entryTitle = formatEntry(entry, guildId);
-      const titleContent = this.trimTextDisplayContent(`### ${entryTitle}`);
-      if (showCompletionButton && entry.gameId) {
-        const titleSection = new SectionBuilder().addTextDisplayComponents(
-          new TextDisplayBuilder().setContent(titleContent),
-        );
-        titleSection.setButtonAccessory(
-          new V2ButtonBuilder()
-            .setCustomId(`${NOW_PLAYING_COMPLETE_DIRECT_PREFIX}:${ownerId}:${entry.gameId}`)
-            .setLabel("Add Completion")
-            .setStyle(ButtonStyle.Secondary),
-        );
-        container.addSectionComponents(titleSection);
-      } else {
-        container.addTextDisplayComponents(new TextDisplayBuilder().setContent(titleContent));
+      const lines = [`### ${entryTitle}`, entry.note ?? ""];
+      if (entry.addedAt) {
+        const addedLabel = `Added ${formatTableDate(entry.addedAt)}`;
+        if (entry.noteUpdatedAt) {
+          const updatedLabel = `last updated ${formatTableDate(entry.noteUpdatedAt)}`;
+          if (formatTableDate(entry.addedAt) === formatTableDate(entry.noteUpdatedAt)) {
+            lines.push(`-# *${addedLabel}.*`);
+          } else {
+            lines.push(`-# *${addedLabel}, ${updatedLabel}.*`);
+          }
+        } else {
+          lines.push(`-# *${addedLabel}.*`);
+        }
       }
-
-      const noteLines = [entry.note ?? "No note yet."];
-      if (entry.note && entry.noteUpdatedAt) {
-        noteLines.push(`-# *Last updated ${formatTableDate(entry.noteUpdatedAt)}.*`);
-      }
-      const noteContent = this.trimTextDisplayContent(noteLines.join("\n"));
+      const content = this.trimTextDisplayContent(lines.join("\n"));
       if (showEditButton && entry.gameId) {
-        const noteSection = new SectionBuilder().addTextDisplayComponents(
-          new TextDisplayBuilder().setContent(noteContent),
+        const section = new SectionBuilder().addTextDisplayComponents(
+          new TextDisplayBuilder().setContent(content),
         );
-        noteSection.setButtonAccessory(
+        section.setButtonAccessory(
           new V2ButtonBuilder()
             .setCustomId(`${NOW_PLAYING_EDIT_NOTE_DIRECT_PREFIX}:${ownerId}:${entry.gameId}`)
             .setLabel(entry.note ? "Edit Note" : "Add Note")
             .setStyle(ButtonStyle.Secondary),
         );
-        container.addSectionComponents(noteSection);
+        container.addSectionComponents(section);
       } else {
-        container.addTextDisplayComponents(new TextDisplayBuilder().setContent(noteContent));
+        container.addTextDisplayComponents(new TextDisplayBuilder().setContent(content));
       }
     });
     return [container];
