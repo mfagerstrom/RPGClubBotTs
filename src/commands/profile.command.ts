@@ -73,6 +73,23 @@ export function parseCompletionDateInput(value: string | undefined): Date | null
   if (normalized === "unknown" || normalized === "skip") {
     return null;
   }
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized);
+  if (isoMatch) {
+    const year = Number(isoMatch[1]);
+    const month = Number(isoMatch[2]);
+    const day = Number(isoMatch[3]);
+    const parsed = new Date(year, month - 1, day);
+    if (
+      parsed.getFullYear() !== year ||
+      parsed.getMonth() !== month - 1 ||
+      parsed.getDate() !== day
+    ) {
+      throw new Error(
+        "Could not parse completion date. Use YYYY-MM-DD, or 'today'/'unknown'.",
+      );
+    }
+    return parsed;
+  }
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
     throw new Error(
