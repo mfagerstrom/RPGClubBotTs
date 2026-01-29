@@ -36,6 +36,7 @@ import {
   safeUpdate,
   sanitizeUserInput,
 } from "../functions/InteractionUtils.js";
+import { countSuggestions } from "../classes/Suggestion.js";
 import {
   addComment,
   closeIssue,
@@ -94,6 +95,14 @@ const TODO_CREATE_BODY_ID = "todo-create-body";
 const TODO_LIST_SESSION_TTL_MS = 30 * 60 * 1000;
 const TODO_CREATE_SESSION_TTL_MS = 10 * 60 * 1000;
 const COMPONENTS_V2_FLAG = 1 << 15;
+
+async function getSuggestionReviewCount(): Promise<number> {
+  try {
+    return await countSuggestions();
+  } catch {
+    return 0;
+  }
+}
 
 type TodoListPayload = {
   page: number;
@@ -756,6 +765,7 @@ function buildIssueListComponents(
   totalIssues: number,
   payload: TodoListPayload,
   sessionId: string,
+  suggestionCount: number,
 ): { components: Array<ContainerBuilder | ActionRowBuilder<any>> } {
   const totalPages = Math.max(1, Math.ceil(totalIssues / payload.perPage));
   const summaryParts = [
@@ -765,6 +775,9 @@ function buildIssueListComponents(
     `Sort: ${payload.sort} ${payload.direction}`,
     `Page: ${payload.page} of ${totalPages}`,
   ];
+  if (suggestionCount > 0) {
+    summaryParts.push(`${suggestionCount} suggestions awaiting review`);
+  }
 
   const container = new ContainerBuilder()
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${ISSUE_LIST_TITLE}`));
@@ -1068,11 +1081,13 @@ export class TodoCommand {
       direction: payload.direction,
       isPublic: payload.isPublic,
     });
+    const suggestionCount = await getSuggestionReviewCount();
     const listPayload = buildIssueListComponents(
       pageIssues,
       totalIssues,
       payload,
       sessionId,
+      suggestionCount,
     );
 
     await safeReply(interaction, {
@@ -1135,11 +1150,13 @@ export class TodoCommand {
     const startIndex = (safePage - 1) * payload.perPage;
     const pageIssues = issues.slice(startIndex, startIndex + payload.perPage);
 
+    const suggestionCount = await getSuggestionReviewCount();
     const listPayload = buildIssueListComponents(
       pageIssues,
       totalIssues,
       { ...payload, page: safePage },
       sessionId,
+      suggestionCount,
     );
 
     return {
@@ -1199,6 +1216,7 @@ export class TodoCommand {
     const safePage = clampNumber(payload.page, 1, totalPages);
     const startIndex = (safePage - 1) * payload.perPage;
     const pageIssues = issues.slice(startIndex, startIndex + payload.perPage);
+    const suggestionCount = await getSuggestionReviewCount();
 
     const sessionId = createTodoListSession({
       perPage: payload.perPage,
@@ -1216,6 +1234,7 @@ export class TodoCommand {
       totalIssues,
       { ...payload, page: safePage },
       sessionId,
+      suggestionCount,
     );
 
     try {

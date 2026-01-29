@@ -37,7 +37,8 @@ type HelpTopicId =
   | "mod"
   | "superadmin"
   | "todo"
-  | "suggestion";
+  | "suggestion"
+  | "suggestion-review";
 
 type HelpTopic = {
   id: HelpTopicId;
@@ -287,7 +288,15 @@ const HELP_TOPICS: HelpTopic[] = [
     id: "suggestion",
     label: "/suggestion",
     summary: "Submit a bot suggestion for review.",
-    syntax: "Syntax: /suggestion title:<string> [details:<string>]",
+    syntax: "Syntax: /suggestion title:<string> details:<string> [labels:<select in dropdown>]",
+    notes: "Suggestions are approved via /suggestion-review by the server owner or bot dev.",
+  },
+  {
+    id: "suggestion-review",
+    label: "/suggestion-review",
+    summary: "Review and approve pending bot suggestions.",
+    syntax: "Syntax: /suggestion-review",
+    notes: "Server owner or bot dev only. Approvals create GitHub issues.",
   },
 ];
 
@@ -315,7 +324,7 @@ const HELP_CATEGORIES: { id: string; name: string; topicIds: HelpTopicId[] }[] =
   {
     id: "server-admin",
     name: "Server Administration",
-    topicIds: ["mod", "admin", "superadmin", "todo", "publicreminder", "thread", "rss"],
+    topicIds: ["mod", "admin", "superadmin", "todo", "publicreminder", "thread", "rss", "suggestion-review"],
   },
 ];
 
@@ -945,6 +954,7 @@ export function buildMainHelpResponse(): {
         `${formatCommandLine("admin", "Admin tools.")}\n` +
         `${formatCommandLine("superadmin", "Server Owner tools.")}\n` +
         `${formatCommandLine("todo", "Manage GitHub issues using the bot.")}\n` +
+        `${formatCommandLine("suggestion-review", "Review and approve suggestions.")}\n` +
         `${formatCommandLine("publicreminder", "Schedule public reminders.")}\n` +
         `${formatCommandLine("thread", "Link threads to GameDB games.")}\n` +
         `${formatCommandLine("rss", "Manage RSS relays with filters.")}`,

@@ -1,3 +1,5 @@
+2026-01-29 - Commit ID: d8a1cf5 - issue-77: corrected missing action buttons when gamedb view imports
+2026-01-29 - Commit ID: 491e4d8 - issue-78: added Edit Title button to /todo view
 2026-01-29 - Commit ID: bda77b6 - minor tweaks, reorganized SQL folder
 2026-01-29 - Commit ID: 5ccf0d8 - fix: gamedb audit tweaks
 2026-01-29 - Commit ID: 393c915 - issue-75: dedupe releases
