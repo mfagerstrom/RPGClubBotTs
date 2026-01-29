@@ -16,7 +16,7 @@ const MAX_LOG_CHARS = 3500;
 async function performAutoAcceptImages(
   onProgress?: (line: string) => Promise<void>,
 ): Promise<AutoAcceptResult> {
-  const games = await Game.getGamesForAudit(true, false, false, false);
+  const games = await Game.getGamesForAudit(true, false, false, false, false);
   const candidates = games.filter((game) => !game.imageData && game.igdbId);
 
   if (!candidates.length) {
@@ -70,7 +70,7 @@ async function performAutoAcceptImages(
 async function performAutoAcceptVideos(
   onProgress?: (line: string) => Promise<void>,
 ): Promise<AutoAcceptResult> {
-  const games = await Game.getGamesForAudit(false, false, true, false);
+  const games = await Game.getGamesForAudit(false, false, true, false, false);
   const candidates = games.filter((game) => !game.featuredVideoUrl && game.igdbId);
 
   if (!candidates.length) {
@@ -113,6 +113,57 @@ async function performAutoAcceptVideos(
       await Game.updateFeaturedVideoUrl(game.id, videoUrl);
       updated++;
       await addLog(`✅ Updated **${game.title}**`);
+    } catch (err: any) {
+      failed++;
+      await addLog(`❌ Failed **${game.title}**: ${err?.message ?? String(err)}`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  return { updated, skipped, failed, logs };
+}
+
+async function performAutoAcceptReleaseData(
+  onProgress?: (line: string) => Promise<void>,
+): Promise<AutoAcceptResult> {
+  const games = await Game.getGamesForAudit(false, false, false, false, true);
+  const candidates = games.filter((game) => game.igdbId);
+
+  if (!candidates.length) {
+    return { updated: 0, skipped: 0, failed: 0, logs: [] };
+  }
+
+  const logs: string[] = [];
+  const addLog = async (line: string): Promise<void> => {
+    logs.push(line);
+    if (onProgress) {
+      await onProgress(line);
+    }
+  };
+
+  let updated = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const game of candidates) {
+    try {
+      if (!game.igdbId) {
+        skipped++;
+        continue;
+      }
+
+      const beforeCount = (await Game.getGameReleases(game.id)).length;
+      await Game.importReleaseDatesFromIgdb(game.id, game.igdbId);
+      const afterCount = (await Game.getGameReleases(game.id)).length;
+
+      if (afterCount > beforeCount) {
+        updated++;
+        await addLog(`✅ Updated **${game.title}**`);
+      } else {
+        skipped++;
+        await addLog(`⏭️ Skipped **${game.title}** (No IGDB release dates found)`);
+      }
     } catch (err: any) {
       failed++;
       await addLog(`❌ Failed **${game.title}**: ${err?.message ?? String(err)}`);
@@ -214,4 +265,4 @@ export function startGamedbAutoImageAuditService(
   }, intervalMs);
 }
 
-export { performAutoAcceptImages, performAutoAcceptVideos };
+export { performAutoAcceptImages, performAutoAcceptVideos, performAutoAcceptReleaseData };

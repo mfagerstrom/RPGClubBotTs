@@ -1,3 +1,5 @@
+2026-01-29 - Commit ID: e339391 - issue-74: implemented initial release date field in db and /gamedb view
+2026-01-29 - Commit ID: 57b87ae - issue-73: updated IGDB imports to pull platform / release date data
 2026-01-29 - Commit ID: 4e6345f - issue-71: added edit description button to /todo view
 2026-01-29 - Commit ID: 8494be7 - issue-70: fixed casing issue on /todo list New Feature filter
 2026-01-29 - Commit ID: 1d07159 - issue-67: removed unneeded /todo subcommands

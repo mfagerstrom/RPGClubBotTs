@@ -469,6 +469,17 @@ export default class Game {
     return { gameId: newGame.id, title: details.name };
   }
 
+  static async importReleaseDatesFromIgdb(
+    gameId: number,
+    igdbId: number,
+  ): Promise<void> {
+    const details = await igdbService.getGameDetails(igdbId);
+    if (!details) {
+      throw new Error("Failed to load game details from IGDB.");
+    }
+    await Game.saveReleaseDates(gameId, details.release_dates ?? []);
+  }
+
   // --- Metadata Handlers ---
 
   private static async getOrInsertMetadata(
@@ -1486,6 +1497,7 @@ export default class Game {
     missingThread: boolean,
     missingFeaturedVideo: boolean,
     missingDescription: boolean,
+    missingReleaseData: boolean,
   ): Promise<IGame[]> {
     const pool = getOraclePool();
     const connection = await pool.getConnection();
@@ -1519,6 +1531,11 @@ export default class Game {
       }
       if (missingDescription) {
         whereClauses.push("DESCRIPTION IS NULL");
+      }
+      if (missingReleaseData) {
+        whereClauses.push(
+          "NOT EXISTS (SELECT 1 FROM GAMEDB_RELEASES r WHERE r.GAME_ID = g.GAME_ID)",
+        );
       }
 
       if (whereClauses.length === 0) {

@@ -25,7 +25,11 @@ import {
   SlashOption,
 } from "discordx";
 import { safeDeferReply, safeReply, safeUpdate, sanitizeUserInput } from "../functions/InteractionUtils.js";
-import { performAutoAcceptImages, performAutoAcceptVideos } from "../services/GamedbAuditService.js";
+import {
+  performAutoAcceptImages,
+  performAutoAcceptReleaseData,
+  performAutoAcceptVideos,
+} from "../services/GamedbAuditService.js";
 import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import { isAdmin } from "./admin.command.js";
 import Game, { IGame } from "../classes/Game.js";
@@ -44,7 +48,7 @@ const AUDIT_SESSIONS = new Map<
     userId: string;
     games: IGame[];
     page: number;
-    filter: "all" | "image" | "thread" | "video" | "description" | "mixed";
+    filter: "all" | "image" | "thread" | "video" | "description" | "release" | "mixed";
   }
 >();
 
@@ -60,7 +64,10 @@ function parseGameIdList(raw: string): number[] {
 @SlashGroup({ description: "Game Database Commands", name: "gamedb" })
 @SlashGroup("gamedb")
 export class GameDbAdmin {
-  @Slash({ description: "Audit GameDB for missing images, threads, or videos (Admin only)", name: "audit" })
+  @Slash({
+    description: "Audit GameDB for missing images, threads, videos, descriptions, or release data (Admin only)",
+    name: "audit",
+  })
   async audit(
     @SlashOption({
       description: "Filter for missing images",
@@ -91,6 +98,13 @@ export class GameDbAdmin {
     })
     missingDescriptions: boolean | undefined,
     @SlashOption({
+      description: "Filter for missing release data",
+      name: "missing_release_data",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    missingReleaseData: boolean | undefined,
+    @SlashOption({
       description: "Automatically accept IGDB images for all missing ones",
       name: "auto_accept_images",
       required: false,
@@ -105,6 +119,13 @@ export class GameDbAdmin {
     })
     autoAcceptVideos: boolean | undefined,
     @SlashOption({
+      description: "Automatically accept IGDB release data for all missing ones",
+      name: "auto_accept_release_data",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    autoAcceptReleaseData: boolean | undefined,
+    @SlashOption({
       description: "Show in chat (public) instead of ephemeral",
       name: "showinchat",
       required: false,
@@ -118,12 +139,27 @@ export class GameDbAdmin {
 
     if (!(await isAdmin(interaction))) return;
 
-    if (autoAcceptImages || autoAcceptVideos) {
+    if (autoAcceptImages || autoAcceptVideos || autoAcceptReleaseData) {
       if (autoAcceptImages) {
-        await this.runAutoAcceptImages(interaction, isPublic, Boolean(autoAcceptVideos));
+        await this.runAutoAcceptImages(
+          interaction,
+          isPublic,
+          Boolean(autoAcceptVideos || autoAcceptReleaseData),
+        );
       }
       if (autoAcceptVideos) {
-        await this.runAutoAcceptVideos(interaction, isPublic, Boolean(autoAcceptImages));
+        await this.runAutoAcceptVideos(
+          interaction,
+          isPublic,
+          Boolean(autoAcceptImages || autoAcceptReleaseData),
+        );
+      }
+      if (autoAcceptReleaseData) {
+        await this.runAutoAcceptReleaseData(
+          interaction,
+          isPublic,
+          Boolean(autoAcceptImages || autoAcceptVideos),
+        );
       }
       return;
     }
@@ -137,22 +173,31 @@ export class GameDbAdmin {
     let checkThreads = true;
     let checkFeaturedVideo = true;
     let checkDescriptions = true;
+    let checkReleaseData = true;
 
     if (
       missingImages !== undefined ||
       missingThreads !== undefined ||
       missingFeaturedVideo !== undefined ||
-      missingDescriptions !== undefined
+      missingDescriptions !== undefined ||
+      missingReleaseData !== undefined
     ) {
       checkImages = !!missingImages;
       checkThreads = !!missingThreads;
       checkFeaturedVideo = !!missingFeaturedVideo;
       checkDescriptions = !!missingDescriptions;
+      checkReleaseData = !!missingReleaseData;
     }
 
-    if (!checkImages && !checkThreads && !checkFeaturedVideo && !checkDescriptions) {
+    if (
+      !checkImages &&
+      !checkThreads &&
+      !checkFeaturedVideo &&
+      !checkDescriptions &&
+      !checkReleaseData
+    ) {
       await safeReply(interaction, {
-        content: "You must check for at least one thing (images, threads, videos, or descriptions).",
+        content: "You must check for at least one thing (images, threads, videos, descriptions, or release data).",
         flags: MessageFlags.Ephemeral, // Always ephemeral for errors/warnings? Or match showInChat? 
         // Typically warnings like this are okay to be ephemeral even if requested public, but let's stick to consistent visibility or force ephemeral for errors.
         // Actually, previous code forced ephemeral. Let's force ephemeral for validation errors to reduce spam.
@@ -165,6 +210,7 @@ export class GameDbAdmin {
       checkThreads,
       checkFeaturedVideo,
       checkDescriptions,
+      checkReleaseData,
     );
 
     if (games.length === 0) {
@@ -181,6 +227,7 @@ export class GameDbAdmin {
       checkThreads,
       checkFeaturedVideo,
       checkDescriptions,
+      checkReleaseData,
     );
 
     AUDIT_SESSIONS.set(sessionId, {
@@ -672,14 +719,22 @@ export class GameDbAdmin {
     checkThreads: boolean,
     checkFeaturedVideo: boolean,
     checkDescriptions: boolean,
-  ): "all" | "image" | "thread" | "video" | "description" | "mixed" {
-    const enabled = [checkImages, checkThreads, checkFeaturedVideo, checkDescriptions].filter(Boolean).length;
-    if (enabled === 4) return "all";
+    checkReleaseData: boolean,
+  ): "all" | "image" | "thread" | "video" | "description" | "release" | "mixed" {
+    const enabled = [
+      checkImages,
+      checkThreads,
+      checkFeaturedVideo,
+      checkDescriptions,
+      checkReleaseData,
+    ].filter(Boolean).length;
+    if (enabled === 5) return "all";
     if (enabled === 1) {
       if (checkImages) return "image";
       if (checkThreads) return "thread";
       if (checkFeaturedVideo) return "video";
-      return "description";
+      if (checkDescriptions) return "description";
+      return "release";
     }
     return "mixed";
   }
@@ -701,7 +756,9 @@ export class GameDbAdmin {
           const imageStatus = g.imageData ? "✅Img" : "❌Img";
           const videoStatus = g.featuredVideoUrl ? "✅Vid" : "❌Vid";
           const descStatus = g.description ? "✅Desc" : "❌Desc";
-          return `• **${g.title}** (ID: ${g.id}) ${imageStatus} ${videoStatus} ${descStatus}`;
+          const releaseStatus = g.initialReleaseDate ? "✅Rel" : "❌Rel";
+          return `• **${g.title}** (ID: ${g.id}) ` +
+            `${imageStatus} ${videoStatus} ${descStatus} ${releaseStatus}`;
         }).join("\n")
       )
       .setFooter({ text: `Page ${page + 1}/${totalPages}` });
@@ -799,9 +856,20 @@ export class GameDbAdmin {
     }
 
     if (game.description) {
-        embed.addFields({ name: "Description", value: "✅ Present", inline: true });
+      embed.addFields({ name: "Description", value: "✅ Present", inline: true });
     } else {
-        embed.addFields({ name: "Description", value: "❌ Missing", inline: true });
+      embed.addFields({ name: "Description", value: "❌ Missing", inline: true });
+    }
+
+    const releases = await Game.getGameReleases(game.id);
+    if (releases.length) {
+      embed.addFields({
+        name: "Release Data",
+        value: `✅ ${releases.length} release${releases.length === 1 ? "" : "s"}`,
+        inline: true,
+      });
+    } else {
+      embed.addFields({ name: "Release Data", value: "❌ Missing", inline: true });
     }
 
     // Check thread link
@@ -988,6 +1056,60 @@ export class GameDbAdmin {
     if (!logs.length) {
       await safeReply(interaction, {
         content: "No games found with missing featured videos and valid IGDB IDs.",
+        __forceFollowUp: useFollowUp,
+        flags: isPublic ? undefined : MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const summary =
+      `\n**Run Complete**\n✅ Updated: ${updated}\n` +
+      `⏭️ Skipped: ${skipped}\n❌ Failed: ${failed}`;
+    await updateEmbed(summary);
+    embed.setColor(0x2ecc71);
+    await interaction.editReply({ embeds: [embed] });
+  }
+
+  private async runAutoAcceptReleaseData(
+    interaction: CommandInteraction,
+    isPublic: boolean,
+    useFollowUp: boolean,
+  ): Promise<void> {
+    const embed = new EmbedBuilder()
+      .setTitle("Auto-Accept IGDB Release Data")
+      .setDescription("Starting auto accept run...")
+      .setColor(0x0099ff);
+
+    await safeReply(interaction, {
+      embeds: [embed],
+      __forceFollowUp: useFollowUp,
+      flags: isPublic ? undefined : MessageFlags.Ephemeral,
+    });
+
+    const logLines: string[] = [];
+    const updateEmbed = async (log?: string) => {
+      if (log) {
+        logLines.push(log);
+      }
+
+      let content = logLines.join("\n");
+      while (content.length > 3500) {
+        logLines.shift();
+        content = logLines.join("\n");
+      }
+
+      embed.setDescription(content || "Processing...");
+      try {
+        await interaction.editReply({ embeds: [embed] });
+      } catch {
+        // ignore
+      }
+    };
+
+    const { updated, skipped, failed, logs } = await performAutoAcceptReleaseData(updateEmbed);
+    if (!logs.length) {
+      await safeReply(interaction, {
+        content: "No games found with missing release data and valid IGDB IDs.",
         __forceFollowUp: useFollowUp,
         flags: isPublic ? undefined : MessageFlags.Ephemeral,
       });
