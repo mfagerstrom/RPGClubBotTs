@@ -278,8 +278,8 @@ const HELP_TOPICS: HelpTopic[] = [
     summary:
       "Manage GitHub issues with the bot (list/view are public; create is mod+, edit is admin+, close is owner).",
     syntax:
-      "Syntax: /todo list [state:<open|closed|all>] [labels:<New Feature|Improvement|Bug|Blocked>] " +
-      "[query:<string>] " +
+      "Syntax: /todo list [query:<string>] [state:<open|closed|all>] " +
+      "[labels:<New Feature,Improvement,Bug,Blocked>] " +
       "[sort:<created|updated>] [direction:<asc|desc>] [page:<int>] [per_page:<int>] " +
       "[showinchat:<boolean>] | /todo view number:<int> [showinchat:<boolean>] | " +
       "/todo create title:<string> [body:<string>] [label:<New Feature|Improvement|Bug|Blocked>] | " +

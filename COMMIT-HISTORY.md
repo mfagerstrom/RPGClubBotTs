@@ -1,3 +1,5 @@
+2026-01-29 - Commit ID: a23851c - issue-65: implemented add/edit labels button on /todo view
+2026-01-29 - Commit ID: 91cf118 - issue-61: added comment viewing/adding to /todo view
 2026-01-29 - Commit ID: 4180a02 - issue-33: Updated /todo functionality to be driven by github issues
 2026-01-28 - Commit ID: 32e96db - WIP: implemented a connection between the bot and Github issues
 2026-01-28 - Commit ID: b78051b - fix: /now-playing fixes and improvements

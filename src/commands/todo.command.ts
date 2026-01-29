@@ -64,8 +64,8 @@ type ListSort = (typeof LIST_SORTS)[number];
 type ListDirection = (typeof LIST_DIRECTIONS)[number];
 
 const MAX_ISSUE_BODY = 4000;
-const DEFAULT_PAGE_SIZE = 10;
-const MAX_PAGE_SIZE = 15;
+const DEFAULT_PAGE_SIZE = 9;
+const MAX_PAGE_SIZE = 9;
 const ISSUE_LIST_TITLE = "RPGClub GameDB GitHub Issues";
 const TODO_LIST_ID_PREFIX = "todo-list-page";
 const TODO_LIST_BACK_ID_PREFIX = "todo-list-back";
@@ -84,6 +84,9 @@ const TODO_COMMENT_INPUT_ID = "todo-comment-input";
 const TODO_CLOSE_VIEW_PREFIX = "todo-close-view";
 const TODO_LABEL_EDIT_BUTTON_PREFIX = "todo-label-edit-button";
 const TODO_LABEL_EDIT_SELECT_PREFIX = "todo-label-edit-select";
+const TODO_QUERY_BUTTON_PREFIX = "todo-query-button";
+const TODO_QUERY_MODAL_PREFIX = "todo-query-modal";
+const TODO_QUERY_INPUT_ID = "todo-query-input";
 const TODO_CREATE_TITLE_ID = "todo-create-title";
 const TODO_CREATE_BODY_ID = "todo-create-body";
 const TODO_LIST_SESSION_TTL_MS = 30 * 60 * 1000;
@@ -443,6 +446,14 @@ function buildTodoLabelEditSelectId(
   return [TODO_LABEL_EDIT_SELECT_PREFIX, sessionId, page, issueNumber].join(":");
 }
 
+function buildTodoQueryButtonId(sessionId: string, page: number): string {
+  return [TODO_QUERY_BUTTON_PREFIX, sessionId, page].join(":");
+}
+
+function buildTodoQueryModalId(sessionId: string, page: number): string {
+  return [TODO_QUERY_MODAL_PREFIX, sessionId, page].join(":");
+}
+
 function buildTodoCreateLabelId(sessionId: string): string {
   return [TODO_CREATE_LABEL_PREFIX, sessionId].join(":");
 }
@@ -615,6 +626,24 @@ function parseTodoLabelEditId(
   }
 
   return { sessionId, page, issueNumber };
+}
+
+function parseTodoQueryId(
+  id: string,
+  prefix: string,
+): { sessionId: string; page: number } | null {
+  const parts = id.split(":");
+  if (parts.length !== 3 || parts[0] !== prefix) {
+    return null;
+  }
+
+  const sessionId = parts[1];
+  const page = Number(parts[2]);
+  if (!sessionId || !page) {
+    return null;
+  }
+
+  return { sessionId, page };
 }
 
 function parseTodoFilterId(
@@ -800,6 +829,11 @@ function buildIssueListComponents(
     );
   const labelRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(labelSelect);
 
+  const queryButton = new ButtonBuilder()
+    .setCustomId(buildTodoQueryButtonId(sessionId, payload.page))
+    .setLabel(payload.query ? "Edit Query" : "Filter by Query")
+    .setStyle(ButtonStyle.Secondary);
+
   const createButton = new ButtonBuilder()
     .setCustomId(buildTodoCreateButtonId(sessionId, payload.page))
     .setLabel("Create Issue")
@@ -813,6 +847,7 @@ function buildIssueListComponents(
   const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     createButton,
     closeButton,
+    queryButton,
   );
 
   const components: Array<ContainerBuilder | ActionRowBuilder<any>> = [
@@ -1101,6 +1136,12 @@ export class TodoCommand {
       ...session.payload,
       page,
     };
+    const safePerPage = clampNumber(payload.perPage, 1, MAX_PAGE_SIZE);
+    if (safePerPage !== payload.perPage) {
+      payload.perPage = safePerPage;
+      session.payload.perPage = safePerPage;
+      todoListSessions.set(sessionId, session);
+    }
 
     let issues: IGithubIssue[];
     try {
@@ -1791,6 +1832,57 @@ export class TodoCommand {
     }
   }
 
+  @ModalComponent({ id: /^todo-query-modal:todo-\d+-\d+:\d+$/ })
+  async submitQueryModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const parsed = parseTodoQueryId(interaction.customId, TODO_QUERY_MODAL_PREFIX);
+    if (!parsed) {
+      await safeReply(interaction, {
+        content: "This query prompt expired.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const rawQuery = interaction.fields.getTextInputValue(TODO_QUERY_INPUT_ID);
+    const query = normalizeQuery(rawQuery);
+
+    const session = getTodoListSession(parsed.sessionId);
+    if (!session) {
+      await this.refreshExpiredList(interaction);
+      return;
+    }
+
+    session.payload.query = query;
+    session.createdAt = Date.now();
+    todoListSessions.set(parsed.sessionId, session);
+
+    const listPayload = await this.buildTodoListPayload(parsed.sessionId, parsed.page);
+    if (!listPayload) {
+      await this.refreshExpiredList(interaction);
+      return;
+    }
+
+    const channel = interaction.client.channels.cache.get(session.channelId ?? "");
+    if (channel && "messages" in channel && session.messageId) {
+      try {
+        const message = await (channel as any).messages.fetch(session.messageId);
+        await message.edit({
+          components: listPayload.components,
+        });
+      } catch {
+        // ignore refresh failures
+      }
+    }
+
+    try {
+      await interaction.deleteReply();
+    } catch {
+      // ignore
+    }
+  }
+
   @ButtonComponent({ id: /^todo-create-submit:todo-create-\d+-\d+$/ })
   async submitCreateFromForm(interaction: ButtonInteraction): Promise<void> {
     const parsed = parseTodoCreateSessionId(interaction.customId, TODO_CREATE_SUBMIT_PREFIX);
@@ -2087,6 +2179,39 @@ export class TodoCommand {
       components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
       flags: MessageFlags.Ephemeral,
     });
+  }
+
+  @ButtonComponent({ id: /^todo-query-button:todo-\d+-\d+:\d+$/ })
+  async queryFromList(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseTodoQueryId(interaction.customId, TODO_QUERY_BUTTON_PREFIX);
+    if (!parsed) {
+      await this.refreshExpiredList(interaction);
+      return;
+    }
+
+    const session = getTodoListSession(parsed.sessionId);
+    if (!session) {
+      await this.refreshExpiredList(interaction);
+      return;
+    }
+
+    const modal = new ModalBuilder()
+      .setCustomId(buildTodoQueryModalId(parsed.sessionId, parsed.page))
+      .setTitle(session.payload.query ? "Edit Query" : "Filter by Query");
+
+    const queryInput = new TextInputBuilder()
+      .setCustomId(TODO_QUERY_INPUT_ID)
+      .setLabel("Query")
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false)
+      .setMaxLength(200);
+
+    if (session.payload.query) {
+      queryInput.setValue(session.payload.query);
+    }
+
+    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(queryInput));
+    await interaction.showModal(modal);
   }
 
   @ButtonComponent({ id: /^todo-comment-button:todo-\d+-\d+:\d+:\d+$/ })
