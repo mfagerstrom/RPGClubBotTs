@@ -46,7 +46,7 @@ import {
 } from "../functions/InteractionUtils.js";
 import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import Game from "../classes/Game.js";
-import { getHltbCacheByGameId } from "../classes/HltbCache.js";
+import { getHltbCacheByGameId, upsertHltbCache } from "../classes/HltbCache.js";
 import { getThreadsByGameId, setThreadGameLink, upsertThreadRecord } from "../classes/Thread.js";
 import axios from "axios"; // For downloading image attachments
 import { igdbService, type IGDBGame } from "../services/IgdbService.js";
@@ -61,6 +61,7 @@ import {
   type CompletionType,
   parseCompletionDateInput,
 } from "./profile.command.js";
+import { searchHltb } from "../functions/SearchHltb.js";
 
 const GAME_SEARCH_PAGE_SIZE = 25;
 const NOW_PLAYING_FORUM_ID = "1059875931356938240";
@@ -83,6 +84,35 @@ function isUnknownWebhookError(err: any): boolean {
 
 function buildComponentsV2Flags(isEphemeral: boolean): number {
   return (isEphemeral ? MessageFlags.Ephemeral : 0) | COMPONENTS_V2_FLAG;
+}
+
+function isHltbImportEligible(
+  game: { initialReleaseDate?: Date | null },
+  hasCache: boolean,
+): boolean {
+  if (hasCache) return false;
+  if (!game.initialReleaseDate) return false;
+  const releaseDate = game.initialReleaseDate instanceof Date
+    ? game.initialReleaseDate
+    : new Date(game.initialReleaseDate);
+  if (Number.isNaN(releaseDate.getTime())) return false;
+  const now = new Date();
+  if (releaseDate > now) return false;
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  return releaseDate <= sixMonthsAgo;
+}
+
+function getSearchRowsFromComponents(
+  components: Array<ActionRow<MessageActionRowComponent> | unknown>,
+): ActionRow<MessageActionRowComponent>[] {
+  return components.filter((row) => {
+    if (!row || typeof row !== "object") return false;
+    const rowComponents = "components" in row ? (row as any).components : [];
+    return Array.isArray(rowComponents) && rowComponents.some((component) =>
+      component.customId?.startsWith("gamedb-search-"),
+    );
+  }) as ActionRow<MessageActionRowComponent>[];
 }
 
 const MAX_COMPLETION_NOTE_LEN = 500;
@@ -515,6 +545,7 @@ export class GameDb {
           gameId,
           profile.hasThread,
           profile.featuredVideoUrl,
+          profile.canImportHltb,
         ),
       );
     }
@@ -545,6 +576,7 @@ export class GameDb {
         gameId,
         profile.hasThread,
         profile.featuredVideoUrl,
+        profile.canImportHltb,
       ),
     ];
     await safeReply(interaction, {
@@ -563,6 +595,7 @@ export class GameDb {
     files: AttachmentBuilder[];
     hasThread: boolean;
     featuredVideoUrl: string | null;
+    canImportHltb: boolean;
   } | null> {
     try {
       const game = await Game.getGameById(gameId);
@@ -736,6 +769,7 @@ export class GameDb {
       }
 
       const hltbCache = await getHltbCacheByGameId(gameId);
+      const canImportHltb = isHltbImportEligible(game, Boolean(hltbCache));
       if (hltbCache) {
         const hltbLines: string[] = [];
         if (hltbCache.main) hltbLines.push(`Main: ${hltbCache.main}`);
@@ -796,6 +830,7 @@ export class GameDb {
         files,
         hasThread: Boolean(threadId),
         featuredVideoUrl: game.featuredVideoUrl ?? null,
+        canImportHltb,
       };
     } catch (error: any) {
       console.error("Failed to build game profile:", error);
@@ -843,6 +878,7 @@ export class GameDb {
     gameId: number,
     hasThread: boolean,
     featuredVideoUrl: string | null,
+    canImportHltb: boolean,
   ): ActionRowBuilder<ButtonBuilder> {
     const addNowPlaying = new ButtonBuilder()
       .setCustomId(`gamedb-action:nowplaying:${gameId}`)
@@ -871,10 +907,39 @@ export class GameDb {
         .setStyle(ButtonStyle.Secondary);
       actionRow.addComponents(addThread);
     }
+    if (canImportHltb) {
+      const importHltb = new ButtonBuilder()
+        .setCustomId(`gamedb-action:hltb-import:${gameId}`)
+        .setLabel("Import HLTB Data")
+        .setStyle(ButtonStyle.Secondary);
+      actionRow.addComponents(importHltb);
+    }
     return actionRow;
   }
 
-  @ButtonComponent({ id: /^gamedb-action:(nowplaying|completion|thread|video):\d+$/ })
+  private async refreshGameProfileMessage(
+    interaction: ButtonInteraction,
+    gameId: number,
+  ): Promise<void> {
+    const profile = await this.buildGameProfile(gameId, interaction);
+    if (!profile) return;
+    const actionRow = this.buildGameProfileActionRow(
+      gameId,
+      profile.hasThread,
+      profile.featuredVideoUrl,
+      profile.canImportHltb,
+    );
+    const existingComponents = interaction.message?.components ?? [];
+    const searchRows = getSearchRowsFromComponents(existingComponents);
+    await interaction.editReply({
+      embeds: [],
+      files: profile.files,
+      components: [...profile.components, actionRow, ...searchRows],
+      flags: buildComponentsV2Flags(false),
+    }).catch(() => {});
+  }
+
+  @ButtonComponent({ id: /^gamedb-action:(nowplaying|completion|thread|video|hltb-import):\d+$/ })
   async handleGameDbAction(interaction: ButtonInteraction): Promise<void> {
     const [, action, gameIdRaw] = interaction.customId.split(":");
     const gameId = Number(gameIdRaw);
@@ -933,6 +998,29 @@ export class GameDb {
       await interaction.deferUpdate();
     } catch {
       // ignore
+    }
+
+    if (action === "hltb-import") {
+      const hltbCache = await getHltbCacheByGameId(gameId);
+      if (isHltbImportEligible(game, Boolean(hltbCache))) {
+        const scraped = await searchHltb(game.title);
+        if (scraped) {
+          await upsertHltbCache(gameId, {
+            name: scraped.name,
+            url: scraped.url,
+            imageUrl: scraped.imageUrl ?? null,
+            main: scraped.main,
+            mainSides: scraped.mainSides,
+            completionist: scraped.completionist,
+            singlePlayer: scraped.singlePlayer,
+            coOp: scraped.coOp,
+            vs: scraped.vs,
+            sourceQuery: game.title,
+          });
+        }
+      }
+      await this.refreshGameProfileMessage(interaction, gameId);
+      return;
     }
 
     if (action === "completion") {
@@ -1115,6 +1203,7 @@ export class GameDb {
           gameId,
           profile.hasThread,
           profile.featuredVideoUrl,
+          profile.canImportHltb,
         );
         const existingComponents = interaction.message?.components ?? [];
         const updatedComponents = existingComponents.length
@@ -1570,6 +1659,7 @@ export class GameDb {
       gameId,
       profile.hasThread,
       profile.featuredVideoUrl,
+      profile.canImportHltb,
     );
 
     try {
