@@ -674,6 +674,10 @@ export class GameDb {
 
       const bodyParts: string[] = [];
       bodyParts.push(`**Description**\n${description}`);
+      const initialReleaseDate = game.initialReleaseDate
+        ? game.initialReleaseDate.toLocaleDateString()
+        : "Unknown";
+      bodyParts.push(`**Initial Release Date**\n${initialReleaseDate}`);
 
       if (releases.length > 0) {
         const releaseField = releases

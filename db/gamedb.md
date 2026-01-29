@@ -24,6 +24,7 @@ Game metadata ingested from IGDB and stored for bot lookups. Schema created by
 | COLLECTION_ID | NUMBER | Yes | FK to `GAMEDB_COLLECTIONS`. |
 | PARENT_IGDB_ID | NUMBER | Yes | Parent/series IGDB id (loose link). |
 | PARENT_GAME_NAME | VARCHAR2(255) | Yes | Parent/series display name. |
+| INITIAL_RELEASE_DATE | DATE | Yes | Earliest release date from `GAMEDB_RELEASES`. |
 | CREATED_AT | TIMESTAMP | Yes | Defaults to `CURRENT_TIMESTAMP`. |
 | UPDATED_AT | TIMESTAMP | Yes | Auto-updated via trigger. |
 

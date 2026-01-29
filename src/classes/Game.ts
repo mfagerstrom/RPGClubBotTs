@@ -14,6 +14,7 @@ export interface IGame {
   totalRating: number | null;
   igdbUrl: string | null;
   featuredVideoUrl: string | null;
+  initialReleaseDate: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -122,6 +123,11 @@ function mapGameRow(row: any): IGame {
     totalRating: row.TOTAL_RATING ? Number(row.TOTAL_RATING) : null,
     igdbUrl: row.IGDB_URL ? String(row.IGDB_URL) : null,
     featuredVideoUrl: row.FEATURED_VIDEO_URL ? String(row.FEATURED_VIDEO_URL) : null,
+    initialReleaseDate: row.INITIAL_RELEASE_DATE instanceof Date
+      ? row.INITIAL_RELEASE_DATE
+      : row.INITIAL_RELEASE_DATE
+        ? new Date(row.INITIAL_RELEASE_DATE)
+        : null,
     createdAt: row.CREATED_AT instanceof Date ? row.CREATED_AT : new Date(row.CREATED_AT),
     updatedAt: row.UPDATED_AT instanceof Date ? row.UPDATED_AT : new Date(row.UPDATED_AT),
   };
@@ -221,10 +227,12 @@ export default class Game {
         TOTAL_RATING: number | null;
         IGDB_URL: string | null;
         FEATURED_VIDEO_URL: string | null;
+        INITIAL_RELEASE_DATE: Date | null;
         CREATED_AT: Date;
         UPDATED_AT: Date;
       }>(
-        `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, FEATURED_VIDEO_URL, CREATED_AT, UPDATED_AT
+        `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, FEATURED_VIDEO_URL,
+                INITIAL_RELEASE_DATE, CREATED_AT, UPDATED_AT
            FROM GAMEDB_GAMES
           WHERE GAME_ID = :id`,
         { id },
@@ -271,11 +279,12 @@ export default class Game {
         TOTAL_RATING: number | null;
         IGDB_URL: string | null;
         FEATURED_VIDEO_URL: string | null;
+        INITIAL_RELEASE_DATE: Date | null;
         CREATED_AT: Date;
         UPDATED_AT: Date;
       }>(
         `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, IGDB_ID, SLUG, TOTAL_RATING,
-                IGDB_URL, FEATURED_VIDEO_URL, CREATED_AT, UPDATED_AT
+                IGDB_URL, FEATURED_VIDEO_URL, INITIAL_RELEASE_DATE, CREATED_AT, UPDATED_AT
            FROM GAMEDB_GAMES
           WHERE GAME_ID IN (${placeholders.join(", ")})`,
         binds,
@@ -302,11 +311,12 @@ export default class Game {
         TOTAL_RATING: number | null;
         IGDB_URL: string | null;
         FEATURED_VIDEO_URL: string | null;
+        INITIAL_RELEASE_DATE: Date | null;
         CREATED_AT: Date;
         UPDATED_AT: Date;
       }>(
         `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, IGDB_ID, SLUG, TOTAL_RATING,
-                IGDB_URL, FEATURED_VIDEO_URL, CREATED_AT, UPDATED_AT
+                IGDB_URL, FEATURED_VIDEO_URL, INITIAL_RELEASE_DATE, CREATED_AT, UPDATED_AT
            FROM GAMEDB_GAMES
           WHERE GAME_ID IN (
             SELECT CASE
@@ -387,11 +397,12 @@ export default class Game {
         TOTAL_RATING: number | null;
         IGDB_URL: string | null;
         FEATURED_VIDEO_URL: string | null;
+        INITIAL_RELEASE_DATE: Date | null;
         CREATED_AT: Date;
         UPDATED_AT: Date;
       }>(
         `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, FEATURED_VIDEO_URL,
-                CREATED_AT, UPDATED_AT
+                INITIAL_RELEASE_DATE, CREATED_AT, UPDATED_AT
            FROM GAMEDB_GAMES
           WHERE IGDB_ID = :igdbId`,
         { igdbId },
@@ -749,6 +760,36 @@ export default class Game {
         releaseDate,
         null,
       );
+    }
+
+    await Game.updateInitialReleaseDate(gameId);
+  }
+
+  static async updateInitialReleaseDate(gameId: number): Promise<void> {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+    try {
+      const result = await connection.execute<{ MIN_DATE: Date | null }>(
+        `SELECT MIN(RELEASE_DATE) AS MIN_DATE
+           FROM GAMEDB_RELEASES
+          WHERE GAME_ID = :gameId
+            AND RELEASE_DATE IS NOT NULL`,
+        { gameId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+      const minDate = (result.rows ?? [])[0] as any;
+      if (!minDate?.MIN_DATE) {
+        return;
+      }
+      await connection.execute(
+        `UPDATE GAMEDB_GAMES
+            SET INITIAL_RELEASE_DATE = :releaseDate
+          WHERE GAME_ID = :gameId`,
+        { releaseDate: minDate.MIN_DATE, gameId },
+        { autoCommit: true },
+      );
+    } finally {
+      await connection.close();
     }
   }
 
@@ -1354,10 +1395,12 @@ export default class Game {
         TOTAL_RATING: number | null;
         IGDB_URL: string | null;
         FEATURED_VIDEO_URL: string | null;
+        INITIAL_RELEASE_DATE: Date | null;
         CREATED_AT: Date;
         UPDATED_AT: Date;
       }>(
-        `SELECT GAME_ID, TITLE, DESCRIPTION, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, FEATURED_VIDEO_URL, CREATED_AT, UPDATED_AT
+        `SELECT GAME_ID, TITLE, DESCRIPTION, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, FEATURED_VIDEO_URL,
+                INITIAL_RELEASE_DATE, CREATED_AT, UPDATED_AT
            FROM GAMEDB_GAMES
           WHERE LOWER(TITLE) LIKE :searchQuery
              OR REGEXP_REPLACE(LOWER(TITLE), '[^a-z0-9]', '') LIKE :normalizedQuery
@@ -1380,6 +1423,11 @@ export default class Game {
         totalRating: row.TOTAL_RATING ? Number(row.TOTAL_RATING) : null,
         igdbUrl: row.IGDB_URL ? String(row.IGDB_URL) : null,
         featuredVideoUrl: row.FEATURED_VIDEO_URL ? String(row.FEATURED_VIDEO_URL) : null,
+        initialReleaseDate: row.INITIAL_RELEASE_DATE instanceof Date
+          ? row.INITIAL_RELEASE_DATE
+          : row.INITIAL_RELEASE_DATE
+            ? new Date(row.INITIAL_RELEASE_DATE)
+            : null,
         createdAt: row.CREATED_AT instanceof Date ? row.CREATED_AT : new Date(row.CREATED_AT),
         updatedAt: row.UPDATED_AT instanceof Date ? row.UPDATED_AT : new Date(row.UPDATED_AT),
       }));
@@ -1495,10 +1543,12 @@ export default class Game {
         TOTAL_RATING: number | null;
         IGDB_URL: string | null;
         FEATURED_VIDEO_URL: string | null;
+        INITIAL_RELEASE_DATE: Date | null;
         CREATED_AT: Date;
         UPDATED_AT: Date;
       }>(
-        `SELECT g.GAME_ID, g.TITLE, g.DESCRIPTION, g.IMAGE_DATA, g.IGDB_ID, g.SLUG, g.TOTAL_RATING, g.IGDB_URL, g.FEATURED_VIDEO_URL, g.CREATED_AT, g.UPDATED_AT
+        `SELECT g.GAME_ID, g.TITLE, g.DESCRIPTION, g.IMAGE_DATA, g.IGDB_ID, g.SLUG, g.TOTAL_RATING,
+                g.IGDB_URL, g.FEATURED_VIDEO_URL, g.INITIAL_RELEASE_DATE, g.CREATED_AT, g.UPDATED_AT
            FROM GAMEDB_GAMES g
           WHERE ${whereClause}
           ORDER BY g.TITLE ASC`,
