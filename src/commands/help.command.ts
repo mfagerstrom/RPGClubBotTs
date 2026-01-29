@@ -276,17 +276,12 @@ const HELP_TOPICS: HelpTopic[] = [
     id: "todo",
     label: "/todo",
     summary:
-      "Manage GitHub issues with the bot (list/view are public; create is mod+, edit is admin+, close is owner).",
+      "Manage GitHub issues with the bot (list is public; actions are button-driven).",
     syntax:
       "Syntax: /todo list [query:<string>] [state:<open|closed|all>] " +
       "[labels:<New Feature,Improvement,Bug,Blocked>] " +
       "[sort:<created|updated>] [direction:<asc|desc>] [page:<int>] [per_page:<int>] " +
-      "[showinchat:<boolean>] | /todo view number:<int> [showinchat:<boolean>] | " +
-      "/todo create title:<string> [body:<string>] [label:<New Feature|Improvement|Bug|Blocked>] | " +
-      "/todo edit number:<int> [title:<string>] [body:<string>] | " +
-      "/todo close number:<int> | /todo reopen number:<int> | /todo comment number:<int> body:<string> | " +
-      "/todo label-add number:<int> label:<New Feature|Improvement|Bug|Blocked> | " +
-      "/todo label-remove number:<int> label:<New Feature|Improvement|Bug|Blocked>",
+      "[showinchat:<boolean>]",
   },
   {
     id: "suggestion",
