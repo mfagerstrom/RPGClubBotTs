@@ -109,6 +109,7 @@ type TodoListPayload = {
   state: ListState;
   stateFilters: ListState[];
   labels: TodoLabel[];
+  excludeBlocked: boolean;
   query?: string;
   sort: ListSort;
   direction: ListDirection;
@@ -200,6 +201,11 @@ function matchesIssueLabels(issue: IGithubIssue, labels: TodoLabel[]): boolean {
   if (!labels.length) return true;
   const issueLabels = issue.labels.map((label) => label.toLowerCase());
   return labels.some((label) => issueLabels.includes(label.toLowerCase()));
+}
+
+function isBlockedIssue(issue: IGithubIssue): boolean {
+  const issueLabels = issue.labels.map((label) => label.toLowerCase());
+  return issueLabels.includes("blocked");
 }
 
 function normalizeStateFilters(filters: ListState[]): ListState[] {
@@ -767,9 +773,14 @@ function buildIssueListComponents(
   suggestionCount: number,
 ): { components: Array<ContainerBuilder | ActionRowBuilder<any>> } {
   const totalPages = Math.max(1, Math.ceil(totalIssues / payload.perPage));
+  const labelSummary = payload.excludeBlocked
+    ? "Label: Not Blocked"
+    : payload.labels.length
+      ? `Label: ${payload.labels.join(", ")}`
+      : "Label: Any";
   const summaryParts = [
     `-# State: ${payload.state}`,
-    payload.labels.length ? `Label: ${payload.labels.join(", ")}` : "Label: Any",
+    labelSummary,
     payload.query ? `Query: ${payload.query}` : "Query: Any",
     `Sort: ${payload.sort} ${payload.direction}`,
     `Page: ${payload.page} of ${totalPages}`,
@@ -816,7 +827,12 @@ function buildIssueListComponents(
         {
           label: "All Issues",
           value: "all",
-          default: payload.labels.length === 0,
+          default: payload.labels.length === 0 && !payload.excludeBlocked,
+        },
+        {
+          label: "Not Blocked",
+          value: "not-blocked",
+          default: payload.excludeBlocked,
         },
         ...TODO_LABELS.map((label) => ({
           label,
@@ -1063,6 +1079,7 @@ export class TodoCommand {
       state: effectiveState,
       stateFilters: initialStateFilters,
       labels: parsedLabels.labels,
+      excludeBlocked: parsedLabels.labels.length === 0,
       query,
       sort: sort ?? "updated",
       direction: direction ?? "desc",
@@ -1073,6 +1090,7 @@ export class TodoCommand {
       state: payload.state,
       stateFilters: payload.stateFilters,
       labels: payload.labels,
+      excludeBlocked: payload.excludeBlocked,
       query: payload.query,
       sort: payload.sort,
       direction: payload.direction,
@@ -1134,6 +1152,9 @@ export class TodoCommand {
       return null;
     }
 
+    if (payload.excludeBlocked) {
+      issues = issues.filter((issue) => !isBlockedIssue(issue));
+    }
     if (payload.labels.length) {
       issues = issues.filter((issue) => matchesIssueLabels(issue, payload.labels));
     }
@@ -1191,6 +1212,7 @@ export class TodoCommand {
       state: "open",
       stateFilters: ["open"],
       labels: [],
+      excludeBlocked: true,
       query: undefined,
       sort: "updated",
       direction: "desc",
@@ -1220,6 +1242,7 @@ export class TodoCommand {
       state: payload.state,
       stateFilters: payload.stateFilters,
       labels: payload.labels,
+      excludeBlocked: payload.excludeBlocked,
       query: payload.query,
       sort: payload.sort,
       direction: payload.direction,
@@ -1389,10 +1412,15 @@ export class TodoCommand {
     const selected = interaction.values[0];
     if (selected === "all") {
       session.payload.labels = [];
+      session.payload.excludeBlocked = false;
+    } else if (selected === "not-blocked") {
+      session.payload.labels = [];
+      session.payload.excludeBlocked = true;
     } else {
       session.payload.labels = selected && TODO_LABELS.includes(selected as TodoLabel)
         ? [selected as TodoLabel]
         : [];
+      session.payload.excludeBlocked = false;
     }
     session.createdAt = Date.now();
     todoListSessions.set(parsed.sessionId, session);
