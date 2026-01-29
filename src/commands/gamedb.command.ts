@@ -236,23 +236,22 @@ export class GameDb {
         ? "\nUse the dropdown's Next page option to see more results."
         : "";
 
-      const embed = new EmbedBuilder().setDescription(
-        `Found ${totalLabel} results for "${query}". Showing first ${Math.min(
-          results.length,
-          22,
-        )}.${pagingHint ? ` ${pagingHint}` : ""}`,
+      const baseText =
+        `## IGDB Results for "${query}"\n` +
+        `Found ${totalLabel} results. Showing first ${Math.min(results.length, 22)}.` +
+        `${pagingHint ? ` ${pagingHint}` : ""}`;
+      const contentParts = [baseText];
+      if (existingText) {
+        contentParts.push(`**Existing GameDB matches**\n${existingText}`);
+      }
+      const content = this.trimTextDisplayContent(contentParts.join("\n\n"));
+      const container = new ContainerBuilder().addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(content),
       );
 
-      if (existingText) {
-        embed.addFields({
-          name: "Existing GameDB matches",
-          value: existingText.slice(0, 1024),
-        });
-      }
-
       await safeReply(interaction, {
-        embeds: [embed],
-        components,
+        components: [container, ...components],
+        flags: buildComponentsV2Flags(false),
         __forceFollowUp: true,
       });
     } catch (err: any) {
@@ -299,9 +298,15 @@ export class GameDb {
         },
       );
 
+      const content = this.trimTextDisplayContent(
+        `## IGDB Results for "${title}"\nFound ${results.length} results. Please select one:`,
+      );
+      const container = new ContainerBuilder().addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(content),
+      );
       await safeReply(interaction, {
-        content: `Found ${results.length} results for "${title}". Please select one:`,
-        components,
+        components: [container, ...components],
+        flags: buildComponentsV2Flags(false),
         __forceFollowUp: true,
       });
 
@@ -590,13 +595,38 @@ export class GameDb {
         rpgClubSections.push(`**${title}**\n${value}`);
       };
 
+      const gotmNomineesByRound = new Map<number, string[]>();
+      associations.gotmNominations.forEach((nom) => {
+        const list = gotmNomineesByRound.get(nom.round) ?? [];
+        list.push(nom.username);
+        gotmNomineesByRound.set(nom.round, list);
+      });
+      const nrGotmNomineesByRound = new Map<number, string[]>();
+      associations.nrGotmNominations.forEach((nom) => {
+        const list = nrGotmNomineesByRound.get(nom.round) ?? [];
+        list.push(nom.username);
+        nrGotmNomineesByRound.set(nom.round, list);
+      });
+
       if (associations.gotmWins.length) {
-        const lines = associations.gotmWins.map((win) => `Round ${win.round}`);
+        const lines = associations.gotmWins.map((win) => {
+          const nominees = gotmNomineesByRound.get(win.round) ?? [];
+          if (!nominees.length) {
+            return `Round ${win.round}`;
+          }
+          return `Round ${win.round} (nominated by ${nominees.join(", ")})`;
+        });
         pushRpgClubSection("GOTM Round(s)", lines.join("\n"));
       }
 
       if (associations.nrGotmWins.length) {
-        const lines = associations.nrGotmWins.map((win) => `Round ${win.round}`);
+        const lines = associations.nrGotmWins.map((win) => {
+          const nominees = nrGotmNomineesByRound.get(win.round) ?? [];
+          if (!nominees.length) {
+            return `Round ${win.round}`;
+          }
+          return `Round ${win.round} (nominated by ${nominees.join(", ")})`;
+        });
         pushRpgClubSection("NR-GOTM Round(s)", lines.join("\n"));
       }
 
@@ -660,15 +690,24 @@ export class GameDb {
         pushRpgClubSection("Completed By", lines.join(", "));
       }
 
-      if (associations.gotmNominations.length) {
-        const lines = associations.gotmNominations.map(
+      const gotmWinRounds = new Set(associations.gotmWins.map((win) => win.round));
+      const nrGotmWinRounds = new Set(associations.nrGotmWins.map((win) => win.round));
+
+      const gotmNominations = associations.gotmNominations.filter(
+        (nom) => !gotmWinRounds.has(nom.round),
+      );
+      if (gotmNominations.length) {
+        const lines = gotmNominations.map(
           (nom) => `Round ${nom.round} - ${nom.username}`,
         );
         pushRpgClubSection("GOTM Nominations", lines.join(", "));
       }
 
-      if (associations.nrGotmNominations.length) {
-        const lines = associations.nrGotmNominations.map(
+      const nrGotmNominations = associations.nrGotmNominations.filter(
+        (nom) => !nrGotmWinRounds.has(nom.round),
+      );
+      if (nrGotmNominations.length) {
+        const lines = nrGotmNominations.map(
           (nom) => `Round ${nom.round} - ${nom.username}`,
         );
         pushRpgClubSection("NR-GOTM Nominations", lines.join(", "));
@@ -1592,18 +1631,52 @@ export class GameDb {
       start,
       start + GAME_SEARCH_PAGE_SIZE,
     );
-    const resultList = displayedResults.map((g) => `• **${g.title}**`).join("\n");
+    const titleCounts = new Map<string, number>();
+    session.results.forEach((game) => {
+      const title = String(game.title ?? "");
+      titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
+    });
+    const resultList = displayedResults.map((game) => {
+      const title = String(game.title ?? "");
+      const isDuplicate = (titleCounts.get(title) ?? 0) > 1;
+      if (!isDuplicate) {
+        return `• **${title}**`;
+      }
+      const releaseDate = game.initialReleaseDate as Date | null | undefined;
+      const year = releaseDate instanceof Date
+        ? releaseDate.getFullYear()
+        : releaseDate
+          ? new Date(releaseDate).getFullYear()
+          : null;
+      const yearText = year ? ` (${year})` : " (Unknown Year)";
+      return `• **${title}**${yearText}`;
+    }).join("\n");
 
     const title = session.query
       ? `Search Results for "${session.query}" (Page ${safePage + 1}/${totalPages})`
       : `All Games (Page ${safePage + 1}/${totalPages})`;
 
     const selectCustomId = `gamedb-search-select:${sessionId}:${session.userId}:${safePage}`;
-    const options = displayedResults.map((g) => ({
-      label: g.title.substring(0, 100),
-      value: String(g.id),
-      description: "View this game",
-    }));
+    const options = displayedResults.map((game) => {
+      const title = String(game.title ?? "");
+      const isDuplicate = (titleCounts.get(title) ?? 0) > 1;
+      let label = title;
+      if (isDuplicate) {
+        const releaseDate = game.initialReleaseDate as Date | null | undefined;
+        const year = releaseDate instanceof Date
+          ? releaseDate.getFullYear()
+          : releaseDate
+            ? new Date(releaseDate).getFullYear()
+            : null;
+        const yearText = year ? ` (${year})` : " (Unknown Year)";
+        label = `${title}${yearText}`;
+      }
+      return {
+        label: label.substring(0, 100),
+        value: String(game.id),
+        description: "View this game",
+      };
+    });
 
     const selectMenu = new StringSelectMenuBuilder()
       .setCustomId(selectCustomId)

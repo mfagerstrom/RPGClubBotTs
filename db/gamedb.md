@@ -6,14 +6,14 @@ Game metadata ingested from IGDB and stored for bot lookups. Schema created by
 
 ## GAMEDB_GAMES
 
-- Primary/unique constraints: `GAME_ID` primary key; unique `TITLE`; unique `IGDB_ID`;
+- Primary/unique constraints: `GAME_ID` primary key; unique `IGDB_ID`;
   `COLLECTION_ID` FK to `GAMEDB_COLLECTIONS`.
 - Indexes/triggers: identity PK; `TRG_GAMEDB_GAMES_UPD` refreshes `UPDATED_AT` on update.
 
 | Column | Type | Nullable | Notes |
 | --- | --- | --- | --- |
 | GAME_ID | NUMBER | No | Identity primary key. |
-| TITLE | VARCHAR2(255) | No | Unique game title. |
+| TITLE | VARCHAR2(255) | No | Game title. |
 | DESCRIPTION | CLOB | Yes | Long-form summary from IGDB. |
 | IMAGE_DATA | BLOB | Yes | Cover art bytes, if downloaded. |
 | IGDB_ID | NUMBER | Yes | Unique IGDB game id. |

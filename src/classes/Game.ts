@@ -455,16 +455,31 @@ export default class Game {
       }
     }
 
-    const newGame = await Game.createGame(
-      details.name,
-      details.summary ?? "",
-      imageData,
-      details.id,
-      details.slug ?? null,
-      details.total_rating ?? null,
-      details.url ?? null,
-      Game.getFeaturedVideoUrl(details),
-    );
+    let newGame: IGame | null = null;
+    try {
+      newGame = await Game.createGame(
+        details.name,
+        details.summary ?? "",
+        imageData,
+        details.id,
+        details.slug ?? null,
+        details.total_rating ?? null,
+        details.url ?? null,
+        Game.getFeaturedVideoUrl(details),
+      );
+    } catch (err: any) {
+      const message = err?.message ?? "";
+      const isUniqueViolation = message.includes("ORA-00001");
+      const isIgdbConstraint = message.includes("UQ_GAMEDB_GAMES_IGDB_ID");
+      if (isUniqueViolation && isIgdbConstraint) {
+        const existing = await Game.getGameByIgdbId(details.id);
+        if (existing) {
+          return { gameId: existing.id, title: existing.title };
+        }
+        throw new Error("Game already exists with this IGDB ID, but could not be loaded.");
+      }
+      throw err;
+    }
     await Game.saveFullGameMetadata(newGame.id, details);
     return { gameId: newGame.id, title: details.name };
   }
