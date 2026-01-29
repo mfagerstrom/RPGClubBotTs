@@ -17,4 +17,5 @@ Do not keep making this mistake: avoid leaving unused imports/variables after re
 Do not keep making this mistake: stop reminding the user about local WSL/compile limitations—assume they'll run npm commands themselves unless they ask.
 Aim for clean, centralized patterns (e.g., shared helpers/defaults) instead of duplicating magic numbers or flags across files.
 Do not keep making this mistake: use Discord flags for ephemerality instead of the deprecated `ephemeral` option when sending interaction responses.
+Do not keep making this mistake: when building Discord Components v2 responses, ensure the top-level components list only includes valid container types (type 1 ActionRow or proper ContainerBuilder), and keep each ActionRow to 1-5 components to avoid DiscordAPIError[50035] about UNION_TYPE_CHOICES or BASE_TYPE_BAD_LENGTH.
 you are not allowed to use emdashes.
