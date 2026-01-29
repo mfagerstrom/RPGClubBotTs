@@ -26,6 +26,13 @@ export interface IGithubIssue {
   assignee: string | null;
 }
 
+export type IGithubIssueComment = {
+  id: number;
+  author: string | null;
+  body: string;
+  createdAt: string;
+};
+
 type IssueListParams = {
   state?: "open" | "closed" | "all";
   labels?: string[];
@@ -44,6 +51,7 @@ type IssueCreateInput = {
   title: string;
   body?: string | null;
   labels?: string[];
+  assignees?: string[];
 };
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
@@ -183,6 +191,15 @@ function toIssue(raw: any): IGithubIssue {
   };
 }
 
+function toIssueComment(raw: any): IGithubIssueComment {
+  return {
+    id: raw.id ?? 0,
+    author: raw.user?.login ?? null,
+    body: raw.body ?? "",
+    createdAt: raw.created_at ?? "",
+  };
+}
+
 export async function listIssues(params: IssueListParams): Promise<IGithubIssue[]> {
   const response = await githubRequest<any[]>(
     "get",
@@ -200,6 +217,14 @@ export async function listIssues(params: IssueListParams): Promise<IGithubIssue[
   return (response ?? [])
     .filter((issue) => !issue.pull_request)
     .map((issue) => toIssue(issue));
+}
+
+export async function listIssueComments(issueNumber: number): Promise<IGithubIssueComment[]> {
+  const response = await githubRequest<any[]>(
+    "get",
+    `/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/issues/${issueNumber}/comments`,
+  );
+  return (response ?? []).map((comment) => toIssueComment(comment));
 }
 
 export async function listAllIssues(params: IssueListParams): Promise<IGithubIssue[]> {
@@ -252,6 +277,9 @@ export async function getIssue(issueNumber: number): Promise<IGithubIssue | null
 }
 
 export async function createIssue(input: IssueCreateInput): Promise<IGithubIssue> {
+  const assignees = input.assignees && input.assignees.length
+    ? input.assignees
+    : (GITHUB_REPO_OWNER ? [GITHUB_REPO_OWNER] : []);
   const response = await githubRequest<any>(
     "post",
     `/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/issues`,
@@ -259,6 +287,7 @@ export async function createIssue(input: IssueCreateInput): Promise<IGithubIssue
       title: input.title,
       body: input.body ?? null,
       labels: input.labels ?? [],
+      assignees,
     },
   );
   return toIssue(response);

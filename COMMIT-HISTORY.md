@@ -1,3 +1,4 @@
+2026-01-29 - Commit ID: 4180a02 - issue-33: Updated /todo functionality to be driven by github issues
 2026-01-28 - Commit ID: 32e96db - WIP: implemented a connection between the bot and Github issues
 2026-01-28 - Commit ID: b78051b - fix: /now-playing fixes and improvements
 2026-01-28 - Commit ID: c0668f1 - feat: added automcomplete for game name to /game-completion add
