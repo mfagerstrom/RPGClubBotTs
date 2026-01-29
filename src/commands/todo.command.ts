@@ -44,6 +44,7 @@ import {
   listAllIssues,
   listIssueComments,
   setIssueLabels,
+  updateIssue,
   type IGithubIssueComment,
   type IGithubIssue,
 } from "../services/GithubIssuesService.js";
@@ -76,6 +77,9 @@ const TODO_CLOSE_CANCEL_PREFIX = "todo-close-cancel";
 const TODO_COMMENT_BUTTON_PREFIX = "todo-comment-button";
 const TODO_COMMENT_MODAL_PREFIX = "todo-comment-modal";
 const TODO_COMMENT_INPUT_ID = "todo-comment-input";
+const TODO_EDIT_DESC_BUTTON_PREFIX = "todo-edit-desc-button";
+const TODO_EDIT_DESC_MODAL_PREFIX = "todo-edit-desc-modal";
+const TODO_EDIT_DESC_INPUT_ID = "todo-edit-desc-input";
 const TODO_CLOSE_VIEW_PREFIX = "todo-close-view";
 const TODO_LABEL_EDIT_BUTTON_PREFIX = "todo-label-edit-button";
 const TODO_LABEL_EDIT_SELECT_PREFIX = "todo-label-edit-select";
@@ -371,6 +375,22 @@ function buildTodoCommentButtonId(sessionId: string, page: number, issueNumber: 
 
 function buildTodoCommentModalId(sessionId: string, page: number, issueNumber: number): string {
   return [TODO_COMMENT_MODAL_PREFIX, sessionId, page, issueNumber].join(":");
+}
+
+function buildTodoEditDescButtonId(
+  sessionId: string,
+  page: number,
+  issueNumber: number,
+): string {
+  return [TODO_EDIT_DESC_BUTTON_PREFIX, sessionId, page, issueNumber].join(":");
+}
+
+function buildTodoEditDescModalId(
+  sessionId: string,
+  page: number,
+  issueNumber: number,
+): string {
+  return [TODO_EDIT_DESC_MODAL_PREFIX, sessionId, page, issueNumber].join(":");
 }
 
 function buildTodoCloseViewId(sessionId: string, page: number, issueNumber: number): string {
@@ -863,6 +883,10 @@ function buildIssueViewComponents(
       .setCustomId(buildTodoCommentButtonId(sessionId, payload.page, issue.number))
       .setLabel("Add Comment")
       .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(buildTodoEditDescButtonId(sessionId, payload.page, issue.number))
+      .setLabel("Edit Description")
+      .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(buildTodoLabelEditButtonId(sessionId, payload.page, issue.number))
       .setLabel("Add/Edit Labels")
@@ -1750,6 +1774,105 @@ export class TodoCommand {
     }
   }
 
+  @ModalComponent({ id: /^todo-edit-desc-modal:todo-\d+-\d+:\d+:\d+$/ })
+  async submitEditDescriptionModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const parsed = parseTodoCommentId(interaction.customId, TODO_EDIT_DESC_MODAL_PREFIX);
+    if (!parsed) {
+      await safeReply(interaction, {
+        content: "This edit prompt expired.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
+
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const rawBody = interaction.fields.getTextInputValue(TODO_EDIT_DESC_INPUT_ID);
+    const trimmedBody = sanitizeUserInput(rawBody, { preserveNewlines: true });
+    if (!trimmedBody) {
+      await safeReply(interaction, {
+        content: "Description cannot be empty.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    try {
+      await updateIssue(parsed.issueNumber, {
+        body: trimmedBody.slice(0, MAX_ISSUE_BODY),
+      });
+    } catch (err: any) {
+      await safeReply(interaction, {
+        content: getGithubErrorMessage(err),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const session = getTodoListSession(parsed.sessionId);
+    if (!session?.channelId || !session?.messageId) {
+      try {
+        await interaction.deleteReply();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    let issue: IGithubIssue | null;
+    let comments: IGithubIssueComment[] = [];
+    try {
+      issue = await getIssue(parsed.issueNumber);
+      if (issue) {
+        comments = await listIssueComments(parsed.issueNumber);
+      }
+    } catch {
+      issue = null;
+    }
+
+    if (!issue) {
+      try {
+        await interaction.deleteReply();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    const payload: TodoListPayload = {
+      ...session.payload,
+      page: parsed.page,
+    };
+
+    const viewPayload = buildIssueViewComponents(
+      issue,
+      comments,
+      payload,
+      parsed.sessionId,
+    );
+
+    const channel = interaction.client.channels.cache.get(session.channelId);
+    if (channel && "messages" in channel) {
+      try {
+        const message = await (channel as any).messages.fetch(session.messageId);
+        await message.edit({
+          components: viewPayload.components,
+        });
+      } catch {
+        // ignore refresh failures
+      }
+    }
+
+    try {
+      await interaction.deleteReply();
+    } catch {
+      // ignore
+    }
+  }
+
   @ModalComponent({ id: /^todo-query-modal:todo-\d+-\d+:\d+$/ })
   async submitQueryModal(interaction: ModalSubmitInteraction): Promise<void> {
     const parsed = parseTodoQueryId(interaction.customId, TODO_QUERY_MODAL_PREFIX);
@@ -2158,6 +2281,54 @@ export class TodoCommand {
       .setMaxLength(MAX_ISSUE_BODY);
 
     modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(commentInput));
+
+    await interaction.showModal(modal);
+  }
+
+  @ButtonComponent({ id: /^todo-edit-desc-button:todo-\d+-\d+:\d+:\d+$/ })
+  async editDescriptionFromView(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseTodoCommentId(interaction.customId, TODO_EDIT_DESC_BUTTON_PREFIX);
+    if (!parsed) {
+      await this.refreshExpiredList(interaction);
+      return;
+    }
+
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
+
+    let issue: IGithubIssue | null;
+    try {
+      issue = await getIssue(parsed.issueNumber);
+    } catch {
+      issue = null;
+    }
+
+    if (!issue) {
+      await safeReply(interaction, {
+        content: `Issue #${parsed.issueNumber} was not found.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const modal = new ModalBuilder()
+      .setCustomId(buildTodoEditDescModalId(parsed.sessionId, parsed.page, parsed.issueNumber))
+      .setTitle("Edit Description");
+
+    const descriptionInput = new TextInputBuilder()
+      .setCustomId(TODO_EDIT_DESC_INPUT_ID)
+      .setLabel("Description")
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true)
+      .setMaxLength(MAX_ISSUE_BODY);
+
+    if (issue.body) {
+      descriptionInput.setValue(issue.body.slice(0, MAX_ISSUE_BODY));
+    }
+
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(descriptionInput),
+    );
 
     await interaction.showModal(modal);
   }
