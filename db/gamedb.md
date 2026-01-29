@@ -43,6 +43,17 @@ Game metadata ingested from IGDB and stored for bot lookups. Schema created by
 | RELEASE_DATE | DATE | Yes | Release date for region/platform. |
 | NOTES | VARCHAR2(255) | Yes | Free-form notes. |
 
+## GAMEDB_GAME_PLATFORMS
+
+- Primary/unique constraints: composite primary key on `(GAME_ID, PLATFORM_ID)`.
+- Indexes: `IDX_GGP_GAME` on `GAME_ID`; `IDX_GGP_PLATFORM` on `PLATFORM_ID`.
+- Purpose: denormalized mapping of games to platforms for quick "available on" lookups.
+
+| Column | Type | Nullable | Notes |
+| --- | --- | --- | --- |
+| GAME_ID | NUMBER | No | FK to `GAMEDB_GAMES`. |
+| PLATFORM_ID | NUMBER | No | FK to `GAMEDB_PLATFORMS`. |
+
 ## GAMEDB_GAME_ALTERNATES
 
 - Primary/unique constraints: composite primary key on `(GAME_ID, ALT_GAME_ID)` with

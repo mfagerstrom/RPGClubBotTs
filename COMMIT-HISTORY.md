@@ -1,3 +1,7 @@
+2026-01-29 - Commit ID: 4e6345f - issue-71: added edit description button to /todo view
+2026-01-29 - Commit ID: 8494be7 - issue-70: fixed casing issue on /todo list New Feature filter
+2026-01-29 - Commit ID: 1d07159 - issue-67: removed unneeded /todo subcommands
+2026-01-29 - Commit ID: 4243af6 - issue-66: implemented text query filter button on /todo list
 2026-01-29 - Commit ID: a23851c - issue-65: implemented add/edit labels button on /todo view
 2026-01-29 - Commit ID: 91cf118 - issue-61: added comment viewing/adding to /todo view
 2026-01-29 - Commit ID: 4180a02 - issue-33: Updated /todo functionality to be driven by github issues

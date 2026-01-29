@@ -72,6 +72,8 @@ export interface IGameAssociationSummary {
   nrGotmNominations: { round: number; userId: string; username: string }[];
 }
 
+type IGDBReleaseDate = NonNullable<IGDBGameDetails["release_dates"]>[number];
+
 export interface INowPlayingMember {
   userId: string;
   username: string | null;
@@ -667,8 +669,86 @@ export default class Game {
         );
       }
 
+      await Game.saveReleaseDates(gameId, details.release_dates ?? []);
+
     } finally {
       await connection.close();
+    }
+  }
+
+  private static buildReleaseSignature(
+    platformId: number,
+    regionId: number,
+    releaseDate: Date | null,
+    format: "Physical" | "Digital" | null,
+  ): string {
+    const dateKey = releaseDate ? releaseDate.toISOString().slice(0, 10) : "none";
+    return [platformId, regionId, dateKey, format ?? "none"].join("|");
+  }
+
+  private static resolveReleaseDate(release: IGDBReleaseDate): Date | null {
+    if (release.date) {
+      return new Date(release.date * 1000);
+    }
+    if (!release.y) {
+      return null;
+    }
+    const month = release.m ? release.m - 1 : 0;
+    return new Date(Date.UTC(release.y, month, 1));
+  }
+
+  private static async saveReleaseDates(
+    gameId: number,
+    releases: NonNullable<IGDBGameDetails["release_dates"]>,
+  ): Promise<void> {
+    if (!releases.length) return;
+
+    const existing = await Game.getGameReleases(gameId);
+    const existingKeys = new Set(
+      existing.map((release) =>
+        Game.buildReleaseSignature(
+          release.platformId,
+          release.regionId,
+          release.releaseDate,
+          release.format,
+        ),
+      ),
+    );
+
+    for (const release of releases) {
+      if (!release.platform?.id) continue;
+
+      const platform = await Game.ensurePlatform({
+        id: release.platform.id,
+        name: release.platform.name ?? null,
+      });
+      if (!platform) continue;
+
+      const region = await Game.ensureRegion(release.region ?? 8);
+      if (!region) continue;
+
+      const releaseDate = Game.resolveReleaseDate(release);
+      const format: "Physical" | "Digital" | null = null;
+      const signature = Game.buildReleaseSignature(
+        platform.id,
+        region.id,
+        releaseDate,
+        format,
+      );
+
+      if (existingKeys.has(signature)) {
+        continue;
+      }
+      existingKeys.add(signature);
+
+      await Game.addReleaseInfo(
+        gameId,
+        platform.id,
+        region.id,
+        format,
+        releaseDate,
+        null,
+      );
     }
   }
 
