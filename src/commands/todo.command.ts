@@ -183,7 +183,8 @@ function matchesIssueQuery(issue: IGithubIssue, query: string): boolean {
 
 function matchesIssueLabels(issue: IGithubIssue, labels: TodoLabel[]): boolean {
   if (!labels.length) return true;
-  return labels.some((label) => issue.labels.includes(label));
+  const issueLabels = issue.labels.map((label) => label.toLowerCase());
+  return labels.some((label) => issueLabels.includes(label.toLowerCase()));
 }
 
 function normalizeStateFilters(filters: ListState[]): ListState[] {
