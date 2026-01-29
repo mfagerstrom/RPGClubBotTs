@@ -874,7 +874,7 @@ const GAMEDB_HELP_TOPICS: GameDbHelpTopic[] = [
       "[missing_featured_video:<boolean>] [missing_descriptions:<boolean>] " +
       "[missing_release_data:<boolean>] [auto_accept_images:<boolean>] " +
       "[auto_accept_videos:<boolean>] [auto_accept_release_data:<boolean>] " +
-      "[showinchat:<boolean>]",
+      "[query:<string>] [show_complete_games:<boolean>] [showinchat:<boolean>]",
     notes:
       "Defaults to checking all selected audit flags when any filter is set. " +
       "Auto-accept pulls IGDB data for missing images, videos, or release data.",

@@ -1509,6 +1509,8 @@ export default class Game {
     missingFeaturedVideo: boolean,
     missingDescription: boolean,
     missingReleaseData: boolean,
+    titleWords?: string[],
+    showCompleteOnly: boolean = false,
   ): Promise<IGame[]> {
     const pool = getOraclePool();
     const connection = await pool.getConnection();
@@ -1560,6 +1562,37 @@ export default class Game {
       // If I say "audit both", I probably want anything that is missing either.
       
       const whereClause = whereClauses.join(" OR ");
+      const binds: Record<string, any> = {};
+      let titleClause = "";
+      if (titleWords && titleWords.length) {
+        const wordClauses: string[] = [];
+        titleWords.forEach((word, index) => {
+          const key = `titleWord${index}`;
+          binds[key] = `%${word.toLowerCase()}%`;
+          wordClauses.push(`LOWER(g.TITLE) LIKE :${key}`);
+        });
+        titleClause = wordClauses.length ? `(${wordClauses.join(" OR ")})` : "";
+      }
+
+      let combinedClause = titleClause
+        ? `(${whereClause}) AND ${titleClause}`
+        : whereClause;
+
+      if (showCompleteOnly) {
+        const completeClause = `
+          IMAGE_DATA IS NOT NULL
+          AND FEATURED_VIDEO_URL IS NOT NULL
+          AND DESCRIPTION IS NOT NULL
+          AND EXISTS (SELECT 1 FROM GAMEDB_RELEASES r WHERE r.GAME_ID = g.GAME_ID)
+          AND (
+            EXISTS (SELECT 1 FROM THREAD_GAME_LINKS tgl WHERE tgl.GAMEDB_GAME_ID = g.GAME_ID)
+            OR EXISTS (SELECT 1 FROM THREADS th WHERE th.GAMEDB_GAME_ID = g.GAME_ID)
+            OR EXISTS (SELECT 1 FROM GOTM_ENTRIES ge WHERE ge.GAMEDB_GAME_ID = g.GAME_ID AND ge.THREAD_ID IS NOT NULL)
+            OR EXISTS (SELECT 1 FROM NR_GOTM_ENTRIES nge WHERE nge.GAMEDB_GAME_ID = g.GAME_ID AND nge.THREAD_ID IS NOT NULL)
+          )
+        `;
+        combinedClause = titleClause ? `(${completeClause}) AND ${titleClause}` : completeClause;
+      }
 
       const result = await connection.execute<{
         GAME_ID: number;
@@ -1578,9 +1611,9 @@ export default class Game {
         `SELECT g.GAME_ID, g.TITLE, g.DESCRIPTION, g.IMAGE_DATA, g.IGDB_ID, g.SLUG, g.TOTAL_RATING,
                 g.IGDB_URL, g.FEATURED_VIDEO_URL, g.INITIAL_RELEASE_DATE, g.CREATED_AT, g.UPDATED_AT
            FROM GAMEDB_GAMES g
-          WHERE ${whereClause}
+          WHERE ${combinedClause}
           ORDER BY g.TITLE ASC`,
-        [],
+        binds,
         {
           outFormat: oracledb.OUT_FORMAT_OBJECT,
           fetchInfo: {
@@ -1606,6 +1639,46 @@ export default class Game {
         { imageData, gameId },
         { autoCommit: true }
       );
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async getThreadStatusForGameIds(
+    gameIds: number[],
+  ): Promise<Set<number>> {
+    const ids = Array.from(new Set(gameIds.filter((id) => Number.isInteger(id) && id > 0)));
+    if (!ids.length) return new Set();
+
+    const placeholders = ids.map((_, idx) => `:id${idx}`).join(", ");
+    const binds: Record<string, any> = {};
+    ids.forEach((id, idx) => {
+      binds[`id${idx}`] = id;
+    });
+
+    const connection = await getOraclePool().getConnection();
+    try {
+      const res = await connection.execute<{ GAME_ID: number }>(
+        `
+        SELECT DISTINCT g.GAME_ID
+          FROM GAMEDB_GAMES g
+         WHERE g.GAME_ID IN (${placeholders})
+           AND (
+             EXISTS (SELECT 1 FROM THREAD_GAME_LINKS tgl WHERE tgl.GAMEDB_GAME_ID = g.GAME_ID)
+             OR EXISTS (SELECT 1 FROM THREADS th WHERE th.GAMEDB_GAME_ID = g.GAME_ID)
+             OR EXISTS (SELECT 1 FROM GOTM_ENTRIES ge WHERE ge.GAMEDB_GAME_ID = g.GAME_ID AND ge.THREAD_ID IS NOT NULL)
+             OR EXISTS (SELECT 1 FROM NR_GOTM_ENTRIES nge WHERE nge.GAMEDB_GAME_ID = g.GAME_ID AND nge.THREAD_ID IS NOT NULL)
+           )
+        `,
+        binds,
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      const set = new Set<number>();
+      (res.rows ?? []).forEach((row) => {
+        set.add(Number((row as any).GAME_ID));
+      });
+      return set;
     } finally {
       await connection.close();
     }

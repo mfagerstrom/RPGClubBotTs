@@ -4,6 +4,7 @@ import {
   AutocompleteInteraction,
   type CommandInteraction,
   EmbedBuilder,
+  ComponentType,
   MessageFlags,
   ActionRowBuilder,
   StringSelectMenuBuilder,
@@ -268,6 +269,22 @@ export class GameCompletionCommands {
       (game) => game.title.toLowerCase() === searchTerm.toLowerCase(),
     );
     if (exactMatch) {
+      const referenceDate = completedAt ?? new Date();
+      const recent = await Member.getRecentCompletionForGame(
+        userId,
+        exactMatch.id,
+        referenceDate,
+      );
+      if (recent) {
+        const confirmed = await this.confirmDuplicateCompletion(
+          interaction,
+          exactMatch.title,
+          recent,
+        );
+        if (!confirmed) {
+          return;
+        }
+      }
       const removeFromNowPlaying = await resolveNowPlayingRemoval(
         interaction,
         userId,
@@ -1786,6 +1803,84 @@ export class GameCompletionCommands {
     const sessionId = `comp-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
     completionAddSessions.set(sessionId, ctx);
     return sessionId;
+  }
+
+  private async confirmDuplicateCompletion(
+    interaction: CommandInteraction | StringSelectMenuInteraction | ButtonInteraction,
+    gameTitle: string,
+    existing: Awaited<ReturnType<typeof Member.getRecentCompletionForGame>>,
+  ): Promise<boolean> {
+    if (!existing) return true;
+
+    const promptId = `comp-dup:${interaction.user.id}:${Date.now()}`;
+    const yesId = `${promptId}:yes`;
+    const noId = `${promptId}:no`;
+    const dateText = existing.completedAt
+      ? formatDiscordTimestamp(existing.completedAt)
+      : "No date";
+    const playtimeText = formatPlaytimeHours(existing.finalPlaytimeHours);
+    const detailParts = [existing.completionType, dateText, playtimeText].filter(Boolean);
+    const noteLine = existing.note ? `\n> ${existing.note}` : "";
+
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(yesId)
+        .setLabel("Add Another")
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId(noId)
+        .setLabel("Cancel")
+        .setStyle(ButtonStyle.Secondary),
+    );
+
+    const payload: InteractionReplyOptions = {
+      content:
+        `We found a completion for **${gameTitle}** within the last week:\n` +
+        `• ${detailParts.join(" — ")} (Completion #${existing.completionId})${noteLine}\n\n` +
+        "Add another completion anyway?",
+      components: [row],
+      flags: MessageFlags.Ephemeral,
+      fetchReply: true,
+    };
+
+    let message: Message | null = null;
+    try {
+      if (interaction.deferred || interaction.replied) {
+        const reply = await interaction.followUp(payload);
+        message = reply as unknown as Message;
+      } else {
+        const reply = await interaction.reply(payload);
+        message = reply as unknown as Message;
+      }
+    } catch {
+      try {
+        const reply = await interaction.followUp(payload);
+        message = reply as unknown as Message;
+      } catch {
+        return false;
+      }
+    }
+
+    if (!message || typeof message.awaitMessageComponent !== "function") {
+      return false;
+    }
+
+    try {
+      const selection = await message.awaitMessageComponent({
+        componentType: ComponentType.Button,
+        filter: (i) =>
+          i.user.id === interaction.user.id && i.customId.startsWith(promptId),
+        time: 120_000,
+      });
+      const confirmed = selection.customId.endsWith(":yes");
+      await selection.update({
+        content: confirmed ? "Adding another completion." : "Cancelled.",
+        components: [],
+      });
+      return confirmed;
+    } catch {
+      return false;
+    }
   }
 
   private parseCompletionYearFilter(value: string | undefined): number | "unknown" | null {
@@ -3366,6 +3461,22 @@ export class GameCompletionCommands {
         }).catch(() => {});
 
         const imported = await this.importGameFromIgdb(gameId);
+        const referenceDate = ctx.completedAt ?? new Date();
+        const recent = await Member.getRecentCompletionForGame(
+          ctx.userId,
+          imported.gameId,
+          referenceDate,
+        );
+        if (recent) {
+          const confirmed = await this.confirmDuplicateCompletion(
+            sel,
+            imported.title,
+            recent,
+          );
+          if (!confirmed) {
+            return;
+          }
+        }
         const removeFromNowPlaying = await resolveNowPlayingRemoval(
           sel,
           ctx.userId,
@@ -3474,6 +3585,23 @@ export class GameCompletionCommands {
           flags: MessageFlags.Ephemeral,
         });
         return false;
+      }
+
+      const referenceDate = ctx.completedAt ?? new Date();
+      const recent = await Member.getRecentCompletionForGame(
+        ctx.userId,
+        gameId,
+        referenceDate,
+      );
+      if (recent) {
+        const confirmed = await this.confirmDuplicateCompletion(
+          interaction,
+          gameTitle ?? "this game",
+          recent,
+        );
+        if (!confirmed) {
+          return false;
+        }
       }
 
       const removeFromNowPlaying = await resolveNowPlayingRemoval(

@@ -49,7 +49,7 @@ const AUDIT_SESSIONS = new Map<
     userId: string;
     games: IGame[];
     page: number;
-    filter: "all" | "image" | "thread" | "video" | "description" | "release" | "mixed";
+    filter: "all" | "image" | "thread" | "video" | "description" | "release" | "mixed" | "complete";
   }
 >();
 const AUTO_ACCEPT_RUNS = new Map<
@@ -146,6 +146,20 @@ export class GameDbAdmin {
     })
     autoAcceptReleaseData: boolean | undefined,
     @SlashOption({
+      description: "Optional title query (matches any word)",
+      name: "query",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    queryRaw: string | undefined,
+    @SlashOption({
+      description: "Show only games with complete audit data",
+      name: "show_complete_games",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    showCompleteGames: boolean | undefined,
+    @SlashOption({
       description: "Show in chat (public) instead of ephemeral",
       name: "showinchat",
       required: false,
@@ -159,12 +173,21 @@ export class GameDbAdmin {
 
     if (!(await isAdmin(interaction))) return;
 
+    const query = queryRaw
+      ? sanitizeUserInput(queryRaw, { preserveNewlines: false })
+      : "";
+    const queryWords = query
+      .split(/\s+/)
+      .map((word) => word.trim())
+      .filter(Boolean);
+
     if (autoAcceptImages || autoAcceptVideos || autoAcceptReleaseData) {
       if (autoAcceptImages) {
         await this.runAutoAcceptImages(
           interaction,
           isPublic,
           Boolean(autoAcceptVideos || autoAcceptReleaseData),
+          queryWords,
         );
       }
       if (autoAcceptVideos) {
@@ -172,6 +195,7 @@ export class GameDbAdmin {
           interaction,
           isPublic,
           Boolean(autoAcceptImages || autoAcceptReleaseData),
+          queryWords,
         );
       }
       if (autoAcceptReleaseData) {
@@ -179,6 +203,7 @@ export class GameDbAdmin {
           interaction,
           isPublic,
           Boolean(autoAcceptImages || autoAcceptVideos),
+          queryWords,
         );
       }
       return;
@@ -194,6 +219,7 @@ export class GameDbAdmin {
     let checkFeaturedVideo = true;
     let checkDescriptions = true;
     let checkReleaseData = true;
+    const useCompleteOnly = Boolean(showCompleteGames);
 
     if (
       missingImages !== undefined ||
@@ -210,6 +236,7 @@ export class GameDbAdmin {
     }
 
     if (
+      !useCompleteOnly &&
       !checkImages &&
       !checkThreads &&
       !checkFeaturedVideo &&
@@ -231,6 +258,8 @@ export class GameDbAdmin {
       checkFeaturedVideo,
       checkDescriptions,
       checkReleaseData,
+      queryWords,
+      useCompleteOnly,
     );
 
     if (games.length === 0) {
@@ -248,6 +277,7 @@ export class GameDbAdmin {
       checkFeaturedVideo,
       checkDescriptions,
       checkReleaseData,
+      useCompleteOnly,
     );
 
     AUDIT_SESSIONS.set(sessionId, {
@@ -257,7 +287,7 @@ export class GameDbAdmin {
       filter: filterLabel,
     });
 
-    const response = this.buildAuditListResponse(sessionId);
+    const response = await this.buildAuditListResponse(sessionId);
     await safeReply(interaction, {
       ...response,
       flags: isPublic ? undefined : MessageFlags.Ephemeral,
@@ -343,7 +373,7 @@ export class GameDbAdmin {
       session.page--;
     }
 
-    const response = this.buildAuditListResponse(sessionId);
+    const response = await this.buildAuditListResponse(sessionId);
     await safeUpdate(interaction, response);
   }
 
@@ -380,7 +410,7 @@ export class GameDbAdmin {
       await safeUpdate(interaction, { content: "Session expired.", components: [] });
       return;
     }
-    const response = this.buildAuditListResponse(sessionId);
+    const response = await this.buildAuditListResponse(sessionId);
     await safeUpdate(interaction, response);
   }
 
@@ -394,7 +424,7 @@ export class GameDbAdmin {
     const currentIndex = session.games.findIndex((game) => game.id === gameId);
     const nextIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
     if (nextIndex >= session.games.length) {
-      const response = this.buildAuditListResponse(sessionId);
+      const response = await this.buildAuditListResponse(sessionId);
       await safeUpdate(interaction, response);
       return;
     }
@@ -788,7 +818,9 @@ export class GameDbAdmin {
     checkFeaturedVideo: boolean,
     checkDescriptions: boolean,
     checkReleaseData: boolean,
-  ): "all" | "image" | "thread" | "video" | "description" | "release" | "mixed" {
+    showComplete: boolean,
+  ): "all" | "image" | "thread" | "video" | "description" | "release" | "mixed" | "complete" {
+    if (showComplete) return "complete";
     const enabled = [
       checkImages,
       checkThreads,
@@ -807,7 +839,7 @@ export class GameDbAdmin {
     return "mixed";
   }
 
-  private buildAuditListResponse(sessionId: string) {
+  private async buildAuditListResponse(sessionId: string) {
     const session = AUDIT_SESSIONS.get(sessionId)!;
     const { games, page } = session;
 
@@ -816,17 +848,20 @@ export class GameDbAdmin {
     const end = start + AUDIT_PAGE_SIZE;
     const slice = games.slice(start, end);
 
+    const threadStatus = await Game.getThreadStatusForGameIds(slice.map((g) => g.id));
+
     const embed = new EmbedBuilder()
       .setTitle(`GameDB Audit (${session.filter})`)
       .setDescription(
         `Showing items ${start + 1}-${Math.min(end, games.length)} of ${games.length}\n\n` +
         slice.map((g) => {
           const imageStatus = g.imageData ? "✅Img" : "❌Img";
+          const threadStatusText = threadStatus.has(g.id) ? "✅Thread" : "❌Thread";
           const videoStatus = g.featuredVideoUrl ? "✅Vid" : "❌Vid";
           const descStatus = g.description ? "✅Desc" : "❌Desc";
           const releaseStatus = g.initialReleaseDate ? "✅Rel" : "❌Rel";
           return `• **${g.title}** (ID: ${g.id}) ` +
-            `${imageStatus} ${videoStatus} ${descStatus} ${releaseStatus}`;
+            `${imageStatus} ${threadStatusText} ${videoStatus} ${descStatus} ${releaseStatus}`;
         }).join("\n")
       )
       .setFooter({ text: `Page ${page + 1}/${totalPages}` });
@@ -1035,6 +1070,7 @@ export class GameDbAdmin {
     interaction: CommandInteraction,
     isPublic: boolean,
     useFollowUp: boolean,
+    titleWords?: string[],
   ): Promise<void> {
     const runId = `audit-auto-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
     AUTO_ACCEPT_RUNS.set(runId, {
@@ -1120,7 +1156,11 @@ export class GameDbAdmin {
       }
     };
 
-    const { updated, skipped, failed, logs } = await performAutoAcceptImages(updateEmbed, shouldStop);
+    const { updated, skipped, failed, logs } = await performAutoAcceptImages(
+      updateEmbed,
+      shouldStop,
+      titleWords,
+    );
     if (!logs.length) {
       await safeReply(interaction, {
         content: "No games found with missing images and valid IGDB IDs.",
@@ -1151,6 +1191,7 @@ export class GameDbAdmin {
     interaction: CommandInteraction,
     isPublic: boolean,
     useFollowUp: boolean,
+    titleWords?: string[],
   ): Promise<void> {
     const runId = `audit-auto-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
     AUTO_ACCEPT_RUNS.set(runId, {
@@ -1236,7 +1277,11 @@ export class GameDbAdmin {
       }
     };
 
-    const { updated, skipped, failed, logs } = await performAutoAcceptVideos(updateEmbed, shouldStop);
+    const { updated, skipped, failed, logs } = await performAutoAcceptVideos(
+      updateEmbed,
+      shouldStop,
+      titleWords,
+    );
     if (!logs.length) {
       await safeReply(interaction, {
         content: "No games found with missing featured videos and valid IGDB IDs.",
@@ -1268,6 +1313,7 @@ export class GameDbAdmin {
     interaction: CommandInteraction,
     isPublic: boolean,
     useFollowUp: boolean,
+    titleWords?: string[],
   ): Promise<void> {
     const runId = `audit-auto-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
     AUTO_ACCEPT_RUNS.set(runId, {
@@ -1356,6 +1402,7 @@ export class GameDbAdmin {
     const { updated, skipped, failed, logs } = await performAutoAcceptReleaseData(
       updateEmbed,
       shouldStop,
+      titleWords,
     );
     if (!logs.length) {
       await safeReply(interaction, {

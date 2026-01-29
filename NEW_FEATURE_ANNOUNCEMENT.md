@@ -12,6 +12,15 @@
 - Owner only and admin/moderator permissions enforced for create, edit, close, and label edits, with read access for all.
 - Expired list views now refresh and re render the list with a notice for non owners.
 - Comments and descriptions include Discord usernames when appropriate.
+- /todo list is now the main /todo command, no subcommand required.
+- /todo list footer now shows pending suggestion review count when non zero.
+
+**Suggestions to GitHub Issues**
+- /suggestion now supports labels via a multi select dropdown, and stores creator name and labels for approvals.
+- New /suggestion-review command walks the server owner or bot dev through pending suggestions.
+- Approve creates a GitHub issue and removes the suggestion from the queue.
+- Reject removes the suggestion from the queue without creating an issue.
+- Dev channel notification is now a short alert without action buttons.
 
 **GameDB Release Data and Initial Release Dates**
 - IGDB import now pulls release data and platform availability.
@@ -25,6 +34,10 @@
 - /gamedb view is now Components v2 based, with improved layout and thumbnail handling.
 - Featured video support added to GameDB entries, with audit and accept flows.
 - IGDB image acceptance fixes and missing image import improvements.
+- GameDB titles are no longer unique, only IGDB IDs are unique to allow duplicate names.
+- /gamedb search results show the release year when multiple games share the same title.
+- /gamedb view shows GameDB and IGDB IDs at the bottom for quick reference.
+- GOTM and NR GOTM wins now include nomination credit when available, and nomination sections exclude winning rounds.
 
 **Now Playing and Presence Updates**
 - /now-playing suite received a major UI and UX overhaul.
@@ -39,6 +52,7 @@
 - Autocomplete for game name in completion add flows.
 - Completion date off by one fix.
 - Completion announcements include games per year counts.
+- Duplicate completion guard prompts if the same game is logged within a week.
 
 **Cleanup and Maintenance**
 - Removed deprecated commands and cleaned up legacy flows.

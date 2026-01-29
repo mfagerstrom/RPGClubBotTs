@@ -16,8 +16,9 @@ const MAX_LOG_CHARS = 3500;
 async function performAutoAcceptImages(
   onProgress?: (line: string, processed: number) => Promise<void>,
   shouldStop?: () => boolean,
+  titleWords?: string[],
 ): Promise<AutoAcceptResult> {
-  const games = await Game.getGamesForAudit(true, false, false, false, false);
+  const games = await Game.getGamesForAudit(true, false, false, false, false, titleWords);
   const candidates = games.filter((game) => !game.imageData && game.igdbId);
 
   if (!candidates.length) {
@@ -90,8 +91,9 @@ async function performAutoAcceptImages(
 async function performAutoAcceptVideos(
   onProgress?: (line: string, processed: number) => Promise<void>,
   shouldStop?: () => boolean,
+  titleWords?: string[],
 ): Promise<AutoAcceptResult> {
-  const games = await Game.getGamesForAudit(false, false, true, false, false);
+  const games = await Game.getGamesForAudit(false, false, true, false, false, titleWords);
   const candidates = games.filter((game) => !game.featuredVideoUrl && game.igdbId);
 
   if (!candidates.length) {
@@ -168,8 +170,9 @@ async function performAutoAcceptVideos(
 async function performAutoAcceptReleaseData(
   onProgress?: (line: string, processed: number) => Promise<void>,
   shouldStop?: () => boolean,
+  titleWords?: string[],
 ): Promise<AutoAcceptResult> {
-  const games = await Game.getGamesForAudit(false, false, false, false, true);
+  const games = await Game.getGamesForAudit(false, false, false, false, true, titleWords);
   const candidates = games.filter((game) => game.igdbId);
 
   if (!candidates.length) {
@@ -260,6 +263,7 @@ async function resolveTextChannel(
 export async function runAutoAcceptImagesAudit(
   client: Client,
   channelId: string,
+  titleWords?: string[],
 ): Promise<void> {
   const channel = await resolveTextChannel(client, channelId);
   if (!channel || typeof (channel as any).send !== "function") {
@@ -298,7 +302,7 @@ export async function runAutoAcceptImagesAudit(
     await message.edit({ embeds: [currentEmbed] }).catch(() => {});
   };
 
-  const { updated, skipped, failed, logs } = await performAutoAcceptImages(updateEmbed);
+  const { updated, skipped, failed, logs } = await performAutoAcceptImages(updateEmbed, undefined, titleWords);
   if (!logs.length) {
     currentEmbed
       .setDescription("No games found with missing images and valid IGDB IDs.")
@@ -319,6 +323,7 @@ export function startGamedbAutoImageAuditService(
   client: Client,
   channelId: string,
   intervalMs: number,
+  titleWords?: string[],
 ): void {
   let running = false;
 
@@ -326,7 +331,7 @@ export function startGamedbAutoImageAuditService(
     if (running) return;
     running = true;
     try {
-      await runAutoAcceptImagesAudit(client, channelId);
+      await runAutoAcceptImagesAudit(client, channelId, titleWords);
     } catch (err) {
       console.error("GameDB auto accept image audit failed:", err);
     } finally {

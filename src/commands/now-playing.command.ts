@@ -5,6 +5,7 @@ import {
   type User,
   AttachmentBuilder,
   MessageFlags,
+  ComponentType,
   ModalBuilder,
   ModalSubmitInteraction,
   ActionRowBuilder,
@@ -58,6 +59,7 @@ import { announceCompletion } from "../functions/CompletionHelpers.js";
 import {
   COMPLETION_TYPES,
   type CompletionType,
+  formatDiscordTimestamp,
   formatPlaytimeHours,
   formatTableDate,
   parseCompletionDateInput,
@@ -113,6 +115,92 @@ type NowPlayingMessageComponents = Array<ContainerBuilder | ActionRowBuilder<But
 
 function buildComponentsV2Flags(isEphemeral: boolean): number {
   return (isEphemeral ? MessageFlags.Ephemeral : 0) | COMPONENTS_V2_FLAG;
+}
+
+async function confirmDuplicateCompletion(
+  interaction: CommandInteraction | ModalSubmitInteraction | ButtonInteraction,
+  gameTitle: string,
+  existing: Awaited<ReturnType<typeof Member.getRecentCompletionForGame>>,
+): Promise<boolean> {
+  if (!existing) return true;
+
+  const promptId = `np-comp-dup:${interaction.user.id}:${Date.now()}`;
+  const yesId = `${promptId}:yes`;
+  const noId = `${promptId}:no`;
+  const dateText = existing.completedAt
+    ? formatDiscordTimestamp(existing.completedAt)
+    : "No date";
+  const playtimeText = formatPlaytimeHours(existing.finalPlaytimeHours);
+  const detailParts = [existing.completionType, dateText, playtimeText].filter(Boolean);
+  const noteLine = existing.note ? `\n> ${existing.note}` : "";
+
+  const container = new ContainerBuilder().addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      `We found a completion for **${gameTitle}** within the last week:\n` +
+        `• ${detailParts.join(" — ")} (Completion #${existing.completionId})${noteLine}\n\n` +
+        "Add another completion anyway?",
+    ),
+  );
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(yesId)
+      .setLabel("Add Another")
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId(noId)
+      .setLabel("Cancel")
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  const payload = {
+    components: [container, row],
+    flags: buildComponentsV2Flags(true),
+    fetchReply: true,
+  };
+
+  let message: Message | null = null;
+  try {
+    if (interaction.deferred || interaction.replied) {
+      const reply = await interaction.followUp(payload as any);
+      message = reply as unknown as Message;
+    } else {
+      const reply = await interaction.reply(payload as any);
+      message = reply as unknown as Message;
+    }
+  } catch {
+    try {
+      const reply = await interaction.followUp(payload as any);
+      message = reply as unknown as Message;
+    } catch {
+      return false;
+    }
+  }
+
+  if (!message || typeof message.awaitMessageComponent !== "function") {
+    return false;
+  }
+
+  try {
+    const selection = await message.awaitMessageComponent({
+      componentType: ComponentType.Button,
+      filter: (i) =>
+        i.user.id === interaction.user.id && i.customId.startsWith(promptId),
+      time: 120_000,
+    });
+    const confirmed = selection.customId.endsWith(":yes");
+    const resultContainer = new ContainerBuilder().addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        confirmed ? "Adding another completion." : "Cancelled.",
+      ),
+    );
+    await selection.update({
+      components: [resultContainer],
+      flags: buildComponentsV2Flags(true),
+    });
+    return confirmed;
+  } catch {
+    return false;
+  }
 }
 
 function createNowPlayingCompletionWizardSession(
@@ -786,6 +874,23 @@ export class NowPlayingCommand {
         flags: buildComponentsV2Flags(true),
       });
       return;
+    }
+
+    const referenceDate = completedAt ?? new Date();
+    const recentCompletion = await Member.getRecentCompletionForGame(
+      session.userId,
+      session.gameId,
+      referenceDate,
+    );
+    if (recentCompletion) {
+      const confirmed = await confirmDuplicateCompletion(
+        interaction,
+        game.title,
+        recentCompletion,
+      );
+      if (!confirmed) {
+        return;
+      }
     }
 
     try {
