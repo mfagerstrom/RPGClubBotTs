@@ -311,7 +311,7 @@ function getGithubErrorMessage(error: any): string {
 
 function formatIssueLink(issue: IGithubIssue): string {
   const labelText = issue.labels.length ? ` [${issue.labels.join(", ")}]` : "";
-  const linkText = `#${issue.number} ${issue.title}`;
+  const linkText = `#${issue.number}: ${issue.title}`;
   if (issue.htmlUrl) {
     return `[${linkText}](${issue.htmlUrl})${labelText}`;
   }
