@@ -26,7 +26,6 @@ import {
   SelectMenuComponent,
   Slash,
   SlashChoice,
-  SlashGroup,
   SlashOption,
 } from "discordx";
 import {
