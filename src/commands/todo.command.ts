@@ -1,30 +1,49 @@
-import type { CommandInteraction } from "discord.js";
+import type { ButtonInteraction, CommandInteraction } from "discord.js";
 import {
+  ActionRowBuilder,
   ApplicationCommandOptionType,
+  ButtonBuilder,
+  ButtonStyle,
   EmbedBuilder,
   MessageFlags,
+  ModalBuilder,
+  ModalSubmitInteraction,
+  PermissionsBitField,
+  StringSelectMenuBuilder,
+  StringSelectMenuInteraction,
+  TextInputBuilder,
+  TextInputStyle,
 } from "discord.js";
 import {
+  ButtonBuilder as V2ButtonBuilder,
+  ContainerBuilder,
+  SectionBuilder,
+  TextDisplayBuilder,
+} from "@discordjs/builders";
+import {
+  ButtonComponent,
   Discord,
+  ModalComponent,
+  SelectMenuComponent,
   Slash,
   SlashChoice,
   SlashGroup,
   SlashOption,
 } from "discordx";
 import {
+  AnyRepliable,
   safeDeferReply,
   safeReply,
+  safeUpdate,
   sanitizeUserInput,
 } from "../functions/InteractionUtils.js";
-import { isSuperAdmin } from "./superadmin.command.js";
 import {
   addComment,
   addLabels,
   closeIssue,
   createIssue,
   getIssue,
-  getRepoDisplayName,
-  listIssues,
+  listAllIssues,
   removeLabel,
   reopenIssue,
   updateIssue,
@@ -42,84 +61,733 @@ type ListSort = (typeof LIST_SORTS)[number];
 type ListDirection = (typeof LIST_DIRECTIONS)[number];
 
 const MAX_ISSUE_BODY = 4000;
-const DEFAULT_PAGE_SIZE = 20;
-const MAX_PAGE_SIZE = 25;
+const DEFAULT_PAGE_SIZE = 10;
+const MAX_PAGE_SIZE = 15;
+const ISSUE_LIST_TITLE = "RPGClub GameDB GitHub Issues";
+const TODO_LIST_ID_PREFIX = "todo-list-page";
+const TODO_LIST_BACK_ID_PREFIX = "todo-list-back";
+const TODO_VIEW_ID_PREFIX = "todo-view";
+const TODO_CREATE_BUTTON_PREFIX = "todo-create-button";
+const TODO_CREATE_LABEL_PREFIX = "todo-create-label";
+const TODO_CREATE_SUBMIT_PREFIX = "todo-create-submit";
+const TODO_CREATE_CANCEL_PREFIX = "todo-create-cancel";
+const TODO_CREATE_MODAL_PREFIX = "todo-create-modal";
+const TODO_CLOSE_BUTTON_PREFIX = "todo-close-button";
+const TODO_CLOSE_SELECT_PREFIX = "todo-close-select";
+const TODO_CLOSE_CANCEL_PREFIX = "todo-close-cancel";
+const TODO_CREATE_TITLE_ID = "todo-create-title";
+const TODO_CREATE_BODY_ID = "todo-create-body";
+const TODO_LIST_SESSION_TTL_MS = 30 * 60 * 1000;
+const TODO_CREATE_SESSION_TTL_MS = 10 * 60 * 1000;
+const COMPONENTS_V2_FLAG = 1 << 15;
+
+type TodoListPayload = {
+  page: number;
+  perPage: number;
+  state: ListState;
+  stateFilters: ListState[];
+  labels: TodoLabel[];
+  query?: string;
+  sort: ListSort;
+  direction: ListDirection;
+  isPublic: boolean;
+};
+
+type TodoListSession = {
+  payload: Omit<TodoListPayload, "page">;
+  createdAt: number;
+  channelId?: string;
+  messageId?: string;
+};
+
+type TodoCreateSession = {
+  userId: string;
+  listSessionId: string;
+  page: number;
+  title: string;
+  body: string;
+  labels: TodoLabel[];
+  createdAt: number;
+};
+
+const todoListSessions = new Map<string, TodoListSession>();
+const todoCreateSessions = new Map<string, TodoCreateSession>();
+
+function buildComponentsV2Flags(isEphemeral: boolean): number {
+  return (isEphemeral ? MessageFlags.Ephemeral : 0) | COMPONENTS_V2_FLAG;
+}
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
+function parseTodoLabels(rawValue: string | undefined): {
+  labels: TodoLabel[];
+  invalid: string[];
+} {
+  if (!rawValue) {
+    return { labels: [], invalid: [] };
+  }
+
+  const tokens = rawValue
+    .split(",")
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+
+  const invalid: string[] = [];
+  const labels: TodoLabel[] = [];
+
+  tokens.forEach((token) => {
+    const match = TODO_LABELS.find((label) => label.toLowerCase() === token.toLowerCase());
+    if (match) {
+      if (!labels.includes(match)) {
+        labels.push(match);
+      }
+    } else {
+      invalid.push(token);
+    }
+  });
+
+  return { labels, invalid };
+}
+
+function normalizeQuery(rawValue: string | undefined): string | undefined {
+  if (!rawValue) return undefined;
+  const sanitized = sanitizeUserInput(rawValue, { preserveNewlines: false });
+  return sanitized.length ? sanitized : undefined;
+}
+
+function matchesIssueQuery(issue: IGithubIssue, query: string): boolean {
+  const haystackParts = [
+    issue.title,
+    issue.body ?? "",
+    issue.labels.join(" "),
+    issue.author ?? "",
+    issue.state,
+    String(issue.number),
+    issue.createdAt,
+    issue.updatedAt,
+    issue.closedAt ?? "",
+  ];
+
+  const haystack = haystackParts.join(" ").toLowerCase();
+  return haystack.includes(query.toLowerCase());
+}
+
+function matchesIssueLabels(issue: IGithubIssue, labels: TodoLabel[]): boolean {
+  if (!labels.length) return true;
+  return labels.some((label) => issue.labels.includes(label));
+}
+
+function normalizeStateFilters(filters: ListState[]): ListState[] {
+  const normalized = filters.filter((state) => state === "open" || state === "closed");
+  if (!normalized.length) {
+    return ["open"];
+  }
+  return Array.from(new Set(normalized));
+}
+
+function toIssueState(filters: ListState[]): ListState {
+  const normalized = normalizeStateFilters(filters);
+  if (normalized.length > 1) return "all";
+  return normalized[0] ?? "open";
+}
+
+function formatDiscordTimestamp(value: string | null | undefined): string {
+  if (!value) return "Unknown";
+  const ms = Date.parse(value);
+  if (Number.isNaN(ms)) return "Unknown";
+  return `<t:${Math.floor(ms / 1000)}:f>`;
+}
+
+async function isAdminOrOwner(interaction: AnyRepliable): Promise<boolean> {
+  const guild = interaction.guild;
+  if (!guild) {
+    await safeReply(interaction, {
+      content: "This command can only be used inside a server.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return false;
+  }
+
+  const member: any = interaction.member;
+  const canCheck = member && typeof member.permissionsIn === "function" && interaction.channel;
+  const isAdmin = canCheck
+    ? member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.Administrator)
+    : false;
+  const isOwner = guild.ownerId === interaction.user.id;
+
+  if (!isAdmin && !isOwner) {
+    await safeReply(interaction, {
+      content: "Access denied. Command requires Administrator role or server owner.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return false;
+  }
+
+  return true;
+}
+
+function getTodoPermissionFlags(interaction: AnyRepliable): {
+  isOwner: boolean;
+  isAdmin: boolean;
+  isModerator: boolean;
+} | null {
+  const guild = interaction.guild;
+  if (!guild) return null;
+
+  const member: any = interaction.member;
+  const canCheck = member && typeof member.permissionsIn === "function" && interaction.channel;
+  const isOwner = guild.ownerId === interaction.user.id;
+  const isAdmin = canCheck
+    ? member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.Administrator)
+    : false;
+  const isModerator = canCheck
+    ? member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.ManageMessages)
+    : false;
+
+  return { isOwner, isAdmin, isModerator };
+}
+
+async function requireModeratorOrAdminOrOwner(
+  interaction: AnyRepliable,
+): Promise<boolean> {
+  const permissions = getTodoPermissionFlags(interaction);
+  if (!permissions) {
+    await safeReply(interaction, {
+      content: "This command can only be used inside a server.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return false;
+  }
+
+  if (permissions.isOwner || permissions.isAdmin || permissions.isModerator) {
+    return true;
+  }
+
+  await safeReply(interaction, {
+    content: "Access denied. Command requires Moderator, Administrator, or server owner.",
+    flags: MessageFlags.Ephemeral,
+  });
+  return false;
+}
+
+async function requireAdminOrOwner(interaction: AnyRepliable): Promise<boolean> {
+  const permissions = getTodoPermissionFlags(interaction);
+  if (!permissions) {
+    await safeReply(interaction, {
+      content: "This command can only be used inside a server.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return false;
+  }
+
+  if (permissions.isOwner || permissions.isAdmin) {
+    return true;
+  }
+
+  await safeReply(interaction, {
+    content: "Access denied. Command requires Administrator or server owner.",
+    flags: MessageFlags.Ephemeral,
+  });
+  return false;
+}
+
+async function requireOwner(interaction: AnyRepliable): Promise<boolean> {
+  const permissions = getTodoPermissionFlags(interaction);
+  if (!permissions) {
+    await safeReply(interaction, {
+      content: "This command can only be used inside a server.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return false;
+  }
+
+  if (permissions.isOwner) {
+    return true;
+  }
+
+  await safeReply(interaction, {
+    content: "Access denied. Command requires server owner.",
+    flags: MessageFlags.Ephemeral,
+  });
+  return false;
+}
+
 function getGithubErrorMessage(error: any): string {
   const status = error?.response?.status as number | undefined;
   const message = error?.response?.data?.message as string | undefined;
-  if (status && message) {
-    return `GitHub error (${status}): ${message}`;
+  const errorMessage = error?.message as string | undefined;
+
+  const outputParts: string[] = [];
+  if (status) {
+    outputParts.push(`Github status: ${status}`);
+  }
+  if (message) {
+    outputParts.push(`Github error: ${message}`);
+  } else if (errorMessage) {
+    outputParts.push(`Github error: ${errorMessage}`);
+  }
+
+  if (outputParts.length) {
+    return outputParts.join("\n");
   }
   return "GitHub request failed. Check the GitHub App configuration.";
 }
 
-function formatIssueLine(issue: IGithubIssue): string {
+function formatIssueLink(issue: IGithubIssue): string {
   const labelText = issue.labels.length ? ` [${issue.labels.join(", ")}]` : "";
-  return `#${issue.number} ${issue.title}${labelText}`;
+  const linkText = `#${issue.number} ${issue.title}`;
+  if (issue.htmlUrl) {
+    return `[${linkText}](${issue.htmlUrl})${labelText}`;
+  }
+  return `${linkText}${labelText}`;
 }
 
-function buildIssueListEmbed(
-  issues: IGithubIssue[],
-  state: ListState,
-  label: TodoLabel | undefined,
+function formatIssueTitle(issue: IGithubIssue): string {
+  const labelText = issue.labels.length ? ` [${issue.labels.join(", ")}]` : "";
+  return `#${issue.number}: ${issue.title}${labelText}`;
+}
+
+function formatIssueSelectLabel(issue: IGithubIssue): string {
+  const labelText = issue.labels.length ? ` [${issue.labels.join(", ")}]` : "";
+  const text = `#${issue.number} ${issue.title}${labelText}`;
+  if (text.length <= 100) return text;
+  return `${text.slice(0, 97)}...`;
+}
+
+function createTodoListSession(payload: Omit<TodoListPayload, "page">): string {
+  const sessionId = `todo-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+  todoListSessions.set(sessionId, { payload, createdAt: Date.now() });
+  return sessionId;
+}
+
+function buildTodoListCustomId(sessionId: string, page: number): string {
+  return [TODO_LIST_ID_PREFIX, sessionId, page].join(":");
+}
+
+function buildTodoListBackId(sessionId: string, page: number): string {
+  return [TODO_LIST_BACK_ID_PREFIX, sessionId, page].join(":");
+}
+
+function buildTodoCreateButtonId(sessionId: string, page: number): string {
+  return [TODO_CREATE_BUTTON_PREFIX, sessionId, page].join(":");
+}
+
+function buildTodoCreateModalId(sessionId: string, page: number): string {
+  return [TODO_CREATE_MODAL_PREFIX, sessionId, page].join(":");
+}
+
+function buildTodoCloseButtonId(sessionId: string, page: number): string {
+  return [TODO_CLOSE_BUTTON_PREFIX, sessionId, page].join(":");
+}
+
+function buildTodoCloseSelectId(sessionId: string, page: number): string {
+  return [TODO_CLOSE_SELECT_PREFIX, sessionId, page].join(":");
+}
+
+function buildTodoCloseCancelId(sessionId: string): string {
+  return [TODO_CLOSE_CANCEL_PREFIX, sessionId].join(":");
+}
+
+function buildTodoCreateLabelId(sessionId: string): string {
+  return [TODO_CREATE_LABEL_PREFIX, sessionId].join(":");
+}
+
+function buildTodoCreateSubmitId(sessionId: string): string {
+  return [TODO_CREATE_SUBMIT_PREFIX, sessionId].join(":");
+}
+
+function buildTodoCreateCancelId(sessionId: string): string {
+  return [TODO_CREATE_CANCEL_PREFIX, sessionId].join(":");
+}
+
+function buildTodoViewId(sessionId: string, page: number, issueNumber: number): string {
+  return [TODO_VIEW_ID_PREFIX, sessionId, page, issueNumber].join(":");
+}
+
+function parseTodoListCustomId(id: string): { sessionId: string; page: number } | null {
+  const parts = id.split(":");
+  if (parts.length !== 3 || parts[0] !== TODO_LIST_ID_PREFIX) {
+    return null;
+  }
+
+  const sessionId = parts[1];
+  const page = Number(parts[2]);
+  if (!sessionId || !page) {
+    return null;
+  }
+
+  return { sessionId, page };
+}
+
+function parseTodoListBackId(id: string): { sessionId: string; page: number } | null {
+  const parts = id.split(":");
+  if (parts.length !== 3 || parts[0] !== TODO_LIST_BACK_ID_PREFIX) {
+    return null;
+  }
+
+  const sessionId = parts[1];
+  const page = Number(parts[2]);
+  if (!sessionId || !page) {
+    return null;
+  }
+
+  return { sessionId, page };
+}
+
+function parseTodoCreateId(
+  id: string,
+  prefix: string,
+): { sessionId: string; page: number } | null {
+  const parts = id.split(":");
+  if (parts.length !== 3 || parts[0] !== prefix) {
+    return null;
+  }
+
+  const sessionId = parts[1];
+  const page = Number(parts[2]);
+  if (!sessionId || !page) {
+    return null;
+  }
+
+  return { sessionId, page };
+}
+
+function parseTodoCreateSessionId(
+  id: string,
+  prefix: string,
+): { sessionId: string } | null {
+  const parts = id.split(":");
+  if (parts.length !== 2 || parts[0] !== prefix) {
+    return null;
+  }
+
+  const sessionId = parts[1];
+  if (!sessionId) {
+    return null;
+  }
+
+  return { sessionId };
+}
+
+function parseTodoCloseId(
+  id: string,
+  prefix: string,
+): { sessionId: string; page: number } | null {
+  const parts = id.split(":");
+  if (parts.length !== 3 || parts[0] !== prefix) {
+    return null;
+  }
+
+  const sessionId = parts[1];
+  const page = Number(parts[2]);
+  if (!sessionId || !page) {
+    return null;
+  }
+
+  return { sessionId, page };
+}
+
+function parseTodoViewId(
+  id: string,
+): { sessionId: string; page: number; issueNumber: number } | null {
+  const parts = id.split(":");
+  if (parts.length !== 4 || parts[0] !== TODO_VIEW_ID_PREFIX) {
+    return null;
+  }
+
+  const sessionId = parts[1];
+  const page = Number(parts[2]);
+  const issueNumber = Number(parts[3]);
+  if (!sessionId || !page || !issueNumber) {
+    return null;
+  }
+
+  return { sessionId, page, issueNumber };
+}
+
+function parseTodoFilterId(
+  id: string,
+  prefix: string,
+): { sessionId: string; page: number } | null {
+  const parts = id.split(":");
+  if (parts.length !== 3 || parts[0] !== prefix) {
+    return null;
+  }
+
+  const sessionId = parts[1];
+  const page = Number(parts[2]);
+  if (!sessionId || !page) {
+    return null;
+  }
+
+  return { sessionId, page };
+}
+
+function getTodoListSession(sessionId: string): TodoListSession | null {
+  const session = todoListSessions.get(sessionId);
+  if (!session) return null;
+  if (Date.now() - session.createdAt > TODO_LIST_SESSION_TTL_MS) {
+    todoListSessions.delete(sessionId);
+    return null;
+  }
+  return session;
+}
+
+function updateTodoListSessionMessage(
+  sessionId: string,
+  channelId: string | null,
+  messageId: string | null,
+): void {
+  if (!channelId || !messageId) return;
+  const session = getTodoListSession(sessionId);
+  if (!session) return;
+  session.channelId = channelId;
+  session.messageId = messageId;
+  session.createdAt = Date.now();
+  todoListSessions.set(sessionId, session);
+}
+
+function getTodoCreateSession(sessionId: string): TodoCreateSession | null {
+  const session = todoCreateSessions.get(sessionId);
+  if (!session) return null;
+  if (Date.now() - session.createdAt > TODO_CREATE_SESSION_TTL_MS) {
+    todoCreateSessions.delete(sessionId);
+    return null;
+  }
+  return session;
+}
+
+function createTodoCreateSession(
+  userId: string,
+  listSessionId: string,
   page: number,
-  perPage: number,
-  sort: ListSort,
-  direction: ListDirection,
-  repo: string,
-): EmbedBuilder {
-  const title = `/todo list (${repo})`;
-  const summaryParts = [
-    `State: ${state}`,
-    label ? `Label: ${label}` : "Label: Any",
-    `Sort: ${sort} ${direction}`,
-    `Page: ${page}`,
-  ];
-
-  const description = issues.length
-    ? issues.map((issue) => `- ${formatIssueLine(issue)}`).join("\n")
-    : "No issues found for this filter.";
-
-  return new EmbedBuilder()
-    .setTitle(title)
-    .setDescription(description)
-    .setFooter({
-      text: `${summaryParts.join(" | ")} | Showing ${issues.length} of ${perPage}`,
-    });
+): string {
+  const sessionId = `todo-create-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+  todoCreateSessions.set(sessionId, {
+    userId,
+    listSessionId,
+    page,
+    title: "",
+    body: "",
+    labels: [],
+    createdAt: Date.now(),
+  });
+  return sessionId;
 }
 
-function buildIssueDetailEmbed(issue: IGithubIssue, repo: string): EmbedBuilder {
-  const body = issue.body ? issue.body.slice(0, MAX_ISSUE_BODY) : "";
-  const embed = new EmbedBuilder()
-    .setTitle(`#${issue.number} ${issue.title}`)
-    .setURL(issue.htmlUrl)
-    .setDescription(body)
-    .addFields(
-      { name: "Repository", value: repo, inline: true },
-      { name: "State", value: issue.state, inline: true },
-    );
-
-  if (issue.labels.length) {
-    embed.addFields({ name: "Labels", value: issue.labels.join(", ") });
-  }
-
-  if (issue.author) {
-    embed.addFields({ name: "Author", value: issue.author, inline: true });
-  }
-
-  embed.addFields(
-    { name: "Created", value: issue.createdAt, inline: true },
-    { name: "Updated", value: issue.updatedAt, inline: true },
+function buildTodoCreateFormComponents(
+  session: TodoCreateSession,
+  createSessionId: string,
+): { components: Array<ContainerBuilder | ActionRowBuilder<any>> } {
+  const container = new ContainerBuilder();
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent("## Create GitHub Issue"),
   );
 
-  if (issue.closedAt) {
-    embed.addFields({ name: "Closed", value: issue.closedAt, inline: true });
+  const titleText = session.title ? session.title : "*No title set.*";
+  const bodyText = session.body ? session.body : "*No description provided.*";
+  const labelText = session.labels.length ? session.labels.join(", ") : "None";
+
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      `**Title:**\n${titleText}\n\n**Description:**\n${bodyText}\n\n**Labels:**\n${labelText}`,
+    ),
+  );
+
+  const labelSelect = new StringSelectMenuBuilder()
+    .setCustomId(buildTodoCreateLabelId(createSessionId))
+    .setPlaceholder("Select Labels (multi-select)")
+    .setMinValues(0)
+    .setMaxValues(TODO_LABELS.length)
+    .addOptions(
+      TODO_LABELS.map((label) => ({
+        label,
+        value: label,
+        default: session.labels.includes(label),
+      })),
+    );
+
+  const labelRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(labelSelect);
+
+  const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(buildTodoCreateSubmitId(createSessionId))
+      .setLabel("Create")
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(!session.title.trim().length),
+    new ButtonBuilder()
+      .setCustomId(buildTodoCreateCancelId(createSessionId))
+      .setLabel("Cancel")
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  return { components: [container, labelRow, actionRow] };
+}
+
+function buildIssueListComponents(
+  issues: IGithubIssue[],
+  totalIssues: number,
+  payload: TodoListPayload,
+  sessionId: string,
+): { components: Array<ContainerBuilder | ActionRowBuilder<any>> } {
+  const totalPages = Math.max(1, Math.ceil(totalIssues / payload.perPage));
+  const summaryParts = [
+    `-# State: ${payload.state}`,
+    payload.labels.length ? `Label: ${payload.labels.join(", ")}` : "Label: Any",
+    payload.query ? `Query: ${payload.query}` : "Query: Any",
+    `Sort: ${payload.sort} ${payload.direction}`,
+    `Page: ${payload.page} of ${totalPages}`,
+  ];
+
+  const container = new ContainerBuilder()
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${ISSUE_LIST_TITLE}`));
+
+  if (issues.length) {
+    issues.forEach((issue) => {
+      const section = new SectionBuilder().addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(formatIssueLink(issue)),
+      );
+      section.setButtonAccessory(
+        new V2ButtonBuilder()
+          .setCustomId(buildTodoViewId(sessionId, payload.page, issue.number))
+          .setLabel("View")
+          .setStyle(ButtonStyle.Primary),
+      );
+      container.addSectionComponents(section);
+    });
+  } else {
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent("No issues found for this filter."),
+    );
   }
+
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      `${summaryParts.join(" | ")} | Total: ${totalIssues}`,
+    ),
+  );
+
+  const labelSelect = new StringSelectMenuBuilder()
+    .setCustomId(`todo-filter-label:${sessionId}:${payload.page}`)
+    .setPlaceholder("Filter by Label...")
+    .setMinValues(1)
+    .setMaxValues(1)
+    .addOptions(
+      [
+        {
+          label: "All Issues",
+          value: "all",
+          default: payload.labels.length === 0,
+        },
+        ...TODO_LABELS.map((label) => ({
+          label,
+          value: label,
+          default: payload.labels.includes(label),
+        })),
+      ],
+    );
+  const labelRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(labelSelect);
+
+  const createButton = new ButtonBuilder()
+    .setCustomId(buildTodoCreateButtonId(sessionId, payload.page))
+    .setLabel("Create Issue")
+    .setStyle(ButtonStyle.Success);
+
+  const closeButton = new ButtonBuilder()
+    .setCustomId(buildTodoCloseButtonId(sessionId, payload.page))
+    .setLabel("Close Issue")
+    .setStyle(ButtonStyle.Danger);
+
+  const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    createButton,
+    closeButton,
+  );
+
+  const components: Array<ContainerBuilder | ActionRowBuilder<any>> = [
+    container,
+    labelRow,
+    actionRow,
+  ];
+  if (totalPages > 1) {
+    const prevDisabled = payload.page <= 1;
+    const nextDisabled = payload.page >= totalPages;
+    actionRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId(buildTodoListCustomId(sessionId, payload.page - 1))
+        .setLabel("Prev Page")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(prevDisabled),
+      new ButtonBuilder()
+        .setCustomId(buildTodoListCustomId(sessionId, payload.page + 1))
+        .setLabel("Next Page")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(nextDisabled),
+    );
+  }
+
+  return { components };
+}
+
+function buildIssueViewComponents(
+  issue: IGithubIssue,
+  payload: TodoListPayload,
+  sessionId: string,
+): { components: Array<ContainerBuilder | ActionRowBuilder<ButtonBuilder>> } {
+  const container = new ContainerBuilder();
+  const titleText = issue.htmlUrl
+    ? `## [${formatIssueTitle(issue)}](${issue.htmlUrl})`
+    : `## ${formatIssueTitle(issue)}`;
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(titleText));
+
+  const body = issue.body ? issue.body.slice(0, MAX_ISSUE_BODY) : "";
+  if (body) {
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(body));
+  } else {
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent("*No description provided.*"),
+    );
+  }
+
+  const assignee = issue.assignee ?? "Unassigned";
+  const footerLine = [
+    `-# **State:** ${issue.state}`,
+    `**Author:** ${issue.author ?? "Unknown"}`,
+    `**Assignee:** ${assignee}`,
+    `**Created:** ${formatDiscordTimestamp(issue.createdAt)}`,
+    `**Updated:** ${formatDiscordTimestamp(issue.updatedAt)}`,
+  ].join(" | ");
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(footerLine));
+
+  const backRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(buildTodoListBackId(sessionId, payload.page))
+      .setLabel("Back")
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  return { components: [container, backRow] };
+}
+
+function buildIssueDetailEmbed(issue: IGithubIssue): EmbedBuilder {
+  const body = issue.body ? issue.body.slice(0, MAX_ISSUE_BODY) : "";
+  const labels = issue.labels.length ? ` [${issue.labels.join(", ")}]` : "";
+  const author = issue.author ?? "Unknown";
+  const assignee = issue.assignee ?? "Unassigned";
+  const footerText = [
+    `-* **State:** ${issue.state}`,
+    `**Author:** ${author}`,
+    `**Assignee:** ${assignee}`,
+    `**Created:** ${formatDiscordTimestamp(issue.createdAt)}`,
+    `**Updated:** ${formatDiscordTimestamp(issue.updatedAt)}`,
+  ].join(" | ");
+  const embed = new EmbedBuilder()
+    .setTitle(`#${issue.number}: ${issue.title}${labels}`)
+    .setURL(issue.htmlUrl);
+
+  const description = body ? body : "*No description provided.*";
+  embed.setDescription(description).setFooter({ text: footerText });
 
   return embed;
 }
@@ -130,6 +798,13 @@ function buildIssueDetailEmbed(issue: IGithubIssue, repo: string): EmbedBuilder 
 export class TodoCommand {
   @Slash({ description: "List GitHub issues", name: "list" })
   async list(
+    @SlashOption({
+      description: "Search text in any issue field",
+      name: "query",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    queryRaw: string | undefined,
     @SlashChoice(...LIST_STATES)
     @SlashOption({
       description: "Issue state",
@@ -138,14 +813,13 @@ export class TodoCommand {
       type: ApplicationCommandOptionType.String,
     })
     state: ListState | undefined,
-    @SlashChoice(...TODO_LABELS)
     @SlashOption({
-      description: "Filter by label",
-      name: "label",
+      description: "Filter by labels (comma-separated)",
+      name: "labels",
       required: false,
       type: ApplicationCommandOptionType.String,
     })
-    label: TodoLabel | undefined,
+    labelsRaw: string | undefined,
     @SlashChoice(...LIST_SORTS)
     @SlashOption({
       description: "Sort order",
@@ -185,46 +859,711 @@ export class TodoCommand {
     showInChat: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    const isPublic = Boolean(showInChat);
-    await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
+    const isPublic = showInChat !== false;
+    await safeDeferReply(interaction, { flags: buildComponentsV2Flags(!isPublic) });
 
-    const resolvedPage = clampNumber(page ?? 1, 1, 100);
     const resolvedPerPage = clampNumber(perPage ?? DEFAULT_PAGE_SIZE, 1, MAX_PAGE_SIZE);
+    const parsedLabels = parseTodoLabels(labelsRaw);
+    const query = normalizeQuery(queryRaw);
+    if (parsedLabels.invalid.length) {
+      await safeReply(interaction, {
+        content:
+          "Unknown labels: " +
+          parsedLabels.invalid.join(", ") +
+          `. Valid labels: ${TODO_LABELS.join(", ")}.`,
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    const initialStateFilters = normalizeStateFilters(
+      state === "all" ? ["open", "closed"] : [state ?? "open"],
+    );
+    const effectiveState = toIssueState(initialStateFilters);
 
     let issues: IGithubIssue[];
     try {
-      issues = await listIssues({
-        state: state ?? "open",
-        labels: label ? [label] : undefined,
+      issues = await listAllIssues({
+        state: effectiveState,
         sort: sort ?? "updated",
         direction: direction ?? "desc",
-        page: resolvedPage,
-        perPage: resolvedPerPage,
       });
     } catch (err: any) {
       await safeReply(interaction, {
         content: getGithubErrorMessage(err),
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    if (parsedLabels.labels.length) {
+      issues = issues.filter((issue) => matchesIssueLabels(issue, parsedLabels.labels));
+    }
+    if (query) {
+      issues = issues.filter((issue) => matchesIssueQuery(issue, query));
+    }
+
+    const totalIssues = issues.length;
+    const totalPages = Math.max(1, Math.ceil(totalIssues / resolvedPerPage));
+    const resolvedPage = clampNumber(page ?? 1, 1, totalPages);
+    const startIndex = (resolvedPage - 1) * resolvedPerPage;
+    const pageIssues = issues.slice(startIndex, startIndex + resolvedPerPage);
+
+    const payload: TodoListPayload = {
+      page: resolvedPage,
+      perPage: resolvedPerPage,
+      state: effectiveState,
+      stateFilters: initialStateFilters,
+      labels: parsedLabels.labels,
+      query,
+      sort: sort ?? "updated",
+      direction: direction ?? "desc",
+      isPublic,
+    };
+    const sessionId = createTodoListSession({
+      perPage: payload.perPage,
+      state: payload.state,
+      stateFilters: payload.stateFilters,
+      labels: payload.labels,
+      query: payload.query,
+      sort: payload.sort,
+      direction: payload.direction,
+      isPublic: payload.isPublic,
+    });
+    const listPayload = buildIssueListComponents(
+      pageIssues,
+      totalIssues,
+      payload,
+      sessionId,
+    );
+
+    await safeReply(interaction, {
+      components: listPayload.components,
+      flags: buildComponentsV2Flags(!isPublic),
+      allowedMentions: { parse: [] },
+    });
+
+    try {
+      const reply = await interaction.fetchReply();
+      updateTodoListSessionMessage(sessionId, interaction.channelId, reply.id);
+    } catch {
+      // ignore fetch failures
+    }
+  }
+
+  private async buildTodoListPayload(
+    sessionId: string,
+    page: number,
+  ): Promise<{
+    components: Array<ContainerBuilder | ActionRowBuilder<any>>;
+    payload: TodoListPayload;
+    pageIssues: IGithubIssue[];
+  } | null> {
+    const session = getTodoListSession(sessionId);
+    if (!session) return null;
+
+    const payload: TodoListPayload = {
+      ...session.payload,
+      page,
+    };
+
+    let issues: IGithubIssue[];
+    try {
+      issues = await listAllIssues({
+        state: payload.state,
+        sort: payload.sort,
+        direction: payload.direction,
+      });
+    } catch {
+      return null;
+    }
+
+    if (payload.labels.length) {
+      issues = issues.filter((issue) => matchesIssueLabels(issue, payload.labels));
+    }
+    if (payload.query) {
+      issues = issues.filter((issue) => matchesIssueQuery(issue, payload.query as string));
+    }
+
+    const totalIssues = issues.length;
+    const totalPages = Math.max(1, Math.ceil(totalIssues / payload.perPage));
+    const safePage = clampNumber(payload.page, 1, totalPages);
+    const startIndex = (safePage - 1) * payload.perPage;
+    const pageIssues = issues.slice(startIndex, startIndex + payload.perPage);
+
+    const listPayload = buildIssueListComponents(
+      pageIssues,
+      totalIssues,
+      { ...payload, page: safePage },
+      sessionId,
+    );
+
+    return {
+      components: listPayload.components,
+      payload: { ...payload, page: safePage },
+      pageIssues,
+    };
+  }
+
+  private async renderTodoListPage(
+    interaction: ButtonInteraction | StringSelectMenuInteraction,
+    sessionId: string,
+    page: number,
+  ): Promise<void> {
+    const listPayload = await this.buildTodoListPayload(sessionId, page);
+    if (!listPayload) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This list view expired.",
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    await safeUpdate(interaction, {
+      components: listPayload.components,
+      flags: buildComponentsV2Flags(!listPayload.payload.isPublic),
+    });
+
+    updateTodoListSessionMessage(sessionId, interaction.channelId, interaction.message?.id ?? null);
+  }
+
+  @ButtonComponent({ id: /^todo-list-page:todo-\d+-\d+:\d+$/ })
+  async listPage(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseTodoListCustomId(interaction.customId);
+    if (!parsed) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This list view expired.",
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+    await this.renderTodoListPage(interaction, parsed.sessionId, parsed.page);
+  }
+
+  @ButtonComponent({ id: /^todo-list-back:todo-\d+-\d+:\d+$/ })
+  async listBack(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseTodoListBackId(interaction.customId);
+    if (!parsed) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This list view expired.",
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+    await this.renderTodoListPage(interaction, parsed.sessionId, parsed.page);
+  }
+
+  @ButtonComponent({ id: /^todo-create-button:todo-\d+-\d+:\d+$/ })
+  async createFromList(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseTodoCreateId(interaction.customId, TODO_CREATE_BUTTON_PREFIX);
+    if (!parsed) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This list view expired.",
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    const ok = await requireModeratorOrAdminOrOwner(interaction);
+    if (!ok) return;
+
+    const modal = new ModalBuilder()
+      .setCustomId(buildTodoCreateModalId(parsed.sessionId, parsed.page))
+      .setTitle("Create GitHub Issue");
+
+    const titleInput = new TextInputBuilder()
+      .setCustomId(TODO_CREATE_TITLE_ID)
+      .setLabel("Title")
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true)
+      .setMaxLength(256);
+
+    const bodyInput = new TextInputBuilder()
+      .setCustomId(TODO_CREATE_BODY_ID)
+      .setLabel("Description")
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true)
+      .setMaxLength(MAX_ISSUE_BODY);
+
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(titleInput),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(bodyInput),
+    );
+
+    await interaction.showModal(modal);
+  }
+
+  @ButtonComponent({ id: /^todo-close-button:todo-\d+-\d+:\d+$/ })
+  async closeFromList(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseTodoCloseId(interaction.customId, TODO_CLOSE_BUTTON_PREFIX);
+    if (!parsed) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This list view expired.",
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
+
+    const listPayload = await this.buildTodoListPayload(parsed.sessionId, parsed.page);
+    if (!listPayload || listPayload.pageIssues.length === 0) {
+      await safeReply(interaction, {
+        content: "No issues to close on this page.",
         flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
-    const repo = getRepoDisplayName();
-    const embed = buildIssueListEmbed(
-      issues,
-      state ?? "open",
-      label,
-      resolvedPage,
-      resolvedPerPage,
-      sort ?? "updated",
-      direction ?? "desc",
-      repo,
+    const select = new StringSelectMenuBuilder()
+      .setCustomId(buildTodoCloseSelectId(parsed.sessionId, parsed.page))
+      .setPlaceholder("Select an issue to close")
+      .setMinValues(1)
+      .setMaxValues(1)
+      .addOptions(
+        listPayload.pageIssues.map((issue) => ({
+          label: formatIssueSelectLabel(issue),
+          value: String(issue.number),
+        })),
+      );
+    const selectRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+
+    const cancelRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(buildTodoCloseCancelId(parsed.sessionId))
+        .setLabel("Cancel")
+        .setStyle(ButtonStyle.Secondary),
     );
 
     await safeReply(interaction, {
-      embeds: [embed],
-      flags: isPublic ? undefined : MessageFlags.Ephemeral,
-      allowedMentions: { parse: [] },
+      content: "Choose an issue to close.",
+      components: [selectRow, cancelRow],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  @SelectMenuComponent({ id: /^todo-filter-label:todo-\d+-\d+:\d+$/ })
+  async filterLabel(interaction: StringSelectMenuInteraction): Promise<void> {
+    const parsed = parseTodoFilterId(interaction.customId, "todo-filter-label");
+    if (!parsed) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This list view expired.",
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    const session = getTodoListSession(parsed.sessionId);
+    if (!session) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This list view expired.",
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    const selected = interaction.values[0];
+    if (selected === "all") {
+      session.payload.labels = [];
+    } else {
+      session.payload.labels = selected && TODO_LABELS.includes(selected as TodoLabel)
+        ? [selected as TodoLabel]
+        : [];
+    }
+    session.createdAt = Date.now();
+    todoListSessions.set(parsed.sessionId, session);
+
+    await this.renderTodoListPage(interaction, parsed.sessionId, 1);
+  }
+
+  @SelectMenuComponent({ id: /^todo-create-label:todo-create-\d+-\d+$/ })
+  async setCreateLabels(interaction: StringSelectMenuInteraction): Promise<void> {
+    const parsed = parseTodoCreateSessionId(interaction.customId, TODO_CREATE_LABEL_PREFIX);
+    if (!parsed) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This create form expired.",
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    const session = getTodoCreateSession(parsed.sessionId);
+    if (!session || session.userId !== interaction.user.id) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This create form expired.",
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    const selectedValues = interaction.values;
+    if (selectedValues.includes("all")) {
+      session.labels = [];
+    } else {
+      session.labels = selectedValues
+        .map((value) => TODO_LABELS.find((label) => label === value))
+        .filter((label): label is TodoLabel => Boolean(label));
+    }
+
+    session.createdAt = Date.now();
+    todoCreateSessions.set(parsed.sessionId, session);
+
+    const formPayload = buildTodoCreateFormComponents(session, parsed.sessionId);
+    await safeUpdate(interaction, {
+      ...formPayload,
+      flags: buildComponentsV2Flags(true),
+    });
+  }
+
+  @SelectMenuComponent({ id: /^todo-close-select:todo-\d+-\d+:\d+$/ })
+  async closeSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const parsed = parseTodoCloseId(interaction.customId, TODO_CLOSE_SELECT_PREFIX);
+    if (!parsed) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This close menu expired.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    try {
+      await interaction.deferUpdate();
+    } catch {
+      // ignore
+    }
+
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
+
+    const issueNumber = Number(interaction.values[0]);
+    if (!issueNumber) {
+      await safeUpdate(interaction, {
+        content: "Invalid issue selection.",
+        components: [],
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    let closed: IGithubIssue | null;
+    try {
+      closed = await closeIssue(issueNumber);
+    } catch (err: any) {
+      await safeUpdate(interaction, {
+        content: getGithubErrorMessage(err),
+        components: [],
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (!closed) {
+      await safeUpdate(interaction, {
+        content: `Issue #${issueNumber} was not found.`,
+        components: [],
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const session = getTodoListSession(parsed.sessionId);
+    if (!session?.channelId || !session?.messageId) {
+      try {
+        await interaction.deleteReply();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    const listPayload = await this.buildTodoListPayload(parsed.sessionId, parsed.page);
+    if (!listPayload) {
+      return;
+    }
+
+    const channel = interaction.client.channels.cache.get(session.channelId);
+    if (!channel || !("messages" in channel)) {
+      return;
+    }
+
+    try {
+      const message = await (channel as any).messages.fetch(session.messageId);
+      await message.edit({
+        components: listPayload.components,
+      });
+      updateTodoListSessionMessage(parsed.sessionId, session.channelId, session.messageId);
+    } catch {
+      // ignore refresh failures
+    }
+
+    try {
+      await interaction.deleteReply();
+    } catch {
+      // ignore
+    }
+  }
+
+  @ButtonComponent({ id: /^todo-close-cancel:todo-\d+-\d+$/ })
+  async closeCancel(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseTodoCreateSessionId(interaction.customId, TODO_CLOSE_CANCEL_PREFIX);
+    if (!parsed) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This close menu expired.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await safeUpdate(interaction, {
+      content: "Close issue cancelled.",
+      components: [],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  @ModalComponent({ id: /^todo-create-modal:todo-\d+-\d+:\d+$/ })
+  async submitCreateModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const parsed = parseTodoCreateId(interaction.customId, TODO_CREATE_MODAL_PREFIX);
+    if (!parsed) {
+      await safeReply(interaction, {
+        content: "This create form expired.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const ok = await requireModeratorOrAdminOrOwner(interaction);
+    if (!ok) return;
+
+    const rawTitle = interaction.fields.getTextInputValue(TODO_CREATE_TITLE_ID);
+    const rawBody = interaction.fields.getTextInputValue(TODO_CREATE_BODY_ID);
+    const trimmedTitle = sanitizeUserInput(rawTitle, { preserveNewlines: false });
+    if (!trimmedTitle) {
+      await safeReply(interaction, {
+        content: "Title cannot be empty.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const trimmedBody = rawBody
+      ? sanitizeUserInput(rawBody, { preserveNewlines: true })
+      : "";
+    if (!trimmedBody) {
+      await safeReply(interaction, {
+        content: "Description cannot be empty.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const createSessionId = createTodoCreateSession(
+      interaction.user.id,
+      parsed.sessionId,
+      parsed.page,
+    );
+    const session = getTodoCreateSession(createSessionId);
+    if (!session) {
+      await safeReply(interaction, {
+        content: "Unable to start issue creation.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    session.title = trimmedTitle;
+    session.body = trimmedBody.slice(0, MAX_ISSUE_BODY);
+    session.createdAt = Date.now();
+    todoCreateSessions.set(createSessionId, session);
+
+    const formPayload = buildTodoCreateFormComponents(session, createSessionId);
+    await safeReply(interaction, {
+      ...formPayload,
+      flags: buildComponentsV2Flags(true),
+    });
+  }
+
+  @ButtonComponent({ id: /^todo-create-submit:todo-create-\d+-\d+$/ })
+  async submitCreateFromForm(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseTodoCreateSessionId(interaction.customId, TODO_CREATE_SUBMIT_PREFIX);
+    if (!parsed) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This create form expired.",
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    const session = getTodoCreateSession(parsed.sessionId);
+    if (!session || session.userId !== interaction.user.id) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This create form expired.",
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    const ok = await requireModeratorOrAdminOrOwner(interaction);
+    if (!ok) return;
+
+    const trimmedTitle = sanitizeUserInput(session.title, { preserveNewlines: false });
+    if (!trimmedTitle) {
+      await safeUpdate(interaction, {
+        content: "Title cannot be empty.",
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    const trimmedBody = session.body
+      ? sanitizeUserInput(session.body, { preserveNewlines: true })
+      : undefined;
+    const finalBody = trimmedBody ? trimmedBody.slice(0, MAX_ISSUE_BODY) : null;
+
+    try {
+      await createIssue({
+        title: trimmedTitle,
+        body: finalBody,
+        labels: session.labels,
+      });
+    } catch (err: any) {
+      await safeUpdate(interaction, {
+        content: getGithubErrorMessage(err),
+        components: [],
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    todoCreateSessions.delete(parsed.sessionId);
+
+    const listSession = getTodoListSession(session.listSessionId);
+    if (!listSession?.channelId || !listSession?.messageId) {
+      return;
+    }
+
+    const listPayload = await this.buildTodoListPayload(session.listSessionId, session.page);
+    if (!listPayload) {
+      return;
+    }
+
+    const channel = interaction.client.channels.cache.get(listSession.channelId);
+    if (!channel || !("messages" in channel)) {
+      return;
+    }
+
+    try {
+      const message = await (channel as any).messages.fetch(listSession.messageId);
+      await message.edit({
+        components: listPayload.components,
+      });
+      updateTodoListSessionMessage(
+        session.listSessionId,
+        listSession.channelId,
+        listSession.messageId,
+      );
+    } catch {
+      // ignore refresh failures
+    }
+
+    try {
+      await interaction.deleteReply();
+    } catch {
+      // ignore
+    }
+  }
+
+  @ButtonComponent({ id: /^todo-create-cancel:todo-create-\d+-\d+$/ })
+  async cancelCreateFromForm(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseTodoCreateSessionId(interaction.customId, TODO_CREATE_CANCEL_PREFIX);
+    if (!parsed) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This create form expired.",
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    todoCreateSessions.delete(parsed.sessionId);
+    try {
+      await interaction.deleteReply();
+    } catch {
+      await safeUpdate(interaction, {
+        content: "Create issue cancelled.",
+        components: [],
+        flags: buildComponentsV2Flags(true),
+      });
+    }
+  }
+
+
+  @ButtonComponent({ id: /^todo-view:todo-\d+-\d+:\d+:\d+$/ })
+  async viewFromList(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseTodoViewId(interaction.customId);
+    if (!parsed) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This list view expired.",
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    const session = getTodoListSession(parsed.sessionId);
+    if (!session) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This list view expired.",
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    let issue: IGithubIssue | null;
+    try {
+      issue = await getIssue(parsed.issueNumber);
+    } catch (err: any) {
+      await safeUpdate(interaction, {
+        content: getGithubErrorMessage(err),
+        components: [],
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    if (!issue) {
+      await safeUpdate(interaction, {
+        content: `Issue #${parsed.issueNumber} was not found.`,
+        components: [],
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    const payload: TodoListPayload = {
+      ...session.payload,
+      page: parsed.page,
+    };
+    const viewPayload = buildIssueViewComponents(issue, payload, parsed.sessionId);
+
+    await safeUpdate(interaction, {
+      components: viewPayload.components,
+      flags: buildComponentsV2Flags(!payload.isPublic),
     });
   }
 
@@ -246,7 +1585,7 @@ export class TodoCommand {
     showInChat: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    const isPublic = Boolean(showInChat);
+    const isPublic = showInChat !== false;
     await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
 
     let issue: IGithubIssue | null;
@@ -267,7 +1606,7 @@ export class TodoCommand {
       return;
     }
 
-    const embed = buildIssueDetailEmbed(issue, getRepoDisplayName());
+    const embed = buildIssueDetailEmbed(issue);
     await safeReply(interaction, {
       embeds: [embed],
       flags: isPublic ? undefined : MessageFlags.Ephemeral,
@@ -303,7 +1642,7 @@ export class TodoCommand {
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
-    const ok = await isSuperAdmin(interaction);
+    const ok = await requireModeratorOrAdminOrOwner(interaction);
     if (!ok) return;
 
     const trimmedTitle = sanitizeUserInput(title, { preserveNewlines: false });
@@ -337,7 +1676,7 @@ export class TodoCommand {
       return;
     }
 
-    const embed = buildIssueDetailEmbed(issue, getRepoDisplayName());
+    const embed = buildIssueDetailEmbed(issue);
     await safeReply(interaction, {
       content: `Created issue #${issue.number}.`,
       embeds: [embed],
@@ -373,7 +1712,7 @@ export class TodoCommand {
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
-    const ok = await isSuperAdmin(interaction);
+    const ok = await requireAdminOrOwner(interaction);
     if (!ok) return;
 
     if (title === undefined && body === undefined) {
@@ -426,7 +1765,7 @@ export class TodoCommand {
       return;
     }
 
-    const embed = buildIssueDetailEmbed(updated, getRepoDisplayName());
+    const embed = buildIssueDetailEmbed(updated);
     await safeReply(interaction, {
       content: `Updated issue #${updated.number}.`,
       embeds: [embed],
@@ -448,7 +1787,7 @@ export class TodoCommand {
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
-    const ok = await isSuperAdmin(interaction);
+    const ok = await requireOwner(interaction);
     if (!ok) return;
 
     let closed: IGithubIssue | null;
@@ -488,7 +1827,7 @@ export class TodoCommand {
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
-    const ok = await isSuperAdmin(interaction);
+    const ok = await isAdminOrOwner(interaction);
     if (!ok) return;
 
     let reopened: IGithubIssue | null;
@@ -535,7 +1874,7 @@ export class TodoCommand {
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
-    const ok = await isSuperAdmin(interaction);
+    const ok = await isAdminOrOwner(interaction);
     if (!ok) return;
 
     const trimmedBody = sanitizeUserInput(body, { preserveNewlines: true });
@@ -583,7 +1922,7 @@ export class TodoCommand {
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
-    const ok = await isSuperAdmin(interaction);
+    const ok = await isAdminOrOwner(interaction);
     if (!ok) return;
 
     try {
@@ -622,7 +1961,7 @@ export class TodoCommand {
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
-    const ok = await isSuperAdmin(interaction);
+    const ok = await isAdminOrOwner(interaction);
     if (!ok) return;
 
     try {

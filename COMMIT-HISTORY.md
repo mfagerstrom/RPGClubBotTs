@@ -1,8 +1,16 @@
+2026-01-28 - Commit ID: 32e96db - WIP: implemented a connection between the bot and Github issues
+2026-01-28 - Commit ID: b78051b - fix: /now-playing fixes and improvements
 2026-01-28 - Commit ID: c0668f1 - feat: added automcomplete for game name to /game-completion add
 2026-01-28 - Commit ID: ed032eb - issue-52: fixed off by 1 day completion date bug
 2026-01-28 - Commit ID: 683a557 - feat: gave /now-playing a better UI/UX
 2026-01-28 - Commit ID: 3bd5178 - issue-55: updated UI/UX for /nomination commands
 2026-01-18 - Commit ID: 601f5a1 - feat: created a proof of concept that I can capture websites as images for future bot dev ideas
+2026-01-18 - Commit ID: 886bf50 - refactor: removed more deprecated commands
+2026-01-18 - Commit ID: 98cba4e - refactor: removed old, deprecated commands
+2026-01-18 - Commit ID: e3a9382 - even more...
+2026-01-18 - Commit ID: b7f5c15 - more log tweaks
+2026-01-18 - Commit ID: 0cded86 - fix: logging tweak
+2026-01-18 - Commit ID: 184c7ce - issue-51: added channel name to message-related logs
 2026-01-18 - Commit ID: 497c471 - fix: also added descriptions to gamedb audit
 2026-01-18 - Commit ID: 339ccd0 - feat: updated gameDB audit to handle adding videos manually
 2026-01-18 - Commit ID: 110606d - feat: added missing videos to the gamedb audit
@@ -10,6 +18,19 @@
 2026-01-18 - Commit ID: eacca2b - feat: added featured videos to gameDB games
 2026-01-18 - Commit ID: fe9b355 - fix: corrected images not getting imported from IGDB
 2026-01-18 - Commit ID: e8c1413 - gamedb view now rendered w/ components v2
+2026-01-17 - Commit ID: 809f09b - fix: turned off presence-based now-playing prompts
+2026-01-17 - Commit ID: b08674c - feat: added list of donated/active games to 'donor settings' button
+2026-01-17 - Commit ID: 864c077 - fix: improved UX for rich presence auto now-playing prompts
+2026-01-16 - Commit ID: 7219684 - ...
+2026-01-16 - Commit ID: e6ebdc9 - fix: now-playing should render after a successful addition
+2026-01-16 - Commit ID: 04e4138 - fix: presence opt out prompt is now a new message to ensure ping is seen
+2026-01-16 - Commit ID: cdf8f72 - fix: adjusted rich presence snooping for adding to now-playing lists to only prompt for a game once per day, and if messages go unanswered eventually opts out for the user
+2026-01-16 - Commit ID: 3a48fca - feat: implemented starboard
+2026-01-16 - Commit ID: 929a859 - feat: server logging added
+2026-01-16 - Commit ID: 1233131 - feat: adding logging to the bot to replace carlbot
+2026-01-16 - Commit ID: 00c70f1 - issue-48: Implemented missing image imports hourly
+2026-01-16 - Commit ID: a272a4a - issue-47: Bot will watch rich presence and prompt users to add to their now-playing list
+2026-01-16 - Commit ID: 802f980 - feat: implemented input sanitization
 2026-01-16 - Commit ID: f1c00f1 - feat: added # of games per year to completion announcement
 2026-01-15 - Commit ID: da2d30a - fix: giveaway keys are dm'd to users
 2026-01-15 - Commit ID: b8633d7 - feat: complete overhaul of the /now-playing set of commands/functionality
@@ -18,6 +39,11 @@
 2026-01-14 - Commit ID: 84faf13 - fix: improved layout of /now-playing list
 2026-01-14 - Commit ID: 28b8f35 - issue-13: improvements to /gamedb view
 2026-01-14 - Commit ID: 8eba33b - fix: adding a game completion will prompt you to remove that game from now playing
+2026-01-14 - Commit ID: 1e74ef1 - fix: updated /now-playing edit-note
+2026-01-14 - Commit ID: 044264d - fix: updated now-playing sort to use a modal
+2026-01-14 - Commit ID: 5b9b402 - issue-44: implemented an optional notification for donors when their games are claimed
+2026-01-14 - Commit ID: e8d048c - more updates to giveaway
+2026-01-14 - Commit ID: eccf3fd - issue-36: improvements to game key giveaway
 2026-01-14 - Commit ID: 96ffc92 - issue-25: implemented pinning of messages via reactions with :pushpin:
 2026-01-14 - Commit ID: 2629f13 - fix: improved display of now playing notes
 2026-01-14 - Commit ID: 34e5262 - issue-38: implemented /avatar-history command
@@ -34,6 +60,25 @@
 2026-01-07 - Commit ID: 52e065a - todo 75:  /todo add tshirt size effort estimates for TODOs [M]
 2026-01-07 - Commit ID: 7d2250a - todo 102: Add Completion: give user option for unknown date
 2026-01-07 - Commit ID: 8eb8a60 - fix: multiple completionator csv import improvements, TODOs 41, 42, 96, 100, 101
+2026-01-07 - Commit ID: 56c32be - todo 95: list platform during igdb import
+2026-01-07 - Commit ID: 79672f2 - todo 89: /todo list: rename "All" button to "All Open"
+2026-01-06 - Commit ID: fb1fe89 - todo 18: automated creation of now-playing thread via button on gamedb view of game without a linked thread
+2026-01-06 - Commit ID: f0baa41 - todo 17: implement linking of multiple versions of game
+2026-01-06 - Commit ID: acf8616 - fix: fallback for todo embed editing added
+2026-01-06 - Commit ID: bd00057 - todo 72: The /coverart command should be removed
+2026-01-06 - Commit ID: 192cad2 - todo 67: /mp-info UI improvements
+2026-01-06 - Commit ID: ee71d3d - todo 86: Now Playing List - sort by alpha
+2026-01-06 - Commit ID: b5e24ca - todo 85: TODO change command output should show category, since it's now a thing
+2026-01-06 - Commit ID: afc4285 - todo 83: TODO changes should be edited into most recent TODO list embed
+2026-01-06 - Commit ID: 8a79eda - todo 74: updated todo embed to be tabbed by todo type
+2026-01-06 - Commit ID: 05eeff1 - todo 74: /todo categorize TODOs into new features / bug fixes / improvements
+2026-01-06 - Commit ID: 65eba45 - fix: improved todo footer text
+2026-01-06 - Commit ID: 73e83c6 - todo 80: for /todo add, edit, delete, include the title and details in the output if they exist
+2026-01-06 - Commit ID: 66afa7a - todo 78: Change bot name / avatar image, remove gameDB thumbnail images from embeds
+2026-01-06 - Commit ID: 889de8b - todo 64: /mp-info should not render members who have left the server
+2026-01-06 - Commit ID: 7581294 - todo 66: capped now-playing list images to 6
+2026-01-05 - Commit ID: 032b6b4 - fix: mp-info all could reuse same embed while keeping the dropdown below it, like game search does
+2026-01-05 - Commit ID: 6b1d25f - fix: Improve layout of /todo list
 2026-01-05 - Commit ID: 42bb3e6 - todo 62: Allow /gamedb view to search all
 2026-01-05 - Commit ID: b027f5d - feat: Add "Add to Now Playing" and "Add Completion" buttons below gamedb view embed
 2026-01-05 - Commit ID: e1baf67 - fix: improved embeds for /now-playing list
@@ -298,15 +343,3 @@
 2024-09-24 - Commit ID: b4b89e0 - feat: re-implemented HLTB functionality
 2024-09-20 - Commit ID: 836aabc - very much a WIP
 2024-09-20 - Commit ID: ee96c57 - feat: initial commit
-2026-01-17 - Commit ID: 809f09b - fix: turned off presence-based now-playing prompts
-2026-01-17 - Commit ID: b08674c - feat: added list of donated/active games to 'donor settings' button
-2026-01-17 - Commit ID: 864c077 - fix: improved UX for rich presence auto now-playing prompts
-2026-01-16 - Commit ID: 7219684 - ...
-2026-01-16 - Commit ID: e6ebdc9 - fix: now-playing should render after a successful addition
-2026-01-18 - Commit ID: 886bf50 - refactor: removed more deprecated commands
-2026-01-18 - Commit ID: 98cba4e - refactor: removed old, deprecated commands
-2026-01-18 - Commit ID: e3a9382 - even more...
-2026-01-18 - Commit ID: b7f5c15 - more log tweaks
-2026-01-18 - Commit ID: 0cded86 - fix: logging tweak
-2026-01-18 - Commit ID: 184c7ce - issue-51: added channel name to message-related logs
-2026-01-18 - Commit ID: 601f5a1 - feat: created a proof of concept that I can capture websites as images for future bot dev ideas

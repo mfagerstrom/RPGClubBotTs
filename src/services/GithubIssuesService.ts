@@ -23,6 +23,7 @@ export interface IGithubIssue {
   updatedAt: string;
   closedAt: string | null;
   author: string | null;
+  assignee: string | null;
 }
 
 type IssueListParams = {
@@ -46,6 +47,27 @@ type IssueCreateInput = {
 };
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
+
+function normalizePrivateKey(rawKey: string): string {
+  const trimmed = rawKey.trim();
+  if (!trimmed) return trimmed;
+
+  const headerMatch = trimmed.match(/-----BEGIN [^-]+-----/);
+  const footerMatch = trimmed.match(/-----END [^-]+-----/);
+  if (!headerMatch || !footerMatch) {
+    return trimmed;
+  }
+
+  const header = headerMatch[0];
+  const footer = footerMatch[0];
+  const body = trimmed
+    .replace(header, "")
+    .replace(footer, "")
+    .replace(/\s+/g, "");
+
+  const wrappedBody = body.match(/.{1,64}/g)?.join("\n") ?? body;
+  return `${header}\n${wrappedBody}\n${footer}`;
+}
 
 function requireGithubConfig(): void {
   const missing = [
@@ -80,7 +102,7 @@ function buildAppJwt(): string {
   const headerToken = toBase64Url(JSON.stringify(header));
   const payloadToken = toBase64Url(JSON.stringify(payload));
   const data = `${headerToken}.${payloadToken}`;
-  const key = GITHUB_APP_PRIVATE_KEY.replace(/\\n/g, "\n");
+  const key = normalizePrivateKey(GITHUB_APP_PRIVATE_KEY.replace(/\\n/g, "\n"));
   const signature = crypto
     .createSign("RSA-SHA256")
     .update(data)
@@ -157,6 +179,7 @@ function toIssue(raw: any): IGithubIssue {
     updatedAt: raw.updated_at ?? "",
     closedAt: raw.closed_at ?? null,
     author: raw.user?.login ?? null,
+    assignee: raw.assignee?.login ?? null,
   };
 }
 
@@ -177,6 +200,37 @@ export async function listIssues(params: IssueListParams): Promise<IGithubIssue[
   return (response ?? [])
     .filter((issue) => !issue.pull_request)
     .map((issue) => toIssue(issue));
+}
+
+export async function listAllIssues(params: IssueListParams): Promise<IGithubIssue[]> {
+  const perPage = 100;
+  const allIssues: IGithubIssue[] = [];
+  for (let page = 1; page <= 100; page += 1) {
+    const response = await githubRequest<any[]>(
+      "get",
+      `/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/issues`,
+      undefined,
+      {
+        state: params.state ?? "open",
+        labels: params.labels?.join(",") || undefined,
+        sort: params.sort ?? "updated",
+        direction: params.direction ?? "desc",
+        page,
+        per_page: perPage,
+      },
+    );
+
+    const pageIssues = (response ?? [])
+      .filter((issue) => !issue.pull_request)
+      .map((issue) => toIssue(issue));
+    allIssues.push(...pageIssues);
+
+    if (!response || response.length < perPage) {
+      break;
+    }
+  }
+
+  return allIssues;
 }
 
 export async function getIssue(issueNumber: number): Promise<IGithubIssue | null> {

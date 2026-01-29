@@ -2314,14 +2314,14 @@ export class NowPlayingCommand {
     listCount: number,
   ): ActionRowBuilder<ButtonBuilder> {
     const buttons: ButtonBuilder[] = [];
-    if (listCount < MAX_NOW_PLAYING) {
-      buttons.push(
-        new ButtonBuilder()
-          .setCustomId(`nowplaying-list-add:${ownerId}`)
-          .setLabel("Add Game")
-          .setStyle(ButtonStyle.Primary),
-      );
+    const addButton = new ButtonBuilder()
+      .setCustomId(`nowplaying-list-add:${ownerId}`)
+      .setLabel("Add Game")
+      .setStyle(ButtonStyle.Primary);
+    if (listCount >= MAX_NOW_PLAYING) {
+      addButton.setDisabled(true);
     }
+    buttons.push(addButton);
     if (listCount > 1) {
       buttons.push(
         new ButtonBuilder()
