@@ -684,9 +684,10 @@ export class GameDb {
           .map((r) => {
             const platformName = platformMap.get(r.platformId) || "Unknown Platform";
             const regionName = regionMap.get(r.regionId) || "Unknown Region";
+            const regionSuffix = regionName === "Worldwide" ? "" : ` (${regionName})`;
             const releaseDate = r.releaseDate ? r.releaseDate.toLocaleDateString() : "TBD";
             const format = r.format ? `(${r.format})` : "";
-            return `• **${platformName}** (${regionName}) ${format} - ${releaseDate}`;
+            return `• **${platformName}**${regionSuffix} ${format} - ${releaseDate}`;
           })
           .join("\n");
         bodyParts.push(`**Releases**\n${releaseField}`);

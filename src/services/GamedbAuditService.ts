@@ -14,7 +14,8 @@ type AutoAcceptResult = {
 const MAX_LOG_CHARS = 3500;
 
 async function performAutoAcceptImages(
-  onProgress?: (line: string) => Promise<void>,
+  onProgress?: (line: string, processed: number) => Promise<void>,
+  shouldStop?: () => boolean,
 ): Promise<AutoAcceptResult> {
   const games = await Game.getGamesForAudit(true, false, false, false, false);
   const candidates = games.filter((game) => !game.imageData && game.igdbId);
@@ -24,28 +25,37 @@ async function performAutoAcceptImages(
   }
 
   const logs: string[] = [];
-  const addLog = async (line: string): Promise<void> => {
+  const addLog = async (line: string, processed: number): Promise<void> => {
     logs.push(line);
     if (onProgress) {
-      await onProgress(line);
+      await onProgress(line, processed);
     }
   };
 
   let updated = 0;
   let skipped = 0;
   let failed = 0;
+  let processed = 0;
 
   for (const game of candidates) {
+    if (shouldStop?.()) {
+      break;
+    }
+    processed += 1;
+    let logged = false;
     try {
       if (!game.igdbId) {
         skipped++;
+        logged = true;
+        await addLog(`⏭️ Skipped **${game.title}** (Missing IGDB ID)`, processed);
         continue;
       }
 
       const details = await igdbService.getGameDetails(game.igdbId);
       if (!details || !details.cover?.image_id) {
         skipped++;
-        await addLog(`⏭️ Skipped **${game.title}** (No IGDB cover found)`);
+        logged = true;
+        await addLog(`⏭️ Skipped **${game.title}** (No IGDB cover found)`, processed);
         continue;
       }
 
@@ -55,10 +65,20 @@ async function performAutoAcceptImages(
 
       await Game.updateGameImage(game.id, buffer);
       updated++;
-      await addLog(`✅ Updated **${game.title}**`);
+      logged = true;
+      await addLog(`✅ Updated **${game.title}**`, processed);
     } catch (err: any) {
       failed++;
-      await addLog(`❌ Failed **${game.title}**: ${err?.message ?? String(err)}`);
+      logged = true;
+      await addLog(`❌ Failed **${game.title}**: ${err?.message ?? String(err)}`, processed);
+    }
+
+    if (!logged && onProgress) {
+      await onProgress("", processed);
+    }
+
+    if (shouldStop?.()) {
+      break;
     }
 
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -68,7 +88,8 @@ async function performAutoAcceptImages(
 }
 
 async function performAutoAcceptVideos(
-  onProgress?: (line: string) => Promise<void>,
+  onProgress?: (line: string, processed: number) => Promise<void>,
+  shouldStop?: () => boolean,
 ): Promise<AutoAcceptResult> {
   const games = await Game.getGamesForAudit(false, false, true, false, false);
   const candidates = games.filter((game) => !game.featuredVideoUrl && game.igdbId);
@@ -78,44 +99,64 @@ async function performAutoAcceptVideos(
   }
 
   const logs: string[] = [];
-  const addLog = async (line: string): Promise<void> => {
+  const addLog = async (line: string, processed: number): Promise<void> => {
     logs.push(line);
     if (onProgress) {
-      await onProgress(line);
+      await onProgress(line, processed);
     }
   };
 
   let updated = 0;
   let skipped = 0;
   let failed = 0;
+  let processed = 0;
 
   for (const game of candidates) {
+    if (shouldStop?.()) {
+      break;
+    }
+    processed += 1;
+    let logged = false;
     try {
       if (!game.igdbId) {
         skipped++;
+        logged = true;
+        await addLog(`⏭️ Skipped **${game.title}** (Missing IGDB ID)`, processed);
         continue;
       }
 
       const details = await igdbService.getGameDetails(game.igdbId);
       if (!details) {
         skipped++;
-        await addLog(`⏭️ Skipped **${game.title}** (No IGDB details)`);
+        logged = true;
+        await addLog(`⏭️ Skipped **${game.title}** (No IGDB details)`, processed);
         continue;
       }
 
       const videoUrl = Game.getFeaturedVideoUrl(details);
       if (!videoUrl) {
         skipped++;
-        await addLog(`⏭️ Skipped **${game.title}** (No IGDB video found)`);
+        logged = true;
+        await addLog(`⏭️ Skipped **${game.title}** (No IGDB video found)`, processed);
         continue;
       }
 
       await Game.updateFeaturedVideoUrl(game.id, videoUrl);
       updated++;
-      await addLog(`✅ Updated **${game.title}**`);
+      logged = true;
+      await addLog(`✅ Updated **${game.title}**`, processed);
     } catch (err: any) {
       failed++;
-      await addLog(`❌ Failed **${game.title}**: ${err?.message ?? String(err)}`);
+      logged = true;
+      await addLog(`❌ Failed **${game.title}**: ${err?.message ?? String(err)}`, processed);
+    }
+
+    if (!logged && onProgress) {
+      await onProgress("", processed);
+    }
+
+    if (shouldStop?.()) {
+      break;
     }
 
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -125,7 +166,8 @@ async function performAutoAcceptVideos(
 }
 
 async function performAutoAcceptReleaseData(
-  onProgress?: (line: string) => Promise<void>,
+  onProgress?: (line: string, processed: number) => Promise<void>,
+  shouldStop?: () => boolean,
 ): Promise<AutoAcceptResult> {
   const games = await Game.getGamesForAudit(false, false, false, false, true);
   const candidates = games.filter((game) => game.igdbId);
@@ -135,21 +177,29 @@ async function performAutoAcceptReleaseData(
   }
 
   const logs: string[] = [];
-  const addLog = async (line: string): Promise<void> => {
+  const addLog = async (line: string, processed: number): Promise<void> => {
     logs.push(line);
     if (onProgress) {
-      await onProgress(line);
+      await onProgress(line, processed);
     }
   };
 
   let updated = 0;
   let skipped = 0;
   let failed = 0;
+  let processed = 0;
 
   for (const game of candidates) {
+    if (shouldStop?.()) {
+      break;
+    }
+    processed += 1;
+    let logged = false;
     try {
       if (!game.igdbId) {
         skipped++;
+        logged = true;
+        await addLog(`⏭️ Skipped **${game.title}** (Missing IGDB ID)`, processed);
         continue;
       }
 
@@ -159,14 +209,25 @@ async function performAutoAcceptReleaseData(
 
       if (afterCount > beforeCount) {
         updated++;
-        await addLog(`✅ Updated **${game.title}**`);
+        logged = true;
+        await addLog(`✅ Updated **${game.title}**`, processed);
       } else {
         skipped++;
-        await addLog(`⏭️ Skipped **${game.title}** (No IGDB release dates found)`);
+        logged = true;
+        await addLog(`⏭️ Skipped **${game.title}** (No IGDB release dates found)`, processed);
       }
     } catch (err: any) {
       failed++;
-      await addLog(`❌ Failed **${game.title}**: ${err?.message ?? String(err)}`);
+      logged = true;
+      await addLog(`❌ Failed **${game.title}**: ${err?.message ?? String(err)}`, processed);
+    }
+
+    if (!logged && onProgress) {
+      await onProgress("", processed);
+    }
+
+    if (shouldStop?.()) {
+      break;
     }
 
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -205,30 +266,44 @@ export async function runAutoAcceptImagesAudit(
     return;
   }
 
-  const embed = new EmbedBuilder()
+  let currentEmbed = new EmbedBuilder()
     .setTitle("GameDB Auto Accept Images")
     .setDescription("Starting auto accept run...")
     .setColor(0x0099ff);
 
-  const message = await (channel as any).send({ embeds: [embed] });
-  const logLines: string[] = [];
+  let message = await (channel as any).send({ embeds: [currentEmbed] });
+  let currentChunk = 0;
+  let logLines: string[] = [];
 
-  const updateEmbed = async (line?: string): Promise<void> => {
+  const updateEmbed = async (line?: string, processed?: number): Promise<void> => {
+    if (processed && processed > 0) {
+      const chunk = Math.floor((processed - 1) / 50);
+      if (chunk !== currentChunk) {
+        currentChunk = chunk;
+        currentEmbed = new EmbedBuilder()
+          .setTitle("GameDB Auto Accept Images")
+          .setDescription("Processing...")
+          .setColor(0x0099ff);
+        message = await (channel as any).send({ embeds: [currentEmbed] });
+        logLines = [];
+      }
+    }
+
     if (line) {
       logLines.push(line);
     }
     const trimmed = trimLogLines(logLines);
     const content = trimmed.length ? trimmed.join("\n") : "Processing...";
-    embed.setDescription(content);
-    await message.edit({ embeds: [embed] }).catch(() => {});
+    currentEmbed.setDescription(content);
+    await message.edit({ embeds: [currentEmbed] }).catch(() => {});
   };
 
   const { updated, skipped, failed, logs } = await performAutoAcceptImages(updateEmbed);
   if (!logs.length) {
-    embed
+    currentEmbed
       .setDescription("No games found with missing images and valid IGDB IDs.")
       .setColor(0x2ecc71);
-    await message.edit({ embeds: [embed] }).catch(() => {});
+    await message.edit({ embeds: [currentEmbed] }).catch(() => {});
     return;
   }
 
@@ -236,8 +311,8 @@ export async function runAutoAcceptImagesAudit(
     `\n**Run Complete**\n✅ Updated: ${updated}\n` +
     `⏭️ Skipped: ${skipped}\n❌ Failed: ${failed}`;
   await updateEmbed(summary);
-  embed.setColor(0x2ecc71);
-  await message.edit({ embeds: [embed] }).catch(() => {});
+  currentEmbed.setColor(0x2ecc71);
+  await message.edit({ embeds: [currentEmbed] }).catch(() => {});
 }
 
 export function startGamedbAutoImageAuditService(

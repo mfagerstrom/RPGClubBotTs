@@ -1,3 +1,5 @@
+2026-01-29 - Commit ID: 393c915 - issue-75: dedupe releases
+2026-01-29 - Commit ID: d37ab4f - feat: added release data to gamedb audit
 2026-01-29 - Commit ID: e339391 - issue-74: implemented initial release date field in db and /gamedb view
 2026-01-29 - Commit ID: 57b87ae - issue-73: updated IGDB imports to pull platform / release date data
 2026-01-29 - Commit ID: 4e6345f - issue-71: added edit description button to /todo view
