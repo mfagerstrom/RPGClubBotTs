@@ -1,3 +1,9 @@
+2026-01-29 - Commit ID: d0481d1 - issue-87: added special server owner override to make all commands public in gamedev channel in order to save time and to show users examples of how things work (when they are usually private)
+2026-01-29 - Commit ID: 54c5705 - issue-88: corrected missing thread links on /now-playing list
+2026-01-29 - Commit ID: 11c5e2d - renamed /todo list to /todo
+2026-01-29 - Commit ID: f6be2b9 - issue-83: added ids to /gamedb view
+2026-01-29 - Commit ID: a062047 - issue-81-and-82: duplicate titles OK and removed redundant info from gamedb view
+2026-01-29 - Commit ID: 720a2e9 - issue-43: updated /suggestion to work with github issues
 2026-01-29 - Commit ID: d8a1cf5 - issue-77: corrected missing action buttons when gamedb view imports
 2026-01-29 - Commit ID: 491e4d8 - issue-78: added Edit Title button to /todo view
 2026-01-29 - Commit ID: bda77b6 - minor tweaks, reorganized SQL folder

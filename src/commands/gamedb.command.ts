@@ -46,6 +46,7 @@ import {
 } from "../functions/InteractionUtils.js";
 import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import Game from "../classes/Game.js";
+import { getHltbCacheByGameId } from "../classes/HltbCache.js";
 import { getThreadsByGameId, setThreadGameLink, upsertThreadRecord } from "../classes/Thread.js";
 import axios from "axios"; // For downloading image attachments
 import { igdbService, type IGDBGame } from "../services/IgdbService.js";
@@ -732,6 +733,22 @@ export class GameDb {
           })
           .join("\n");
         bodyParts.push(`**Releases**\n${releaseField}`);
+      }
+
+      const hltbCache = await getHltbCacheByGameId(gameId);
+      if (hltbCache) {
+        const hltbLines: string[] = [];
+        if (hltbCache.main) hltbLines.push(`Main: ${hltbCache.main}`);
+        if (hltbCache.mainSides) hltbLines.push(`Main + Sides: ${hltbCache.mainSides}`);
+        if (hltbCache.completionist) hltbLines.push(`Completionist: ${hltbCache.completionist}`);
+        if (hltbCache.singlePlayer) hltbLines.push(`Single-Player: ${hltbCache.singlePlayer}`);
+        if (hltbCache.coOp) hltbLines.push(`Co-Op: ${hltbCache.coOp}`);
+        if (hltbCache.vs) hltbLines.push(`Vs.: ${hltbCache.vs}`);
+        const sourceLine = hltbCache.url ? `Source: ${hltbCache.url}` : null;
+        const textLines = sourceLine ? [sourceLine, ...hltbLines] : hltbLines;
+        if (textLines.length) {
+          bodyParts.push(`**How Long to Beat (cached)**\n${textLines.join("\n")}`);
+        }
       }
 
       const series = await Game.getGameSeries(gameId);

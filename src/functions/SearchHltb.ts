@@ -16,10 +16,25 @@ interface IGoogleSearchResult {
     pagemap: any;
 }
 
-export async function searchHltb(title: string) {
+export type HltbSearchResult = {
+    name: string;
+    main: string;
+    mainSides: string;
+    completionist: string;
+    singlePlayer: string;
+    coOp: string;
+    vs: string;
+    imageUrl: string | undefined;
+    url: string;
+};
+
+export async function searchHltb(title: string): Promise<HltbSearchResult | null> {
     const hltbQuery: string = title;
 
     const searchData: IGoogleSearchResult[] = await searchGoogleCustomSearchAPI(`How long is ${hltbQuery}?`) as IGoogleSearchResult[];
+    if (!searchData || !searchData.length || !searchData[0]?.link) {
+        return null;
+    }
 
     // grab the first link of the bunch and pull out the id from it
     const hltbUrl: string = searchData[0].link;
@@ -29,7 +44,7 @@ export async function searchHltb(title: string) {
     const $ = cheerio.load(hltbGameHTML);
 
     // grab the data that we need with cheerio
-    const result = {
+    const result: HltbSearchResult = {
         name: $('.GameHeader_profile_header__q_PID').text().trim(),
         main: $('h4:contains("Main Story")').next().text(),
         mainSides: $('h4:contains("Main + Sides")').next().text(),
@@ -38,6 +53,7 @@ export async function searchHltb(title: string) {
         coOp: $('h4:contains("Co-Op")').next().text(),
         vs: $('h4:contains("Vs.")').next().text(),
         imageUrl: $('img').attr('src'),
+        url: hltbUrl,
     };
 
     return result;
