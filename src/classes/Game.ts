@@ -726,18 +726,22 @@ export default class Game {
     if (!releases.length) return;
 
     const existing = await Game.getGameReleases(gameId);
-    const existingKeys = new Set(
-      existing.map((release) =>
-        Game.buildReleaseSignature(
-          release.platformId,
-          release.regionId,
-          release.releaseDate,
-          release.format,
-        ),
-      ),
-    );
+    const existingPlatformIds = new Set(existing.map((release) => release.platformId));
 
+    const earliestByPlatform = new Map<number, { release: IGDBReleaseDate; date: Date }>();
     for (const release of releases) {
+      const platformId = release.platform?.id;
+      if (!platformId) continue;
+      const releaseDate = Game.resolveReleaseDate(release);
+      if (!releaseDate) continue;
+
+      const current = earliestByPlatform.get(platformId);
+      if (!current || releaseDate < current.date) {
+        earliestByPlatform.set(platformId, { release, date: releaseDate });
+      }
+    }
+
+    for (const { release, date } of earliestByPlatform.values()) {
       if (!release.platform?.id) continue;
 
       const platform = await Game.ensurePlatform({
@@ -746,29 +750,21 @@ export default class Game {
       });
       if (!platform) continue;
 
+      if (existingPlatformIds.has(platform.id)) {
+        continue;
+      }
+
       const region = await Game.ensureRegion(release.region ?? 8);
       if (!region) continue;
 
-      const releaseDate = Game.resolveReleaseDate(release);
       const format: "Physical" | "Digital" | null = null;
-      const signature = Game.buildReleaseSignature(
-        platform.id,
-        region.id,
-        releaseDate,
-        format,
-      );
-
-      if (existingKeys.has(signature)) {
-        continue;
-      }
-      existingKeys.add(signature);
 
       await Game.addReleaseInfo(
         gameId,
         platform.id,
         region.id,
         format,
-        releaseDate,
+        date,
         null,
       );
     }
