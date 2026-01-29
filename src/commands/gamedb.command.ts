@@ -3,6 +3,7 @@ import {
   CommandInteraction,
   EmbedBuilder,
   StringSelectMenuBuilder,
+  AutocompleteInteraction,
   ActionRowBuilder,
   StringSelectMenuInteraction,
   ButtonBuilder,
@@ -86,6 +87,26 @@ function buildComponentsV2Flags(isEphemeral: boolean): number {
   return (isEphemeral ? MessageFlags.Ephemeral : 0) | COMPONENTS_V2_FLAG;
 }
 
+function getReleaseYear(game: { initialReleaseDate?: Date | null }): number | null {
+  const releaseDate = game.initialReleaseDate;
+  if (!releaseDate) return null;
+  const date = releaseDate instanceof Date ? releaseDate : new Date(releaseDate);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.getFullYear();
+}
+
+function formatTitleWithYear(
+  game: { title: string; initialReleaseDate?: Date | null },
+  isDuplicate: boolean,
+): string {
+  if (!isDuplicate) {
+    return game.title;
+  }
+  const year = getReleaseYear(game);
+  const yearText = year ? ` (${year})` : " (Unknown Year)";
+  return `${game.title}${yearText}`;
+}
+
 function isHltbImportEligible(
   game: { initialReleaseDate?: Date | null },
   hasCache: boolean,
@@ -113,6 +134,34 @@ function getSearchRowsFromComponents(
       component.customId?.startsWith("gamedb-search-"),
     );
   }) as ActionRow<MessageActionRowComponent>[];
+}
+
+async function autocompleteGameDbViewTitle(
+  interaction: AutocompleteInteraction,
+): Promise<void> {
+  const focused = interaction.options.getFocused(true);
+  const rawQuery = focused?.value ? String(focused.value) : "";
+  const query = sanitizeUserInput(rawQuery, { preserveNewlines: false }).trim();
+  if (!query) {
+    await interaction.respond([]);
+    return;
+  }
+  const results = await Game.searchGames(query);
+  const titleCounts = new Map<string, number>();
+  results.forEach((game) => {
+    const title = String(game.title ?? "");
+    titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
+  });
+  const options = results.slice(0, 25).map((game) => {
+    const title = String(game.title ?? "");
+    const isDuplicate = (titleCounts.get(title) ?? 0) > 1;
+    const label = formatTitleWithYear(game, isDuplicate);
+    return {
+      name: label.slice(0, 100),
+      value: String(game.id),
+    };
+  });
+  await interaction.respond(options);
 }
 
 const MAX_COMPLETION_NOTE_LEN = 500;
@@ -510,6 +559,7 @@ export class GameDb {
       name: "title",
       required: true,
       type: ApplicationCommandOptionType.String,
+      autocomplete: autocompleteGameDbViewTitle,
     })
     query: string,
     interaction: CommandInteraction,
@@ -517,6 +567,16 @@ export class GameDb {
     await safeDeferReply(interaction, { flags: buildComponentsV2Flags(false) });
 
     const searchTerm = sanitizeUserInput(query, { preserveNewlines: false });
+    if (/^\d+$/.test(searchTerm)) {
+      const gameId = Number(searchTerm);
+      if (Number.isInteger(gameId) && gameId > 0) {
+        const game = await Game.getGameById(gameId);
+        if (game) {
+          await this.showGameProfile(interaction, gameId);
+          return;
+        }
+      }
+    }
     await this.runSearchFlow(interaction, searchTerm);
   }
 
