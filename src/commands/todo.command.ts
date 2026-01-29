@@ -45,6 +45,7 @@ import {
   getIssue,
   listAllIssues,
   listIssueComments,
+  setIssueLabels,
   removeLabel,
   reopenIssue,
   updateIssue,
@@ -81,6 +82,8 @@ const TODO_COMMENT_BUTTON_PREFIX = "todo-comment-button";
 const TODO_COMMENT_MODAL_PREFIX = "todo-comment-modal";
 const TODO_COMMENT_INPUT_ID = "todo-comment-input";
 const TODO_CLOSE_VIEW_PREFIX = "todo-close-view";
+const TODO_LABEL_EDIT_BUTTON_PREFIX = "todo-label-edit-button";
+const TODO_LABEL_EDIT_SELECT_PREFIX = "todo-label-edit-select";
 const TODO_CREATE_TITLE_ID = "todo-create-title";
 const TODO_CREATE_BODY_ID = "todo-create-body";
 const TODO_LIST_SESSION_TTL_MS = 30 * 60 * 1000;
@@ -424,6 +427,22 @@ function buildTodoCloseViewId(sessionId: string, page: number, issueNumber: numb
   return [TODO_CLOSE_VIEW_PREFIX, sessionId, page, issueNumber].join(":");
 }
 
+function buildTodoLabelEditButtonId(
+  sessionId: string,
+  page: number,
+  issueNumber: number,
+): string {
+  return [TODO_LABEL_EDIT_BUTTON_PREFIX, sessionId, page, issueNumber].join(":");
+}
+
+function buildTodoLabelEditSelectId(
+  sessionId: string,
+  page: number,
+  issueNumber: number,
+): string {
+  return [TODO_LABEL_EDIT_SELECT_PREFIX, sessionId, page, issueNumber].join(":");
+}
+
 function buildTodoCreateLabelId(sessionId: string): string {
   return [TODO_CREATE_LABEL_PREFIX, sessionId].join(":");
 }
@@ -561,6 +580,25 @@ function parseTodoCommentId(
 }
 
 function parseTodoCloseViewId(
+  id: string,
+  prefix: string,
+): { sessionId: string; page: number; issueNumber: number } | null {
+  const parts = id.split(":");
+  if (parts.length !== 4 || parts[0] !== prefix) {
+    return null;
+  }
+
+  const sessionId = parts[1];
+  const page = Number(parts[2]);
+  const issueNumber = Number(parts[3]);
+  if (!sessionId || !page || !issueNumber) {
+    return null;
+  }
+
+  return { sessionId, page, issueNumber };
+}
+
+function parseTodoLabelEditId(
   id: string,
   prefix: string,
 ): { sessionId: string; page: number; issueNumber: number } | null {
@@ -843,6 +881,10 @@ function buildIssueViewComponents(
       .setCustomId(buildTodoCommentButtonId(sessionId, payload.page, issue.number))
       .setLabel("Add Comment")
       .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(buildTodoLabelEditButtonId(sessionId, payload.page, issue.number))
+      .setLabel("Add/Edit Labels")
+      .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(buildTodoCloseViewId(sessionId, payload.page, issue.number))
       .setLabel("Close Issue")
@@ -1463,6 +1505,105 @@ export class TodoCommand {
     }
   }
 
+  @SelectMenuComponent({ id: /^todo-label-edit-select:todo-\d+-\d+:\d+:\d+$/ })
+  async labelEditSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const parsed = parseTodoLabelEditId(interaction.customId, TODO_LABEL_EDIT_SELECT_PREFIX);
+    if (!parsed) {
+      await safeReply(interaction, {
+        content: "This label editor expired.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const ok = await requireModeratorOrAdminOrOwner(interaction);
+    if (!ok) return;
+
+    try {
+      await interaction.deferUpdate();
+    } catch {
+      // ignore
+    }
+
+    const selectedLabels = interaction.values
+      .map((value) => TODO_LABELS.find((label) => label === value))
+      .filter((label): label is TodoLabel => Boolean(label));
+
+    let updated: IGithubIssue | null;
+    try {
+      updated = await setIssueLabels(parsed.issueNumber, selectedLabels);
+    } catch (err: any) {
+      await safeUpdate(interaction, {
+        content: getGithubErrorMessage(err),
+        components: [],
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (!updated) {
+      await safeUpdate(interaction, {
+        content: `Issue #${parsed.issueNumber} was not found.`,
+        components: [],
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const session = getTodoListSession(parsed.sessionId);
+    if (!session?.channelId || !session?.messageId) {
+      try {
+        await interaction.deleteReply();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    let issue: IGithubIssue | null;
+    let comments: IGithubIssueComment[] = [];
+    try {
+      issue = await getIssue(parsed.issueNumber);
+      if (issue) {
+        comments = await listIssueComments(parsed.issueNumber);
+      }
+    } catch {
+      issue = null;
+    }
+
+    if (issue) {
+      const payload: TodoListPayload = {
+        ...session.payload,
+        page: parsed.page,
+      };
+
+      const viewPayload = buildIssueViewComponents(
+        issue,
+        comments,
+        payload,
+        parsed.sessionId,
+      );
+
+      const channel = interaction.client.channels.cache.get(session.channelId);
+      if (channel && "messages" in channel) {
+        try {
+          const message = await (channel as any).messages.fetch(session.messageId);
+          await message.edit({
+            components: viewPayload.components,
+          });
+        } catch {
+          // ignore refresh failures
+        }
+      }
+    }
+
+    try {
+      await interaction.deleteReply();
+    } catch {
+      // ignore
+    }
+  }
+
   @ButtonComponent({ id: /^todo-close-cancel:todo-\d+-\d+$/ })
   async closeCancel(interaction: ButtonInteraction): Promise<void> {
     const parsed = parseTodoCreateSessionId(interaction.customId, TODO_CLOSE_CANCEL_PREFIX);
@@ -1890,6 +2031,62 @@ export class TodoCommand {
       interaction.channelId,
       interaction.message?.id ?? null,
     );
+  }
+
+  @ButtonComponent({ id: /^todo-label-edit-button:todo-\d+-\d+:\d+:\d+$/ })
+  async editLabelsFromView(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseTodoLabelEditId(interaction.customId, TODO_LABEL_EDIT_BUTTON_PREFIX);
+    if (!parsed) {
+      await this.refreshExpiredList(interaction);
+      return;
+    }
+
+    const ok = await requireModeratorOrAdminOrOwner(interaction);
+    if (!ok) return;
+
+    const session = getTodoListSession(parsed.sessionId);
+    if (!session) {
+      await this.refreshExpiredList(interaction);
+      return;
+    }
+
+    let issue: IGithubIssue | null;
+    try {
+      issue = await getIssue(parsed.issueNumber);
+    } catch (err: any) {
+      await safeReply(interaction, {
+        content: getGithubErrorMessage(err),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (!issue) {
+      await safeReply(interaction, {
+        content: `Issue #${parsed.issueNumber} was not found.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const select = new StringSelectMenuBuilder()
+      .setCustomId(buildTodoLabelEditSelectId(parsed.sessionId, parsed.page, parsed.issueNumber))
+      .setPlaceholder("Select Label(s)...")
+      .setMinValues(0)
+      .setMaxValues(TODO_LABELS.length)
+      .addOptions(
+        TODO_LABELS.map((label) => ({
+          label,
+          value: label,
+          default: issue.labels.includes(label),
+        })),
+      );
+
+    await safeReply(interaction, {
+      content: "Select labels to apply to this issue.",
+      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   @ButtonComponent({ id: /^todo-comment-button:todo-\d+-\d+:\d+:\d+$/ })

@@ -315,6 +315,25 @@ export async function updateIssue(
   }
 }
 
+export async function setIssueLabels(
+  issueNumber: number,
+  labels: string[],
+): Promise<IGithubIssue | null> {
+  try {
+    const response = await githubRequest<any>(
+      "patch",
+      `/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/issues/${issueNumber}`,
+      { labels },
+    );
+    return toIssue(response);
+  } catch (err: any) {
+    if (err?.response?.status === 404) {
+      return null;
+    }
+    throw err;
+  }
+}
+
 export async function closeIssue(issueNumber: number): Promise<IGithubIssue | null> {
   try {
     const response = await githubRequest<any>(
