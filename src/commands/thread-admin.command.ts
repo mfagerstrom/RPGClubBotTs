@@ -41,7 +41,9 @@ export class ThreadAdminCommands {
 
     await setThreadGameLink(threadId, gamedbGameId);
     await safeReply(interaction, {
-              flags: MessageFlags.Ephemeral,    });
+      content: `Linked thread ${threadId} to GameDB game ${gamedbGameId}.`,
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   @Slash({ description: "Unlink a thread from a GameDB game id", name: "unlink" })
