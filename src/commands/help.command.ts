@@ -279,7 +279,7 @@ const HELP_TOPICS: HelpTopic[] = [
     summary:
       "Manage GitHub issues with the bot (list is public; actions are button-driven).",
     syntax:
-      "Syntax: /todo list [query:<string>] [state:<open|closed|all>] " +
+      "Syntax: /todo [query:<string>] [state:<open|closed|all>] " +
       "[labels:<New Feature,Improvement,Bug,Blocked>] " +
       "[sort:<created|updated>] [direction:<asc|desc>] [page:<int>] [per_page:<int>] " +
       "[showinchat:<boolean>]",

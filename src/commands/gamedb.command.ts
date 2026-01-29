@@ -757,6 +757,9 @@ export class GameDb {
         bodyParts.push(rpgClubSections.join("\n\n"));
       }
 
+      const igdbIdText = game.igdbId ? String(game.igdbId) : "N/A";
+      bodyParts.push(`-# GameDB ID: ${game.id} | IGDB ID: ${igdbIdText}`);
+
       const content = this.trimTextDisplayContent(
         [headerLines.join("\n"), bodyParts.join("\n\n")].filter(Boolean).join("\n"),
       );

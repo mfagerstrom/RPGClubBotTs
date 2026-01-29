@@ -944,10 +944,8 @@ function buildIssueViewComponents(
 }
 
 @Discord()
-@SlashGroup({ description: "GitHub issue controls", name: "todo" })
-@SlashGroup("todo")
 export class TodoCommand {
-  @Slash({ description: "List GitHub issues", name: "list" })
+  @Slash({ description: "List GitHub issues", name: "todo" })
   async list(
     @SlashOption({
       description: "Search text in any issue field",
