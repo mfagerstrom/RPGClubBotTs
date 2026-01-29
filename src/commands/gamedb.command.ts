@@ -459,12 +459,12 @@ export class GameDb {
     }
 
     if (opts?.showProfile) {
-      await this.showGameProfile(interaction, newGame.id);
+      await this.showGameProfile(interaction, newGame.id, true);
       return;
     }
 
     // 7. Show the /gamedb view for the newly added game
-    await this.showGameProfile(interaction, newGame.id);
+    await this.showGameProfile(interaction, newGame.id, true);
   }
 
   @Slash({ description: "View details of a game", name: "view" })
@@ -487,6 +487,7 @@ export class GameDb {
   private async showGameProfile(
     interaction: CommandInteraction | StringSelectMenuInteraction,
     gameId: number,
+    includeActionsOverride?: boolean,
   ): Promise<void> {
     const profile = await this.buildGameProfile(gameId, interaction);
     if (!profile) {
@@ -497,9 +498,10 @@ export class GameDb {
       return;
     }
 
-    const includeActions =
+    const includeActions = includeActionsOverride ?? (
       !("isMessageComponent" in interaction) ||
-      !interaction.isMessageComponent();
+      !interaction.isMessageComponent()
+    );
     const components = [...profile.components];
     if (includeActions) {
       components.push(
