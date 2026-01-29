@@ -21,7 +21,7 @@ import { startRssFeedService } from "./services/RssFeedService.js";
 import { startPublicReminderService } from "./services/PublicReminderService.js";
 import { startThreadSyncService } from "./services/ThreadSyncService.js";
 import { startThreadLinkPromptService } from "./services/ThreadLinkPromptService.js";
-import { recreateGiveawayHubMessage } from "./services/GiveawayHubService.js";
+import { refreshGiveawayHubMessage } from "./services/GiveawayHubService.js";
 installConsoleLogging();
 
 const PRESENCE_CHECK_INTERVAL_MS: number = 30 * 60 * 1000;
@@ -102,7 +102,7 @@ bot.once("clientReady", async () => {
   startThreadLinkPromptService(bot);
   await joinAllTargetForumThreads(bot);
   startRssFeedService(bot);
-  await recreateGiveawayHubMessage(bot);
+  await refreshGiveawayHubMessage(bot);
   console.log("Startup sequence completed.");
 });
 

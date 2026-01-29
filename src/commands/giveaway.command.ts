@@ -43,7 +43,6 @@ import {
   GIVEAWAY_HUB_CHANNEL_ID,
   getAvailableKeysPage,
   listAllAvailableKeys,
-  recreateGiveawayHubMessage,
   refreshGiveawayHubMessage,
 } from "../services/GiveawayHubService.js";
 
@@ -590,7 +589,7 @@ export class GiveawayCommand {
     keyValue = sanitizeUserInput(keyValue, { preserveNewlines: false });
     const created = await handleDonation(interaction, title, platform, keyValue);
     if (created) {
-      await recreateGiveawayHubMessage(interaction.client).catch(() => {});
+      await refreshGiveawayHubMessage(interaction.client).catch(() => {});
     }
   }
 
@@ -608,7 +607,7 @@ export class GiveawayCommand {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
     const removed = await handleRevoke(interaction, keyId);
     if (removed) {
-      await recreateGiveawayHubMessage(interaction.client).catch(() => {});
+      await refreshGiveawayHubMessage(interaction.client).catch(() => {});
     }
   }
   */
@@ -1063,7 +1062,7 @@ export class GiveawayCommand {
 
     const created = await handleDonation(interaction, title, platform, keyValue);
     if (created) {
-      await recreateGiveawayHubMessage(interaction.client).catch(() => {});
+      await refreshGiveawayHubMessage(interaction.client).catch(() => {});
     }
   }
 

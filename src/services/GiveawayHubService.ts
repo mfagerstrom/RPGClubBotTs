@@ -322,7 +322,7 @@ export async function refreshGiveawayHubMessage(
   }
 
   const payload = await buildGiveawayHubPayload(page);
-  const shouldRecreate = options?.forceRecreate ?? true;
+  const shouldRecreate = options?.forceRecreate ?? false;
   if (shouldRecreate) {
     if (!("send" in textChannel)) {
       console.warn("Giveaway hub channel does not support send.");
