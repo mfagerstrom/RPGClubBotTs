@@ -1,4 +1,4 @@
-import { MessageFlags } from "discord.js";
+import { MessageFlags, MessageFlagsBitField } from "discord.js";
 import type {
   CommandInteraction,
   InteractionDeferReplyOptions,
@@ -6,6 +6,8 @@ import type {
 } from "discord.js";
 
 export type AnyRepliable = RepliableInteraction | CommandInteraction;
+
+const BOT_DEV_CHANNEL_ID = "1466475139402170450";
 
 type SanitizeOptions = {
   maxLength?: number;
@@ -131,12 +133,84 @@ function normalizeOptions(options: any): any {
   return restOptions;
 }
 
+function stripEphemeralFlag(flags: any): number {
+  try {
+    return new MessageFlagsBitField(flags).remove(MessageFlags.Ephemeral).bitfield;
+  } catch {
+    return 0;
+  }
+}
+
+function shouldForcePublicInDevChannel(interaction: AnyRepliable): boolean {
+  const anyInteraction = interaction as any;
+  const channelId = anyInteraction?.channelId;
+  if (!channelId || channelId !== BOT_DEV_CHANNEL_ID) return false;
+  const ownerId = anyInteraction?.guild?.ownerId;
+  return Boolean(ownerId && anyInteraction?.user?.id === ownerId);
+}
+
+function getCommandOwnerId(interaction: AnyRepliable): string | null {
+  const anyInteraction = interaction as any;
+  const message = anyInteraction?.message;
+  const ownerId = message?.interaction?.user?.id;
+  return ownerId ?? null;
+}
+
+function shouldBlockDevChannelInteraction(interaction: AnyRepliable): boolean {
+  const anyInteraction = interaction as any;
+  const channelId = anyInteraction?.channelId;
+  if (!channelId || channelId !== BOT_DEV_CHANNEL_ID) return false;
+  const isComponent = typeof anyInteraction.isMessageComponent === "function" &&
+    anyInteraction.isMessageComponent();
+  const isModal = typeof anyInteraction.isModalSubmit === "function" &&
+    anyInteraction.isModalSubmit();
+  if (!isComponent && !isModal) return false;
+
+  const ownerId = anyInteraction?.guild?.ownerId ?? null;
+  const commandOwnerId = getCommandOwnerId(interaction);
+  const userId = anyInteraction?.user?.id ?? null;
+  if (!userId) return true;
+  return userId !== ownerId && userId !== commandOwnerId;
+}
+
+async function sendDevChannelBlockResponse(interaction: AnyRepliable): Promise<void> {
+  const anyInteraction = interaction as any;
+  const payload = {
+    content: "Only the command owner or server owner can use controls in this channel.",
+    flags: MessageFlags.Ephemeral,
+  };
+
+  try {
+    if (anyInteraction.deferred || anyInteraction.replied) {
+      await anyInteraction.followUp(payload);
+    } else {
+      await anyInteraction.reply(payload);
+    }
+    anyInteraction.__rpgAcked = true;
+  } catch (err: any) {
+    if (!isAckError(err)) throw err;
+  }
+}
+
+function applyDevChannelOverrides(interaction: AnyRepliable, options: any): any {
+  if (!options || typeof options === "string") return options;
+  if (!shouldForcePublicInDevChannel(interaction)) return options;
+  if (!("flags" in options)) return options;
+  const flags = stripEphemeralFlag(options.flags);
+  return { ...options, flags };
+}
+
 // Safely defer a reply, ignoring errors and avoiding double-deferral
 export async function safeDeferReply(
   interaction: AnyRepliable,
   options?: InteractionDeferReplyOptions,
 ): Promise<void> {
   const anyInteraction = interaction as any;
+
+  if (shouldBlockDevChannelInteraction(interaction)) {
+    await sendDevChannelBlockResponse(interaction);
+    return;
+  }
 
   let deferOptions: InteractionDeferReplyOptions | undefined = options;
   try {
@@ -152,6 +226,11 @@ export async function safeDeferReply(
     // ignore detection issues
   }
 
+  if (deferOptions && shouldForcePublicInDevChannel(interaction)) {
+    const flags = stripEphemeralFlag(deferOptions.flags);
+    deferOptions = { ...deferOptions, flags };
+  }
+
   // Custom flag so our helpers can reliably detect an acknowledgement
   if (anyInteraction.__rpgAcked || anyInteraction.deferred || anyInteraction.replied) {
     return;
@@ -160,7 +239,8 @@ export async function safeDeferReply(
   try {
     if (typeof anyInteraction.deferReply === "function") {
       const normalized = deferOptions ? normalizeOptions(deferOptions) : deferOptions;
-      await anyInteraction.deferReply(normalized as any);
+      const overridden = applyDevChannelOverrides(interaction, normalized);
+      await anyInteraction.deferReply(overridden as any);
       anyInteraction.__rpgAcked = true;
       anyInteraction.__rpgDeferred = true;
     }
@@ -177,8 +257,12 @@ const isAckError = (err: any): boolean => {
 
 export async function safeReply(interaction: AnyRepliable, options: any): Promise<any> {
   const anyInteraction = interaction as any;
+  if (shouldBlockDevChannelInteraction(interaction)) {
+    await sendDevChannelBlockResponse(interaction);
+    return;
+  }
   const forceFollowUp = Boolean(options?.__forceFollowUp);
-  const normalizedOptions = normalizeOptions(options);
+  const normalizedOptions = applyDevChannelOverrides(interaction, normalizeOptions(options));
 
   const deferred: boolean = Boolean(
     anyInteraction.__rpgDeferred !== undefined
@@ -247,7 +331,11 @@ export async function safeReply(interaction: AnyRepliable, options: any): Promis
 // Try to update an existing interaction message; fall back to a normal reply if needed.
 export async function safeUpdate(interaction: AnyRepliable, options: any): Promise<void> {
   const anyInteraction = interaction as any;
-  const normalizedOptions = normalizeOptions(options);
+  if (shouldBlockDevChannelInteraction(interaction)) {
+    await sendDevChannelBlockResponse(interaction);
+    return;
+  }
+  const normalizedOptions = applyDevChannelOverrides(interaction, normalizeOptions(options));
 
   if (typeof anyInteraction.update === "function") {
     try {
