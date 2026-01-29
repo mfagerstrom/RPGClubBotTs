@@ -1,19 +1,11 @@
-import type { Client, CommandInteraction } from "discord.js";
+import type { CommandInteraction } from "discord.js";
 import {
-  ActionRowBuilder,
   ApplicationCommandOptionType,
-  ButtonBuilder,
-  ButtonInteraction,
-  ButtonStyle,
   EmbedBuilder,
   MessageFlags,
-  StringSelectMenuBuilder,
-  StringSelectMenuInteraction,
 } from "discord.js";
 import {
-  ButtonComponent,
   Discord,
-  SelectMenuComponent,
   Slash,
   SlashChoice,
   SlashGroup,
@@ -22,538 +14,168 @@ import {
 import {
   safeDeferReply,
   safeReply,
-  safeUpdate,
   sanitizeUserInput,
 } from "../functions/InteractionUtils.js";
 import { isSuperAdmin } from "./superadmin.command.js";
 import {
-  completeTodo,
-  createTodo,
-  countTodoSummary,
-  deleteTodo,
-  fetchTodoById,
-  listTodos,
-  updateTodo,
-  type ITodoItem,
-} from "../classes/Todo.js";
-import {
-  countSuggestions,
-  deleteSuggestion,
-  getSuggestionById,
-  listSuggestions,
-  type ISuggestionItem,
-} from "../classes/Suggestion.js";
+  addComment,
+  addLabels,
+  closeIssue,
+  createIssue,
+  getIssue,
+  getRepoDisplayName,
+  listIssues,
+  removeLabel,
+  reopenIssue,
+  updateIssue,
+  type IGithubIssue,
+} from "../services/GithubIssuesService.js";
 
-const MAX_LIST_ITEMS: number = 100;
-const MAX_TODO_DESCRIPTION: number = 3800;
-const MAX_SUGGESTION_OPTIONS: number = 25;
-const DEFAULT_TODO_CATEGORY = "Improvements";
-const TODO_CATEGORIES = ["New Features", "Improvements", "Defects", "Blocked", "Refactoring"] as const;
-const TODO_SIZES = ["XS", "S", "M", "L", "XL"] as const;
+const TODO_LABELS = ["New Feature", "Improvement", "Bug", "Blocked"] as const;
+const LIST_STATES = ["open", "closed", "all"] as const;
+const LIST_SORTS = ["created", "updated"] as const;
+const LIST_DIRECTIONS = ["asc", "desc"] as const;
 
-type TodoCategory = (typeof TODO_CATEGORIES)[number];
-type TodoSize = (typeof TODO_SIZES)[number];
-type TodoFilter = "all" | "completed" | "suggestions" | TodoCategory;
-type TodoListState = {
-  messageId: string;
-  filter: TodoFilter;
-  ownerId: string;
-  sizes: TodoSize[];
-};
+type TodoLabel = (typeof TODO_LABELS)[number];
+type ListState = (typeof LIST_STATES)[number];
+type ListSort = (typeof LIST_SORTS)[number];
+type ListDirection = (typeof LIST_DIRECTIONS)[number];
 
-const TODO_TAB_DEFINITIONS: Array<{ id: TodoFilter; label: string }> = [
-  { id: "all", label: "All Open" },
-  { id: "New Features", label: "New Features" },
-  { id: "Improvements", label: "Improvements" },
-  { id: "Defects", label: "Defects" },
-  { id: "Blocked", label: "Blocked" },
-  { id: "Refactoring", label: "Refactoring" },
-  { id: "suggestions", label: "Suggestions" },
-  { id: "completed", label: "Completed" },
-];
+const MAX_ISSUE_BODY = 4000;
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 25;
 
-const TODO_TAB_OPTIONS = TODO_TAB_DEFINITIONS.map((tab) => tab.label) as [
-  "All Open",
-  "New Features",
-  "Improvements",
-  "Defects",
-  "Blocked",
-  "Refactoring",
-  "Suggestions",
-  "Completed",
-];
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
 
-const TODO_TAB_LABEL_TO_FILTER: Record<(typeof TODO_TAB_OPTIONS)[number], TodoFilter> = {
-  "All Open": "all",
-  "New Features": "New Features",
-  Improvements: "Improvements",
-  Defects: "Defects",
-  Blocked: "Blocked",
-  Refactoring: "Refactoring",
-  Suggestions: "suggestions",
-  Completed: "completed",
-};
+function getGithubErrorMessage(error: any): string {
+  const status = error?.response?.status as number | undefined;
+  const message = error?.response?.data?.message as string | undefined;
+  if (status && message) {
+    return `GitHub error (${status}): ${message}`;
+  }
+  return "GitHub request failed. Check the GitHub App configuration.";
+}
 
-const latestTodoListByChannel = new Map<string, TodoListState>();
+function formatIssueLine(issue: IGithubIssue): string {
+  const labelText = issue.labels.length ? ` [${issue.labels.join(", ")}]` : "";
+  return `#${issue.number} ${issue.title}${labelText}`;
+}
 
-const serializeSizeToken = (sizes: TodoSize[]): string => (
-  sizes.length ? sizes.join(",") : "any"
-);
-
-const parseSizeToken = (token: string | undefined): TodoSize[] => {
-  if (!token || token === "any") return [];
-  const parts = token.split(",").map((part) => part.trim());
-  const valid = parts.filter((part): part is TodoSize => TODO_SIZES.includes(part as TodoSize));
-  return Array.from(new Set(valid));
-};
-
-function buildTodoListComponents(
-  active: TodoFilter,
-  ownerId: string,
-  sizes: TodoSize[],
-  items: ITodoItem[],
-): ActionRowBuilder<StringSelectMenuBuilder>[] {
-  const sizeToken: string = serializeSizeToken(sizes);
-  const filterOptions = TODO_TAB_DEFINITIONS.map((tab) => ({
-    label: tab.label,
-    value: tab.id,
-    default: tab.id === active,
-  }));
-  const filterSelect = new StringSelectMenuBuilder()
-    .setCustomId(`todo-tab:${active}:${ownerId}:${sizeToken}`)
-    .setPlaceholder("Select a view")
-    .setMinValues(1)
-    .setMaxValues(1)
-    .addOptions(filterOptions);
-
-  const rows: ActionRowBuilder<StringSelectMenuBuilder>[] = [
-    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(filterSelect),
+function buildIssueListEmbed(
+  issues: IGithubIssue[],
+  state: ListState,
+  label: TodoLabel | undefined,
+  page: number,
+  perPage: number,
+  sort: ListSort,
+  direction: ListDirection,
+  repo: string,
+): EmbedBuilder {
+  const title = `/todo list (${repo})`;
+  const summaryParts = [
+    `State: ${state}`,
+    label ? `Label: ${label}` : "Label: Any",
+    `Sort: ${sort} ${direction}`,
+    `Page: ${page}`,
   ];
 
-  if (active === "suggestions") {
-    return rows;
-  }
+  const description = issues.length
+    ? issues.map((issue) => `- ${formatIssueLine(issue)}`).join("\n")
+    : "No issues found for this filter.";
 
-  const sizeOptions = TODO_SIZES.map((s) => ({
-    label: s,
-    value: s,
-    default: sizes.includes(s),
-  }));
-  const sizeSelect = new StringSelectMenuBuilder()
-    .setCustomId(`todo-size:${active}:${ownerId}:${sizeToken}`)
-    .setPlaceholder("Filter by effort estimate")
-    .setMinValues(0)
-    .setMaxValues(TODO_SIZES.length)
-    .addOptions(sizeOptions);
-
-  rows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(sizeSelect));
-  const scopedItems = active === "all" || active === "completed"
-    ? items
-    : items.filter((item) => item.todoCategory === active);
-  const openItems = scopedItems.filter((item) => !item.isCompleted);
-  if (openItems.length) {
-    const options = openItems.slice(0, MAX_SUGGESTION_OPTIONS).map((item) => ({
-      label: `[#${item.todoId}] ${item.title}`.slice(0, 100),
-      value: String(item.todoId),
-      description: item.details ? item.details.slice(0, 95) : "Mark completed",
-    }));
-    const completeSelect = new StringSelectMenuBuilder()
-      .setCustomId(`todo-complete:${active}:${ownerId}:${sizeToken}`)
-      .setPlaceholder("Mark a TODO as completed")
-      .setMinValues(1)
-      .setMaxValues(1)
-      .addOptions(options);
-    rows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(completeSelect));
-  }
-  return rows;
-}
-
-function trackTodoListState(
-  channelId: string | null,
-  messageId: string | undefined,
-  filter: TodoFilter,
-  ownerId: string,
-  sizes: TodoSize[],
-): void {
-  if (!channelId || !messageId) return;
-  latestTodoListByChannel.set(channelId, { messageId, filter, ownerId, sizes });
-}
-
-function parseTodoListStateFromMessage(message: any): TodoListState | null {
-  const components = message?.components ?? [];
-  let activeFilter: TodoFilter | null = null;
-  let ownerId: string | null = null;
-  let sizes: TodoSize[] = [];
-
-  for (const row of components) {
-    const rowComponents = row?.components ?? [];
-    for (const component of rowComponents) {
-      const customId = component?.customId;
-      if (typeof customId !== "string") continue;
-      if (!customId.startsWith("todo-tab:") && !customId.startsWith("todo-size:")) {
-        continue;
-      }
-      const [, filterRaw, ownerRaw, sizeRaw] = customId.split(":");
-      if (!filterRaw || !ownerRaw) continue;
-      activeFilter = filterRaw as TodoFilter;
-      ownerId = ownerRaw;
-      sizes = parseSizeToken(sizeRaw);
-    }
-  }
-
-  if (!activeFilter || !ownerId || !message?.id) return null;
-  return { messageId: message.id, filter: activeFilter, ownerId, sizes };
-}
-
-async function findLatestTodoListState(
-  channel: any,
-): Promise<TodoListState | null> {
-  if (!channel?.messages?.fetch) return null;
-  const messages = await channel.messages.fetch({ limit: 50 });
-  for (const message of messages.values()) {
-    if (!message?.author?.bot) continue;
-    const state = parseTodoListStateFromMessage(message);
-    if (state) return state;
-  }
-  return null;
-}
-
-async function refreshLatestTodoList(
-  channelId: string | null,
-  client: Client,
-): Promise<void> {
-  if (!channelId) return;
-  try {
-    const channel = await client.channels.fetch(channelId);
-    if (!channel || !channel.isTextBased()) return;
-
-    let state = latestTodoListByChannel.get(channelId);
-    if (!state) {
-      const recovered = await findLatestTodoListState(channel);
-      if (!recovered) return;
-      latestTodoListByChannel.set(channelId, recovered);
-      state = recovered;
-    }
-
-    let message = await channel.messages.fetch(state.messageId).catch(() => null);
-    if (!message) {
-      const recovered = await findLatestTodoListState(channel);
-      if (!recovered) {
-        latestTodoListByChannel.delete(channelId);
-        return;
-      }
-      latestTodoListByChannel.set(channelId, recovered);
-      state = recovered;
-      message = await channel.messages.fetch(state.messageId).catch(() => null);
-      if (!message) {
-        latestTodoListByChannel.delete(channelId);
-        return;
-      }
-    }
-    const summary = await countTodoSummary();
-    const suggestionCount = await countSuggestions();
-    const footerText = buildAllTodoFooterText(summary, suggestionCount);
-
-    if (state.filter === "suggestions") {
-      const suggestions = await listSuggestions(MAX_SUGGESTION_OPTIONS);
-      const embed = buildSuggestionTabEmbed(suggestions, footerText);
-      await message.edit({
-        embeds: [embed],
-        components: buildTodoListComponents("suggestions", state.ownerId, state.sizes, []),
-      });
-      return;
-    }
-
-    const query = extractTodoQueryFromMessage(message);
-    const includeDetails = state.filter !== "all" && state.filter !== "completed";
-    const todos = state.filter === "completed"
-      ? (await listTodos(true, MAX_LIST_ITEMS)).filter((item) => item.isCompleted)
-      : await listTodos(false, MAX_LIST_ITEMS);
-    const filteredTodos = state.sizes.length
-      ? todos.filter((item) => item.todoSize && state.sizes.includes(item.todoSize as TodoSize))
-      : todos;
-    const filteredTodosByQuery = filterTodosByQuery(filteredTodos, query);
-    const response = buildTodoListEmbed(
-      filteredTodosByQuery,
-      state.filter === "completed",
-      footerText,
-      state.filter,
-      includeDetails,
-      query,
-    );
-
-    await message.edit({
-      ...response,
-      components: buildTodoListComponents(
-        state.filter,
-        state.ownerId,
-        state.sizes,
-        filteredTodosByQuery,
-      ),
-    });
-  } catch {
-    latestTodoListByChannel.delete(channelId);
-  }
-}
-function formatTodoLines(items: ITodoItem[], includeDetails: boolean): string[] {
-  const lines: string[] = [];
-  const labelLengths: number[] = items.map((item) => `[${item.todoId}]`.length);
-  const maxLabelLength: number = labelLengths.length
-    ? Math.max(...labelLengths)
-    : 0;
-  const sizeLabelMap: Record<string, string> = {
-    XS: "[XS]",
-    S: "[S]",
-    M: "[M]",
-    L: "[L]",
-    XL: "[XL]",
-  };
-  for (const item of items) {
-    const statusSuffix: string = item.isCompleted ? " (Completed)" : "";
-    const sizeLabel: string | null = item.todoSize
-      ? (sizeLabelMap[item.todoSize] ?? null)
-      : null;
-    const sizeSuffix: string = sizeLabel ? ` ${sizeLabel}` : "";
-    const labelRaw: string = `[${item.todoId}]`;
-    const labelPadded: string = labelRaw.padStart(maxLabelLength, " ");
-    const labelBlock: string = `\`${labelPadded}\``;
-    lines.push(`**${labelBlock}** ${item.title}${statusSuffix}${sizeSuffix}`);
-    if (includeDetails && item.details) {
-      lines.push(`> ${item.details}`);
-    }
-  }
-  return lines;
-}
-
-function buildCategoryTodoLines(
-  items: ITodoItem[],
-  category: TodoCategory,
-  includeDetails: boolean,
-): string[] {
-  const categoryItems = items.filter((item) => item.todoCategory === category);
-  if (!categoryItems.length) return [];
-  return [`**${category}**`, ...formatTodoLines(categoryItems, includeDetails), ""];
-}
-
-function buildSuggestionLines(items: ISuggestionItem[]): string[] {
-  if (!items.length) return ["No suggestions found."];
-  const lines: string[] = [];
-  for (const item of items) {
-    lines.push(`**[#${item.suggestionId}]** ${item.title}`);
-    if (item.details) {
-      lines.push(`> ${item.details}`);
-    }
-  }
-  return lines;
-}
-
-function buildSuggestionTabEmbed(items: ISuggestionItem[], footerText: string): EmbedBuilder {
-  return new EmbedBuilder()
-    .setTitle("Suggestions")
-    .setColor(0x3498db)
-    .setDescription(buildSuggestionLines(items).join("\n"))
-    .setFooter({ text: footerText });
-}
-
-function buildTodoActionEmbed(action: string, todo: ITodoItem): EmbedBuilder {
-  const title = `${action} TODO #${todo.todoId} (${todo.todoCategory})`;
-  const line = formatTodoLines([todo], false).join("\n");
-  const description = todo.details ? `${line}\n> ${todo.details}` : line;
   return new EmbedBuilder()
     .setTitle(title)
-    .setColor(0x3498db)
-    .setDescription(description);
-}
-
-function buildAllTodoFooterText(
-  summary: {
-    open: number;
-    completed: number;
-    openByCategory: { newFeatures: number; improvements: number; defects: number; blocked: number; refactoring: number };
-  },
-  suggestionCount: number,
-): string {
-  return [
-    `${summary.open} open TODOs`,
-    `${summary.openByCategory.newFeatures} New Features`,
-    `${summary.openByCategory.improvements} Improvements`,
-    `${summary.openByCategory.defects} Defects`,
-    `${summary.openByCategory.blocked} Blocked`,
-    `${summary.openByCategory.refactoring} Refactoring`,
-    `${suggestionCount} Suggestions`,
-    `${summary.completed} Completed`,
-  ].join(" | ");
-}
-
-function buildTodoDescription(
-  items: ITodoItem[],
-  includeCompleted: boolean,
-  filter: TodoFilter,
-  includeDetails: boolean,
-): string {
-  if (items.length === 0) {
-    return includeCompleted ? "No TODO items found." : "No open TODO items found.";
-  }
-
-  const lines: string[] = [];
-  if (filter === "all" || filter === "completed") {
-    for (const category of TODO_CATEGORIES) {
-      lines.push(...buildCategoryTodoLines(items, category, includeDetails));
-    }
-  } else if (filter !== "suggestions") {
-    lines.push(...buildCategoryTodoLines(items, filter, includeDetails));
-  }
-
-  if (lines.length === 0) {
-    return includeCompleted ? "No TODO items found." : "No open TODO items found.";
-  }
-  const trimmedLines: string[] = [];
-  let currentLength: number = 0;
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line: string = lines[i];
-    const nextLength: number = currentLength + line.length + 1;
-    if (nextLength > MAX_TODO_DESCRIPTION) {
-      const remaining: number = lines.length - i;
-      trimmedLines.push(`...and ${remaining} more`);
-      break;
-    }
-    trimmedLines.push(line);
-    currentLength = nextLength;
-  }
-
-  while (trimmedLines.length && trimmedLines[trimmedLines.length - 1] === "") {
-    trimmedLines.pop();
-  }
-
-  return trimmedLines.join("\n");
-}
-
-function normalizeTodoQuery(query: string | null | undefined): string {
-  return (query ?? "").trim().toLowerCase();
-}
-
-function filterTodosByQuery(items: ITodoItem[], query: string | null | undefined): ITodoItem[] {
-  const trimmedQuery = normalizeTodoQuery(query);
-  if (!trimmedQuery) return items;
-  return items.filter((item) => {
-    const title = item.title.toLowerCase();
-    const details = item.details?.toLowerCase() ?? "";
-    return title.includes(trimmedQuery) || details.includes(trimmedQuery);
-  });
-}
-
-function extractTodoQueryFromMessage(message: any): string | null {
-  const description = message?.embeds?.[0]?.description;
-  if (typeof description !== "string") return null;
-  const match = description.match(/^Query:\s*(.+?)(?:\n|$)/);
-  if (!match) return null;
-  const trimmedQuery = normalizeTodoQuery(match[1]);
-  return trimmedQuery ? trimmedQuery : null;
-}
-
-function buildTodoListEmbed(
-  items: ITodoItem[],
-  includeCompleted: boolean,
-  footerText: string,
-  filter: TodoFilter,
-  includeDetails: boolean,
-  query: string | null,
-): { embeds: EmbedBuilder[] } {
-  const description: string = buildTodoDescription(
-    items,
-    includeCompleted,
-    filter,
-    includeDetails,
-  );
-  const title: string = "Bot Development TODOs";
-  const queryLine: string = query ? `Query: ${query}\n` : "";
-  const fullDescription: string = queryLine
-    ? `${queryLine}\n${description}`
-    : description;
-
-  const embed: EmbedBuilder = new EmbedBuilder()
-    .setTitle(title)
-    .setColor(0x3498db)
-    .setDescription(fullDescription)
-    .setFooter({ text: footerText });
-
-  return { embeds: [embed] };
-}
-
-function formatSuggestionLine(item: ISuggestionItem): string {
-  const title = item.title;
-  return `- **#${item.suggestionId}** ${title}`;
-}
-
-function buildSuggestionListEmbed(
-  items: ISuggestionItem[],
-): { embeds: EmbedBuilder[] } {
-  if (items.length === 0) {
-    const emptyEmbed = new EmbedBuilder()
-      .setTitle("Suggestions")
-      .setDescription("No suggestions found.");
-    return { embeds: [emptyEmbed] };
-  }
-
-  const lines = items.map((item) => formatSuggestionLine(item));
-  const description = lines.join("\n");
-  const embed = new EmbedBuilder()
-    .setTitle("Suggestions")
     .setDescription(description)
-    .setFooter({ text: `${items.length} suggestion(s)` });
-
-  return { embeds: [embed] };
+    .setFooter({
+      text: `${summaryParts.join(" | ")} | Showing ${issues.length} of ${perPage}`,
+    });
 }
 
-function buildSuggestionDetailEmbed(item: ISuggestionItem): EmbedBuilder {
-  const createdBy = item.createdBy ? `<@${item.createdBy}>` : "Unknown";
-  const createdAt = item.createdAt.toISOString().split("T")[0] ?? "n/a";
-
+function buildIssueDetailEmbed(issue: IGithubIssue, repo: string): EmbedBuilder {
+  const body = issue.body ? issue.body.slice(0, MAX_ISSUE_BODY) : "";
   const embed = new EmbedBuilder()
-    .setTitle(`Suggestion #${item.suggestionId}`)
-    .setDescription(item.title)
+    .setTitle(`#${issue.number} ${issue.title}`)
+    .setURL(issue.htmlUrl)
+    .setDescription(body)
     .addFields(
-      { name: "Submitted By", value: createdBy, inline: true },
-      { name: "Submitted", value: createdAt, inline: true },
+      { name: "Repository", value: repo, inline: true },
+      { name: "State", value: issue.state, inline: true },
     );
 
-  if (item.details) {
-    embed.addFields({ name: "Details", value: item.details });
+  if (issue.labels.length) {
+    embed.addFields({ name: "Labels", value: issue.labels.join(", ") });
+  }
+
+  if (issue.author) {
+    embed.addFields({ name: "Author", value: issue.author, inline: true });
+  }
+
+  embed.addFields(
+    { name: "Created", value: issue.createdAt, inline: true },
+    { name: "Updated", value: issue.updatedAt, inline: true },
+  );
+
+  if (issue.closedAt) {
+    embed.addFields({ name: "Closed", value: issue.closedAt, inline: true });
   }
 
   return embed;
 }
 
 @Discord()
-@SlashGroup({ description: "Bot development TODOs (owner manages)", name: "todo" })
+@SlashGroup({ description: "GitHub issue controls", name: "todo" })
 @SlashGroup("todo")
 export class TodoCommand {
-  @Slash({ description: "List bot development TODOs", name: "list" })
+  @Slash({ description: "List GitHub issues", name: "list" })
   async list(
-    @SlashChoice(...TODO_TAB_OPTIONS)
+    @SlashChoice(...LIST_STATES)
     @SlashOption({
-      description: "Starting view (optional)",
-      name: "mode",
+      description: "Issue state",
+      name: "state",
       required: false,
       type: ApplicationCommandOptionType.String,
     })
-    mode: (typeof TODO_TAB_OPTIONS)[number] | undefined,
-    @SlashChoice(...TODO_SIZES)
+    state: ListState | undefined,
+    @SlashChoice(...TODO_LABELS)
     @SlashOption({
-      description: "Filter by effort size (optional)",
-      name: "size",
+      description: "Filter by label",
+      name: "label",
       required: false,
       type: ApplicationCommandOptionType.String,
     })
-    size: TodoSize | undefined,
+    label: TodoLabel | undefined,
+    @SlashChoice(...LIST_SORTS)
     @SlashOption({
-      description: "Text filter (matches title or details)",
-      name: "query",
+      description: "Sort order",
+      name: "sort",
       required: false,
       type: ApplicationCommandOptionType.String,
     })
-    query: string | undefined,
+    sort: ListSort | undefined,
+    @SlashChoice(...LIST_DIRECTIONS)
+    @SlashOption({
+      description: "Sort direction",
+      name: "direction",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    direction: ListDirection | undefined,
+    @SlashOption({
+      description: "Page number",
+      name: "page",
+      required: false,
+      type: ApplicationCommandOptionType.Integer,
+    })
+    page: number | undefined,
+    @SlashOption({
+      description: "Results per page",
+      name: "per_page",
+      required: false,
+      type: ApplicationCommandOptionType.Integer,
+    })
+    perPage: number | undefined,
     @SlashOption({
       description: "Show in chat (public) instead of ephemeral",
       name: "showinchat",
@@ -563,286 +185,123 @@ export class TodoCommand {
     showInChat: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    const isPublic: boolean = Boolean(showInChat);
+    const isPublic = Boolean(showInChat);
     await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
 
-    if (size && !TODO_SIZES.includes(size)) {
+    const resolvedPage = clampNumber(page ?? 1, 1, 100);
+    const resolvedPerPage = clampNumber(perPage ?? DEFAULT_PAGE_SIZE, 1, MAX_PAGE_SIZE);
+
+    let issues: IGithubIssue[];
+    try {
+      issues = await listIssues({
+        state: state ?? "open",
+        labels: label ? [label] : undefined,
+        sort: sort ?? "updated",
+        direction: direction ?? "desc",
+        page: resolvedPage,
+        perPage: resolvedPerPage,
+      });
+    } catch (err: any) {
       await safeReply(interaction, {
-        content: "Invalid size. Use XS, S, M, L, or XL.",
+        content: getGithubErrorMessage(err),
         flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
-    const summary = await countTodoSummary();
-    const suggestionCount = await countSuggestions();
-    const filter = mode ? TODO_TAB_LABEL_TO_FILTER[mode] : "all";
-    const footerText = buildAllTodoFooterText(summary, suggestionCount);
-
-    if (filter === "suggestions") {
-      const suggestions = await listSuggestions(MAX_SUGGESTION_OPTIONS);
-      const embed = buildSuggestionTabEmbed(suggestions, footerText);
-      const reply = await safeReply(interaction, {
-        embeds: [embed],
-        components: buildTodoListComponents("suggestions", interaction.user.id, size ? [size] : [], []),
-        flags: isPublic ? undefined : MessageFlags.Ephemeral,
-      });
-      if (isPublic) {
-        const replyMessage = reply ?? await interaction.fetchReply();
-        trackTodoListState(
-          interaction.channelId,
-          replyMessage?.id,
-          "suggestions",
-          interaction.user.id,
-          size ? [size] : [],
-        );
-      }
-      return;
-    }
-
-    const includeDetails = filter !== "all" && filter !== "completed";
-    const todos = filter === "completed"
-      ? (await listTodos(true, MAX_LIST_ITEMS)).filter((item) => item.isCompleted)
-      : await listTodos(false, MAX_LIST_ITEMS);
-    const filteredTodosBySize = size
-      ? todos.filter((item) => item.todoSize === size)
-      : todos;
-    const trimmedQuery = normalizeTodoQuery(
-      query ? sanitizeUserInput(query, { preserveNewlines: false }) : "",
-    );
-    const filteredTodos = filterTodosByQuery(filteredTodosBySize, trimmedQuery);
-    const response = buildTodoListEmbed(
-      filteredTodos,
-      filter === "completed",
-      footerText,
-      filter,
-      includeDetails,
-      trimmedQuery || null,
-    );
-    const reply = await safeReply(interaction, {
-      ...response,
-      components: buildTodoListComponents(filter, interaction.user.id, size ? [size] : [], filteredTodos),
-      flags: isPublic ? undefined : MessageFlags.Ephemeral,
-    });
-    if (isPublic) {
-      const replyMessage = reply ?? await interaction.fetchReply();
-      trackTodoListState(interaction.channelId, replyMessage?.id, filter, interaction.user.id, size ? [size] : []);
-    }
-  }
-
-  @Slash({ description: "Review user suggestions", name: "review-suggestions" })
-  async reviewSuggestions(interaction: CommandInteraction): Promise<void> {
-    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-
-    const ok = await isSuperAdmin(interaction);
-    if (!ok) return;
-
-    await this.renderSuggestionMenu(interaction);
-  }
-
-  @SelectMenuComponent({ id: /^todo-suggestion-select:\d+$/ })
-  async handleSuggestionSelect(interaction: StringSelectMenuInteraction): Promise<void> {
-    const [, ownerId] = interaction.customId.split(":");
-    if (interaction.user.id !== ownerId) {
-      await interaction.reply({
-        content: "This review prompt isn't for you.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const suggestionId = Number(interaction.values?.[0]);
-    if (!Number.isInteger(suggestionId) || suggestionId <= 0) {
-      await interaction.reply({
-        content: "Invalid selection.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const suggestion = await getSuggestionById(suggestionId);
-    if (!suggestion) {
-      await interaction.reply({
-        content: "That suggestion no longer exists.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const embed = buildSuggestionDetailEmbed(suggestion);
-    const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`todo-suggestion-accept:${ownerId}:${suggestionId}`)
-        .setLabel("Accept (Create TODO)")
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(`todo-suggestion-decline:${ownerId}:${suggestionId}`)
-        .setLabel("Decline (Delete)")
-        .setStyle(ButtonStyle.Danger),
+    const repo = getRepoDisplayName();
+    const embed = buildIssueListEmbed(
+      issues,
+      state ?? "open",
+      label,
+      resolvedPage,
+      resolvedPerPage,
+      sort ?? "updated",
+      direction ?? "desc",
+      repo,
     );
 
-    await interaction.update({
+    await safeReply(interaction, {
       embeds: [embed],
-      components: [buttons],
+      flags: isPublic ? undefined : MessageFlags.Ephemeral,
+      allowedMentions: { parse: [] },
     });
   }
 
-  @ButtonComponent({ id: /^todo-suggestion-accept:\d+:\d+$/ })
-  async handleSuggestionAccept(interaction: ButtonInteraction): Promise<void> {
-    const [, ownerId, suggestionIdRaw] = interaction.customId.split(":");
-    if (interaction.user.id !== ownerId) {
-      await interaction.reply({
-        content: "This review prompt isn't for you.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const ok = await isSuperAdmin(interaction as any);
-    if (!ok) return;
-
-    const suggestionId = Number(suggestionIdRaw);
-    if (!Number.isInteger(suggestionId) || suggestionId <= 0) {
-      await interaction.reply({
-        content: "Invalid suggestion id.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const suggestion = await getSuggestionById(suggestionId);
-    if (!suggestion) {
-      await interaction.reply({
-        content: "That suggestion no longer exists.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const todo = await createTodo(
-      suggestion.title,
-      suggestion.details ?? null,
-      DEFAULT_TODO_CATEGORY,
-      null,
-      suggestion.createdBy,
-    );
-    await deleteSuggestion(suggestionId);
-    await this.renderSuggestionMenu(interaction, {
-      content: `Accepted suggestion #${suggestionId} and created TODO #${todo.todoId}.`,
-    });
-    await refreshLatestTodoList(interaction.channelId, interaction.client);
-  }
-
-  @ButtonComponent({ id: /^todo-suggestion-decline:\d+:\d+$/ })
-  async handleSuggestionDecline(interaction: ButtonInteraction): Promise<void> {
-    const [, ownerId, suggestionIdRaw] = interaction.customId.split(":");
-    if (interaction.user.id !== ownerId) {
-      await interaction.reply({
-        content: "This review prompt isn't for you.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const ok = await isSuperAdmin(interaction as any);
-    if (!ok) return;
-
-    const suggestionId = Number(suggestionIdRaw);
-    if (!Number.isInteger(suggestionId) || suggestionId <= 0) {
-      await interaction.reply({
-        content: "Invalid suggestion id.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const deleted = await deleteSuggestion(suggestionId);
-    await this.renderSuggestionMenu(interaction, {
-      content: deleted
-        ? `Declined suggestion #${suggestionId}.`
-        : "That suggestion no longer exists.",
-    });
-  }
-
-  private async renderSuggestionMenu(
-    interaction: CommandInteraction | ButtonInteraction,
-    payload?: { content?: string },
-  ): Promise<void> {
-    const suggestions = await listSuggestions(MAX_SUGGESTION_OPTIONS);
-    const response = buildSuggestionListEmbed(suggestions);
-
-    if (!suggestions.length) {
-      await safeUpdate(interaction, {
-        ...response,
-        content: payload?.content ?? "No suggestions found.",
-        components: [],
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const select = new StringSelectMenuBuilder()
-      .setCustomId(`todo-suggestion-select:${interaction.user.id}`)
-      .setPlaceholder("Select a suggestion to review")
-      .addOptions(
-        suggestions.map((item) => ({
-          label: item.title.slice(0, 100),
-          value: String(item.suggestionId),
-          description: item.details ? item.details.slice(0, 95) : "No details",
-        })),
-      );
-
-    await safeUpdate(interaction, {
-      ...response,
-      content: payload?.content ?? undefined,
-      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
-      flags: MessageFlags.Ephemeral,
-    });
-  }
-
-  @Slash({ description: "Add a bot development TODO", name: "add" })
-  async add(
+  @Slash({ description: "View a GitHub issue", name: "view" })
+  async view(
     @SlashOption({
-      description: "Short TODO title",
+      description: "Issue number",
+      name: "number",
+      required: true,
+      type: ApplicationCommandOptionType.Integer,
+    })
+    number: number,
+    @SlashOption({
+      description: "Show in chat (public) instead of ephemeral",
+      name: "showinchat",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    showInChat: boolean | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    const isPublic = Boolean(showInChat);
+    await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
+
+    let issue: IGithubIssue | null;
+    try {
+      issue = await getIssue(number);
+    } catch (err: any) {
+      await safeReply(interaction, {
+        content: getGithubErrorMessage(err),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    if (!issue) {
+      await safeReply(interaction, {
+        content: `Issue #${number} was not found.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const embed = buildIssueDetailEmbed(issue, getRepoDisplayName());
+    await safeReply(interaction, {
+      embeds: [embed],
+      flags: isPublic ? undefined : MessageFlags.Ephemeral,
+      allowedMentions: { parse: [] },
+    });
+  }
+
+  @Slash({ description: "Create a GitHub issue", name: "create" })
+  async create(
+    @SlashOption({
+      description: "Issue title",
       name: "title",
       required: true,
       type: ApplicationCommandOptionType.String,
     })
     title: string,
-    @SlashChoice(...TODO_CATEGORIES)
     @SlashOption({
-      description: "TODO category",
-      name: "category",
-      required: true,
-      type: ApplicationCommandOptionType.String,
-    })
-    category: TodoCategory,
-    @SlashChoice(...TODO_SIZES)
-    @SlashOption({
-      description: "Effort size (XS/S/M/L/XL)",
-      name: "size",
-      required: true,
-      type: ApplicationCommandOptionType.String,
-    })
-    size: TodoSize,
-    @SlashOption({
-      description: "Optional details for the TODO",
-      name: "details",
+      description: "Issue body",
+      name: "body",
       required: false,
       type: ApplicationCommandOptionType.String,
     })
-    details: string | undefined,
+    body: string | undefined,
+    @SlashChoice(...TODO_LABELS)
     @SlashOption({
-      description: "Show in chat (public) instead of ephemeral",
-      name: "showinchat",
+      description: "Optional label",
+      name: "label",
       required: false,
-      type: ApplicationCommandOptionType.Boolean,
+      type: ApplicationCommandOptionType.String,
     })
-    showInChat: boolean | undefined,
+    label: TodoLabel | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    const isPublic: boolean = Boolean(showInChat);
-    await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const ok = await isSuperAdmin(interaction);
     if (!ok) return;
@@ -856,89 +315,70 @@ export class TodoCommand {
       return;
     }
 
-    if (size && !TODO_SIZES.includes(size)) {
+    const trimmedBody = body
+      ? sanitizeUserInput(body, { preserveNewlines: true })
+      : undefined;
+    const finalBody = trimmedBody
+      ? trimmedBody.slice(0, MAX_ISSUE_BODY)
+      : null;
+
+    let issue: IGithubIssue;
+    try {
+      issue = await createIssue({
+        title: trimmedTitle,
+        body: finalBody,
+        labels: label ? [label] : [],
+      });
+    } catch (err: any) {
       await safeReply(interaction, {
-        content: "Invalid size. Use XS, S, M, L, or XL.",
+        content: getGithubErrorMessage(err),
         flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
-    const trimmedDetails = details
-      ? sanitizeUserInput(details, { preserveNewlines: true })
-      : undefined;
-    const finalSize = size;
-    const todo = await createTodo(
-      trimmedTitle,
-      trimmedDetails ?? null,
-      category,
-      finalSize,
-      interaction.user.id,
-    );
+    const embed = buildIssueDetailEmbed(issue, getRepoDisplayName());
     await safeReply(interaction, {
-      embeds: [buildTodoActionEmbed("Added", todo)],
-      flags: isPublic ? undefined : MessageFlags.Ephemeral,
+      content: `Created issue #${issue.number}.`,
+      embeds: [embed],
+      flags: MessageFlags.Ephemeral,
+      allowedMentions: { parse: [] },
     });
-    await refreshLatestTodoList(interaction.channelId, interaction.client);
   }
 
-  @Slash({ description: "Edit an existing bot development TODO", name: "edit" })
+  @Slash({ description: "Edit a GitHub issue", name: "edit" })
   async edit(
     @SlashOption({
-      description: "TODO id",
-      name: "id",
+      description: "Issue number",
+      name: "number",
       required: true,
       type: ApplicationCommandOptionType.Integer,
     })
-    todoId: number,
+    number: number,
     @SlashOption({
-      description: "New title (optional)",
+      description: "New title",
       name: "title",
       required: false,
       type: ApplicationCommandOptionType.String,
     })
     title: string | undefined,
     @SlashOption({
-      description: "New details (optional, empty clears)",
-      name: "details",
+      description: "New body",
+      name: "body",
       required: false,
       type: ApplicationCommandOptionType.String,
     })
-    details: string | undefined,
-    @SlashChoice(...TODO_CATEGORIES)
-    @SlashOption({
-      description: "New category (optional)",
-      name: "category",
-      required: false,
-      type: ApplicationCommandOptionType.String,
-    })
-    category: TodoCategory | undefined,
-    @SlashChoice(...TODO_SIZES)
-    @SlashOption({
-      description: "New effort size (optional, empty clears)",
-      name: "size",
-      required: false,
-      type: ApplicationCommandOptionType.String,
-    })
-    size: TodoSize | undefined,
-    @SlashOption({
-      description: "Show in chat (public) instead of ephemeral",
-      name: "showinchat",
-      required: false,
-      type: ApplicationCommandOptionType.Boolean,
-    })
-    showInChat: boolean | undefined,
+    body: string | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    const isPublic: boolean = Boolean(showInChat);
-    await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const ok = await isSuperAdmin(interaction);
     if (!ok) return;
 
-    if (title === undefined && details === undefined && category === undefined && size === undefined) {
+    if (title === undefined && body === undefined) {
       await safeReply(interaction, {
-        content: "Provide a title, details, category, or size to update.",
+        content: "Provide a title or body to update.",
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -955,317 +395,248 @@ export class TodoCommand {
       return;
     }
 
-    if (size && !TODO_SIZES.includes(size)) {
-      await safeReply(interaction, {
-        content: "Invalid size. Use XS, S, M, L, or XL.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const trimmedDetails = details === undefined
+    const trimmedBody = body === undefined
       ? undefined
-      : sanitizeUserInput(details, { preserveNewlines: true });
-    const finalDetails = trimmedDetails === "" ? null : trimmedDetails;
-    const updated = await updateTodo(todoId, trimmedTitle, finalDetails, category, size);
-    const updatedTodo = updated ? await fetchTodoById(todoId) : null;
-    await safeReply(interaction, {
-      content: updatedTodo
-        ? undefined
-        : updated
-          ? `Updated TODO #${todoId}.`
-          : `TODO #${todoId} was not found.`,
-      embeds: updatedTodo ? [buildTodoActionEmbed("Updated", updatedTodo)] : undefined,
-      flags: isPublic ? undefined : MessageFlags.Ephemeral,
-    });
-    if (updated) {
-      await refreshLatestTodoList(interaction.channelId, interaction.client);
+      : sanitizeUserInput(body, { preserveNewlines: true });
+    const finalBody = trimmedBody === undefined
+      ? undefined
+      : trimmedBody
+        ? trimmedBody.slice(0, MAX_ISSUE_BODY)
+        : "";
+
+    let updated: IGithubIssue | null;
+    try {
+      updated = await updateIssue(number, {
+        title: trimmedTitle,
+        body: finalBody,
+      });
+    } catch (err: any) {
+      await safeReply(interaction, {
+        content: getGithubErrorMessage(err),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
     }
+
+    if (!updated) {
+      await safeReply(interaction, {
+        content: `Issue #${number} was not found.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const embed = buildIssueDetailEmbed(updated, getRepoDisplayName());
+    await safeReply(interaction, {
+      content: `Updated issue #${updated.number}.`,
+      embeds: [embed],
+      flags: MessageFlags.Ephemeral,
+      allowedMentions: { parse: [] },
+    });
   }
 
-  @Slash({ description: "Delete a bot development TODO", name: "delete" })
-  async delete(
+  @Slash({ description: "Close a GitHub issue", name: "close" })
+  async close(
     @SlashOption({
-      description: "TODO id",
-      name: "id",
+      description: "Issue number",
+      name: "number",
       required: true,
       type: ApplicationCommandOptionType.Integer,
     })
-    todoId: number,
-    @SlashOption({
-      description: "Show in chat (public) instead of ephemeral",
-      name: "showinchat",
-      required: false,
-      type: ApplicationCommandOptionType.Boolean,
-    })
-    showInChat: boolean | undefined,
+    number: number,
     interaction: CommandInteraction,
   ): Promise<void> {
-    const isPublic: boolean = Boolean(showInChat);
-    await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const ok = await isSuperAdmin(interaction);
     if (!ok) return;
 
-    const existing = await fetchTodoById(todoId);
-    const removed = await deleteTodo(todoId);
-    await safeReply(interaction, {
-      content: removed
-        ? existing
-          ? undefined
-          : `Deleted TODO #${todoId}.`
-        : `TODO #${todoId} was not found.`,
-      embeds: removed && existing ? [buildTodoActionEmbed("Deleted", existing)] : undefined,
-      flags: isPublic ? undefined : MessageFlags.Ephemeral,
-    });
-    if (removed) {
-      await refreshLatestTodoList(interaction.channelId, interaction.client);
+    let closed: IGithubIssue | null;
+    try {
+      closed = await closeIssue(number);
+    } catch (err: any) {
+      await safeReply(interaction, {
+        content: getGithubErrorMessage(err),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
     }
+    if (!closed) {
+      await safeReply(interaction, {
+        content: `Issue #${number} was not found.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await safeReply(interaction, {
+      content: `Closed issue #${number}.`,
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
-  @Slash({ description: "Mark a bot development TODO as completed", name: "complete" })
-  async complete(
+  @Slash({ description: "Reopen a GitHub issue", name: "reopen" })
+  async reopen(
     @SlashOption({
-      description: "TODO id",
-      name: "id",
+      description: "Issue number",
+      name: "number",
       required: true,
       type: ApplicationCommandOptionType.Integer,
     })
-    todoId: number,
-    @SlashOption({
-      description: "Show in chat (public) instead of ephemeral",
-      name: "showinchat",
-      required: false,
-      type: ApplicationCommandOptionType.Boolean,
-    })
-    showInChat: boolean | undefined,
+    number: number,
     interaction: CommandInteraction,
   ): Promise<void> {
-    const isPublic: boolean = Boolean(showInChat);
-    await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const ok = await isSuperAdmin(interaction);
     if (!ok) return;
 
-    const existing = await fetchTodoById(todoId);
-    const completed = await completeTodo(todoId, interaction.user.id);
+    let reopened: IGithubIssue | null;
+    try {
+      reopened = await reopenIssue(number);
+    } catch (err: any) {
+      await safeReply(interaction, {
+        content: getGithubErrorMessage(err),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    if (!reopened) {
+      await safeReply(interaction, {
+        content: `Issue #${number} was not found.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
     await safeReply(interaction, {
-      content: completed
-        ? existing
-          ? undefined
-          : `Marked TODO #${todoId} as completed.`
-        : `TODO #${todoId} was not found or already completed.`,
-      embeds: completed && existing
-        ? [buildTodoActionEmbed("Completed", existing)]
-        : undefined,
-      flags: isPublic ? undefined : MessageFlags.Ephemeral,
+      content: `Reopened issue #${number}.`,
+      flags: MessageFlags.Ephemeral,
     });
-    if (completed) {
-      await refreshLatestTodoList(interaction.channelId, interaction.client);
-    }
   }
 
-  @SelectMenuComponent({
-    id: /^todo-tab:(all|New Features|Improvements|Defects|Blocked|Refactoring|suggestions|completed):\d+:(?:any|[A-Z,]+)$/,
-  })
-  async handleTodoTab(interaction: StringSelectMenuInteraction): Promise<void> {
-    const [, , ownerId, sizeRaw] = interaction.customId.split(":");
-    if (interaction.user.id !== ownerId) {
-      await interaction.reply({
-        content: "This menu isn't for you.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
+  @Slash({ description: "Comment on a GitHub issue", name: "comment" })
+  async comment(
+    @SlashOption({
+      description: "Issue number",
+      name: "number",
+      required: true,
+      type: ApplicationCommandOptionType.Integer,
+    })
+    number: number,
+    @SlashOption({
+      description: "Comment body",
+      name: "body",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    body: string,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
-    const selectedFilter = interaction.values?.[0] as TodoFilter | undefined;
-    if (!selectedFilter) {
-      await interaction.reply({
-        content: "No filter selected.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const sizes = parseSizeToken(sizeRaw);
-    const query = extractTodoQueryFromMessage(interaction.message);
-    const summary = await countTodoSummary();
-    const suggestionCount = await countSuggestions();
-    const footerText = buildAllTodoFooterText(summary, suggestionCount);
-
-    if (selectedFilter === "suggestions") {
-      const suggestions = await listSuggestions(MAX_SUGGESTION_OPTIONS);
-      const embed = buildSuggestionTabEmbed(suggestions, footerText);
-      await safeUpdate(interaction, {
-        embeds: [embed],
-        components: buildTodoListComponents("suggestions", ownerId, sizes, []),
-      });
-      trackTodoListState(interaction.channelId, interaction.message?.id, "suggestions", ownerId, sizes);
-      return;
-    }
-
-    const includeDetails = selectedFilter !== "all" && selectedFilter !== "completed";
-    const todos = selectedFilter === "completed"
-      ? (await listTodos(true, MAX_LIST_ITEMS)).filter((item) => item.isCompleted)
-      : await listTodos(false, MAX_LIST_ITEMS);
-    const filteredTodos = sizes.length
-      ? todos.filter((item) => item.todoSize && sizes.includes(item.todoSize as TodoSize))
-      : todos;
-    const filteredTodosByQuery = filterTodosByQuery(filteredTodos, query);
-    const response = buildTodoListEmbed(
-      filteredTodosByQuery,
-      selectedFilter === "completed",
-      footerText,
-      selectedFilter,
-      includeDetails,
-      query,
-    );
-
-    await safeUpdate(interaction, {
-      ...response,
-      components: buildTodoListComponents(selectedFilter, ownerId, sizes, filteredTodosByQuery),
-    });
-    trackTodoListState(
-      interaction.channelId,
-      interaction.message?.id,
-      selectedFilter,
-      ownerId,
-      sizes,
-    );
-  }
-
-  @SelectMenuComponent({
-    id: /^todo-size:(all|New Features|Improvements|Defects|Blocked|Refactoring|suggestions|completed):\d+:(?:any|[A-Z,]+)$/,
-  })
-  async handleTodoSize(interaction: StringSelectMenuInteraction): Promise<void> {
-    const [, filterRaw, ownerId] = interaction.customId.split(":");
-    if (interaction.user.id !== ownerId) {
-      await interaction.reply({
-        content: "This menu isn't for you.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const selectedValues = interaction.values ?? [];
-    const sizes = Array.from(new Set(selectedValues.filter(
-      (value): value is TodoSize => TODO_SIZES.includes(value as TodoSize),
-    )));
-    const filter = filterRaw as TodoFilter;
-    const query = extractTodoQueryFromMessage(interaction.message);
-
-    const summary = await countTodoSummary();
-    const suggestionCount = await countSuggestions();
-    const footerText = buildAllTodoFooterText(summary, suggestionCount);
-
-    if (filter === "suggestions") {
-      const suggestions = await listSuggestions(MAX_SUGGESTION_OPTIONS);
-      const embed = buildSuggestionTabEmbed(suggestions, footerText);
-      await safeUpdate(interaction, {
-        embeds: [embed],
-        components: buildTodoListComponents("suggestions", ownerId, sizes, []),
-      });
-      trackTodoListState(interaction.channelId, interaction.message?.id, "suggestions", ownerId, sizes);
-      return;
-    }
-
-    const includeDetails = filter !== "all" && filter !== "completed";
-    const todos = filter === "completed"
-      ? (await listTodos(true, MAX_LIST_ITEMS)).filter((item) => item.isCompleted)
-      : await listTodos(false, MAX_LIST_ITEMS);
-    const filteredTodos = sizes.length
-      ? todos.filter((item) => item.todoSize && sizes.includes(item.todoSize as TodoSize))
-      : todos;
-    const filteredTodosByQuery = filterTodosByQuery(filteredTodos, query);
-    const response = buildTodoListEmbed(
-      filteredTodosByQuery,
-      filter === "completed",
-      footerText,
-      filter,
-      includeDetails,
-      query,
-    );
-
-    await safeUpdate(interaction, {
-      ...response,
-      components: buildTodoListComponents(filter, ownerId, sizes, filteredTodosByQuery),
-    });
-    trackTodoListState(interaction.channelId, interaction.message?.id, filter, ownerId, sizes);
-  }
-
-  @SelectMenuComponent({
-    id: /^todo-complete:(all|New Features|Improvements|Defects|Blocked|Refactoring|suggestions|completed):\d+:(?:any|[A-Z,]+)$/,
-  })
-  async handleTodoComplete(interaction: StringSelectMenuInteraction): Promise<void> {
-    const [, filterRaw, ownerId, sizeRaw] = interaction.customId.split(":");
-    if (interaction.user.id !== ownerId) {
-      await interaction.reply({
-        content: "This menu isn't for you.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const ok = await isSuperAdmin(interaction as any);
+    const ok = await isSuperAdmin(interaction);
     if (!ok) return;
 
-    const todoId = Number(interaction.values?.[0]);
-    if (!Number.isInteger(todoId) || todoId <= 0) {
-      await interaction.reply({
-        content: "Invalid TODO id.",
+    const trimmedBody = sanitizeUserInput(body, { preserveNewlines: true });
+    if (!trimmedBody) {
+      await safeReply(interaction, {
+        content: "Comment body cannot be empty.",
         flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
-    const completed = await completeTodo(todoId, interaction.user.id);
-    if (!completed) {
-      await interaction.reply({
-        content: `TODO #${todoId} was not found or already completed.`,
+    try {
+      await addComment(number, trimmedBody.slice(0, MAX_ISSUE_BODY));
+    } catch (err: any) {
+      await safeReply(interaction, {
+        content: getGithubErrorMessage(err),
         flags: MessageFlags.Ephemeral,
       });
       return;
     }
-
-    const sizes = parseSizeToken(sizeRaw);
-    const filter = filterRaw as TodoFilter;
-    const query = extractTodoQueryFromMessage(interaction.message);
-    const summary = await countTodoSummary();
-    const suggestionCount = await countSuggestions();
-    const footerText = buildAllTodoFooterText(summary, suggestionCount);
-
-    if (filter === "suggestions") {
-      const suggestions = await listSuggestions(MAX_SUGGESTION_OPTIONS);
-      const embed = buildSuggestionTabEmbed(suggestions, footerText);
-      await safeUpdate(interaction, {
-        embeds: [embed],
-        components: buildTodoListComponents("suggestions", ownerId, sizes, []),
-      });
-      trackTodoListState(interaction.channelId, interaction.message?.id, "suggestions", ownerId, sizes);
-      return;
-    }
-
-    const includeDetails = filter !== "all" && filter !== "completed";
-    const todos = filter === "completed"
-      ? (await listTodos(true, MAX_LIST_ITEMS)).filter((item) => item.isCompleted)
-      : await listTodos(false, MAX_LIST_ITEMS);
-    const filteredTodos = sizes.length
-      ? todos.filter((item) => item.todoSize && sizes.includes(item.todoSize as TodoSize))
-      : todos;
-    const filteredTodosByQuery = filterTodosByQuery(filteredTodos, query);
-    const response = buildTodoListEmbed(
-      filteredTodosByQuery,
-      filter === "completed",
-      footerText,
-      filter,
-      includeDetails,
-      query,
-    );
-
-    await safeUpdate(interaction, {
-      ...response,
-      components: buildTodoListComponents(filter, ownerId, sizes, filteredTodosByQuery),
+    await safeReply(interaction, {
+      content: `Added a comment to issue #${number}.`,
+      flags: MessageFlags.Ephemeral,
     });
-    trackTodoListState(interaction.channelId, interaction.message?.id, filter, ownerId, sizes);
+  }
+
+  @Slash({ description: "Add a label to a GitHub issue", name: "label-add" })
+  async labelAdd(
+    @SlashOption({
+      description: "Issue number",
+      name: "number",
+      required: true,
+      type: ApplicationCommandOptionType.Integer,
+    })
+    number: number,
+    @SlashChoice(...TODO_LABELS)
+    @SlashOption({
+      description: "Label to add",
+      name: "label",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    label: TodoLabel,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const ok = await isSuperAdmin(interaction);
+    if (!ok) return;
+
+    try {
+      await addLabels(number, [label]);
+    } catch (err: any) {
+      await safeReply(interaction, {
+        content: getGithubErrorMessage(err),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    await safeReply(interaction, {
+      content: `Added label ${label} to issue #${number}.`,
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  @Slash({ description: "Remove a label from a GitHub issue", name: "label-remove" })
+  async labelRemove(
+    @SlashOption({
+      description: "Issue number",
+      name: "number",
+      required: true,
+      type: ApplicationCommandOptionType.Integer,
+    })
+    number: number,
+    @SlashChoice(...TODO_LABELS)
+    @SlashOption({
+      description: "Label to remove",
+      name: "label",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    label: TodoLabel,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const ok = await isSuperAdmin(interaction);
+    if (!ok) return;
+
+    try {
+      await removeLabel(number, label);
+    } catch (err: any) {
+      await safeReply(interaction, {
+        content: getGithubErrorMessage(err),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    await safeReply(interaction, {
+      content: `Removed label ${label} from issue #${number}.`,
+      flags: MessageFlags.Ephemeral,
+    });
   }
 }

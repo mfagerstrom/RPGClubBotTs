@@ -275,14 +275,16 @@ const HELP_TOPICS: HelpTopic[] = [
   {
     id: "todo",
     label: "/todo",
-    summary: "Manage bot development TODO items (list is public; edits are owner only).",
+    summary: "Manage GitHub issues with the bot (list/view are public; edits are owner only).",
     syntax:
-      "Syntax: /todo add title:<string> [details:<string>] [showinchat:<boolean>] | " +
-      "/todo edit id:<int> [title:<string>] [details:<string>] [showinchat:<boolean>] | " +
-      "/todo delete id:<int> [showinchat:<boolean>] | /todo complete id:<int> " +
-      "[showinchat:<boolean>] | /todo list [mode:<string>] [size:<XS|S|M|L|XL>] " +
-      "[query:<string>] " +
-      "[showinchat:<boolean>] | /todo review-suggestions",
+      "Syntax: /todo list [state:<open|closed|all>] [label:<New Feature|Improvement|Bug|Blocked>] " +
+      "[sort:<created|updated>] [direction:<asc|desc>] [page:<int>] [per_page:<int>] " +
+      "[showinchat:<boolean>] | /todo view number:<int> [showinchat:<boolean>] | " +
+      "/todo create title:<string> [body:<string>] [label:<New Feature|Improvement|Bug|Blocked>] | " +
+      "/todo edit number:<int> [title:<string>] [body:<string>] | " +
+      "/todo close number:<int> | /todo reopen number:<int> | /todo comment number:<int> body:<string> | " +
+      "/todo label-add number:<int> label:<New Feature|Improvement|Bug|Blocked> | " +
+      "/todo label-remove number:<int> label:<New Feature|Improvement|Bug|Blocked>",
   },
   {
     id: "suggestion",
@@ -942,7 +944,7 @@ export function buildMainHelpResponse(): {
         `${formatCommandLine("mod", "Moderator tools.")}\n` +
         `${formatCommandLine("admin", "Admin tools.")}\n` +
         `${formatCommandLine("superadmin", "Server Owner tools.")}\n` +
-        `${formatCommandLine("todo", "Manage bot development TODO items.")}\n` +
+        `${formatCommandLine("todo", "Manage GitHub issues using the bot.")}\n` +
         `${formatCommandLine("publicreminder", "Schedule public reminders.")}\n` +
         `${formatCommandLine("thread", "Link threads to GameDB games.")}\n` +
         `${formatCommandLine("rss", "Manage RSS relays with filters.")}`,
