@@ -879,7 +879,8 @@ export class GameDb {
       const bodyParts: Array<{ content: string; accessory?: ButtonBuilder }> = [];
       bodyParts.push({ content: `**Description**\n${this.formatQuotedDescription(description)}` });
 
-      const padWidth = 14;
+      const labelCandidates: string[] = [];
+      let releasesByDate: Map<string, string[]> | null = null;
 
       if (releases.length > 0) {
         const sortedReleases = [...releases].sort((a, b) => {
@@ -888,7 +889,7 @@ export class GameDb {
           return aTime - bTime;
         });
 
-        const releasesByDate = new Map<string, string[]>();
+        const releaseMap = new Map<string, string[]>();
         sortedReleases.forEach((r) => {
           const platformName = (formatPlatformDisplayName(platformMap.get(r.platformId))
             ?? "Unknown Platform").trim();
@@ -897,37 +898,57 @@ export class GameDb {
           const releaseDate = r.releaseDate ? formatTableDate(r.releaseDate) : "TBD";
           const format = r.format ? `(${r.format}) ` : "";
           const platformLabel = `${platformName} ${regionSuffix}${format}`.trim();
-          const list = releasesByDate.get(releaseDate) ?? [];
+          const list = releaseMap.get(releaseDate) ?? [];
           list.push(platformLabel);
-          releasesByDate.set(releaseDate, list);
+          releaseMap.set(releaseDate, list);
         });
+        releasesByDate = releaseMap;
+      }
 
+      const hltbCache = await getHltbCacheByGameId(gameId);
+      const canImportHltb = isHltbImportEligible(game, Boolean(hltbCache));
+      const hltbLabels: string[] = [];
+
+      if (releasesByDate) {
+        labelCandidates.push(...releasesByDate.keys());
+      }
+      
+      if (hltbCache) {
+        if (hltbCache.main) hltbLabels.push("Main");
+        if (hltbCache.mainSides) hltbLabels.push("Main + Sides");
+        if (hltbCache.completionist) hltbLabels.push("Completionist");
+        if (hltbCache.singlePlayer) hltbLabels.push("Single-Player");
+        if (hltbCache.coOp) hltbLabels.push("Co-Op");
+        if (hltbCache.vs) hltbLabels.push("Vs.");
+      }
+
+      labelCandidates.push(...hltbLabels);
+      const padWidth = labelCandidates.reduce((max, label) => Math.max(max, label.length), 0) + 1;
+
+      if (releasesByDate) {
         const releaseField = Array.from(releasesByDate.entries())
           .map(([dateLabel, platformsForDate]) =>
-            `\n> **\`\` ${padCommandName(dateLabel, padWidth)}\`\`**  ` + 
+            `\n> **\`\` ${padCommandName(dateLabel, padWidth)}\`\`**  ` +
             platformsForDate.join(", "),
           )
           .join("");
         bodyParts.push({ content: `**Releases** ${releaseField}` });
       }
 
-      const hltbCache = await getHltbCacheByGameId(gameId);
-      const canImportHltb = isHltbImportEligible(game, Boolean(hltbCache));
-      
       if (hltbCache) {
         const hltbLines: string[] = [];
         if (hltbCache.main) 
-          hltbLines.push(`> **\`\` ${padCommandName('Main', padWidth)}\`\`**  ${hltbCache.main}`);
+          hltbLines.push(`> **\`\` ${padCommandName("Main", padWidth)}\`\`**  ${hltbCache.main}`);
         if (hltbCache.mainSides) 
-          hltbLines.push(`> **\`\` ${padCommandName('Main + Sides', padWidth)}\`\`**  ${hltbCache.mainSides}`);
+          hltbLines.push(`> **\`\` ${padCommandName("Main + Sides", padWidth)}\`\`**  ${hltbCache.mainSides}`);
         if (hltbCache.completionist) 
-          hltbLines.push(`> **\`\` ${padCommandName('Completionist', padWidth)}\`\`**  ${hltbCache.completionist}`);
+          hltbLines.push(`> **\`\` ${padCommandName("Completionist", padWidth)}\`\`**  ${hltbCache.completionist}`);
         if (hltbCache.singlePlayer) 
-          hltbLines.push(`> **\`\` ${padCommandName('Single-Player', padWidth)}\`\`**  ${hltbCache.singlePlayer}`);
+          hltbLines.push(`> **\`\` ${padCommandName("Single-Player", padWidth)}\`\`**  ${hltbCache.singlePlayer}`);
         if (hltbCache.coOp) 
-          hltbLines.push(`> **\`\` ${padCommandName('Co-Op', padWidth)}\`\`**  ${hltbCache.coOp}`);
+          hltbLines.push(`> **\`\` ${padCommandName("Co-Op", padWidth)}\`\`**  ${hltbCache.coOp}`);
         if (hltbCache.vs) 
-          hltbLines.push(`> **\`\` ${padCommandName('Vs.', padWidth)}\`\`**  ${hltbCache.vs}`);
+          hltbLines.push(`> **\`\` ${padCommandName("Vs.", padWidth)}\`\`**  ${hltbCache.vs}`);
         if (hltbLines.length) {
           bodyParts.push({ content: `**HowLongToBeat™**\n${hltbLines.join("\n")}` });
         }
