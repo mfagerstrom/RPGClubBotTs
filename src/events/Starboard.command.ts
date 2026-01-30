@@ -4,11 +4,11 @@ import type { ArgsOf, Client } from "discordx";
 import { Discord, On } from "discordx";
 import Starboard from "../classes/Starboard.js";
 import { formatTimestampWithDay } from "../utilities/DiscordLogUtils.js";
+import { QUOTABLES_CHANNEL_ID } from "../config/channels.js";
 
 const STAR_EMOJI = "⭐";
 const STAR_EMOJI_NAME = "star";
 const STAR_THRESHOLD = 3;
-const QUOTABLES_CHANNEL_ID = "621159662645149715";
 
 function isStarReaction(reaction: MessageReaction | PartialMessageReaction): boolean {
   const name = reaction.emoji?.name;

@@ -7,8 +7,7 @@ import {
   MessageFlags,
 } from "discord.js";
 import { countAvailableGameKeys, listAvailableGameKeys } from "../classes/GameKey.js";
-
-export const GIVEAWAY_HUB_CHANNEL_ID = "1461101188572254351";
+import { GIVEAWAY_HUB_CHANNEL_ID } from "../config/channels.js";
 const GIVEAWAY_HUB_SCAN_LIMIT = 50;
 
 export const KEYS_PAGE_SIZE = 20;

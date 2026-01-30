@@ -18,9 +18,7 @@ import {
 } from "../commands/profile.command.js";
 import Game, { type IGame } from "../classes/Game.js";
 import Member from "../classes/Member.js";
-
-const ANNOUNCEMENT_CHANNEL_ID = "360819470836695042";
-const BOT_DEV_CHANNEL_ID = "1466475139402170450";
+import { ANNOUNCEMENT_CHANNEL_ID, BOT_DEV_CHANNEL_ID } from "../config/channels.js";
 
 export async function saveCompletion(
   interaction: CommandInteraction | StringSelectMenuInteraction,

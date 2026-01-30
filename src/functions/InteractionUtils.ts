@@ -4,10 +4,9 @@ import type {
   InteractionDeferReplyOptions,
   RepliableInteraction,
 } from "discord.js";
+import { BOT_DEV_CHANNEL_ID } from "../config/channels.js";
 
 export type AnyRepliable = RepliableInteraction | CommandInteraction;
-
-const BOT_DEV_CHANNEL_ID = "1466475139402170450";
 
 type SanitizeOptions = {
   maxLength?: number;

@@ -2,8 +2,7 @@ import { EmbedBuilder, Role } from "discord.js";
 import type { ArgsOf, Client } from "discordx";
 import { Discord, On } from "discordx";
 import { formatTimestampWithDay } from "../utilities/DiscordLogUtils.js";
-
-const JOIN_LEAVE_LOG_CHANNEL_ID = "1138532206378242139";
+import { JOIN_LEAVE_LOG_CHANNEL_ID } from "../config/channels.js";
 
 async function resolveLogChannel(client: Client): Promise<any | null> {
   const channel = await client.channels.fetch(JOIN_LEAVE_LOG_CHANNEL_ID).catch(() => null);

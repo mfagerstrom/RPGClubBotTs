@@ -40,17 +40,16 @@ import Member from "../classes/Member.js";
 import { isAdmin } from "./admin.command.js";
 import {
   buildKeyListEmbed,
-  GIVEAWAY_HUB_CHANNEL_ID,
   getAvailableKeysPage,
   listAllAvailableKeys,
   refreshGiveawayHubMessage,
 } from "../services/GiveawayHubService.js";
+import { GIVEAWAY_HUB_CHANNEL_ID, GIVEAWAY_LOG_CHANNEL_ID } from "../config/channels.js";
 
 const MAX_TITLE_LENGTH = 200;
 const MAX_PLATFORM_LENGTH = 50;
 const MAX_KEY_LENGTH = 200;
 const MEMBER_ROLE_ID = "747520789003239530";
-const GIVEAWAY_LOG_CHANNEL_ID = "1439333324547035428";
 const GIVEAWAY_DONATE_MODAL_ID = "giveaway-donate-modal";
 const GIVEAWAY_REVOKE_MODAL_ID = "giveaway-revoke-modal";
 const GIVEAWAY_DONATE_TITLE_ID = "giveaway-donate-title";

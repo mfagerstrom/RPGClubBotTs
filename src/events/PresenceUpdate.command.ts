@@ -14,8 +14,8 @@ import Member from "../classes/Member.js";
 import PresencePromptOptOut, { normalizePresenceGameTitle } from "../classes/PresencePromptOptOut.js";
 import PresencePromptHistory from "../classes/PresencePromptHistory.js";
 import { igdbService } from "../services/IgdbService.js";
+import { PRESENCE_PROMPT_CHANNEL_ID } from "../config/channels.js";
 
-const PRESENCE_PROMPT_CHANNEL_ID = "1295063765154533397";
 const YES_PREFIX = "presence-np-yes";
 const NO_PREFIX = "presence-np-no";
 const OPT_OUT_GAME_PREFIX = "presence-np-optout-game";

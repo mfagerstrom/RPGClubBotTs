@@ -2,9 +2,7 @@ import { EmbedBuilder } from "discord.js";
 import type { ArgsOf, Client } from "discordx";
 import { Discord, On } from "discordx";
 import { formatTimestampWithDay } from "../utilities/DiscordLogUtils.js";
-
-const BAN_LOG_CHANNEL_ID = "1138532206378242139";
-const UNBAN_LOG_CHANNEL_ID = "428142514222923776";
+import { BAN_LOG_CHANNEL_ID, UNBAN_LOG_CHANNEL_ID } from "../config/channels.js";
 
 async function resolveLogChannel(client: Client, channelId: string): Promise<any | null> {
   const channel = await client.channels.fetch(channelId).catch(() => null);

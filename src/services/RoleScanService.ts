@@ -3,6 +3,7 @@ import { AttachmentBuilder, EmbedBuilder, type Client, type TextBasedChannel } f
 import oracledb from "oracledb";
 import { getOraclePool } from "../db/oracleClient.js";
 import Member, { type IMemberRecord } from "../classes/Member.js";
+import { DISCORD_LOG_CHANNEL_ID } from "../config/channels.js";
 
 const ROLE_IDS = {
   admin: process.env.ADMIN_ROLE_ID?.replace(/[<@&>]/g, "").trim() || null,
@@ -72,7 +73,7 @@ export async function memberScanTick(
   let successCount = 0;
   let failCount = 0;
   const throttle = opts?.throttleMs ?? 1000;
-  const logChannelId = opts?.logChannelId ?? "679499735757094950";
+  const logChannelId = opts?.logChannelId ?? DISCORD_LOG_CHANNEL_ID;
   let logChannel: TextBasedChannel | null = null;
 
   if (logChannelId) {

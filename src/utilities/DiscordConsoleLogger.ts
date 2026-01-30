@@ -1,6 +1,6 @@
 import { EmbedBuilder } from "discord.js";
 
-const LOG_CHANNEL_ID = "1439333324547035428";
+import { DISCORD_CONSOLE_LOG_CHANNEL_ID } from "../config/channels.js";
 const MAX_DESCRIPTION_LENGTH = 3900;
 const LEVEL_COLORS: Record<ConsoleLevel, number> = {
   log: 0x95a5a6,
@@ -45,7 +45,7 @@ async function ensureChannel(): Promise<any | null> {
 
   resolvingChannel = true;
   try {
-    const channel = await discordClient.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+    const channel = await discordClient.channels.fetch(DISCORD_CONSOLE_LOG_CHANNEL_ID).catch(() => null);
     if (channel && typeof (channel as any).send === "function") {
       logChannel = channel;
     }

@@ -2,9 +2,7 @@ import { EmbedBuilder, ChannelType, type ForumChannel, type TextChannel } from "
 import type { ArgsOf, Client } from "discordx";
 import { Discord, On } from "discordx";
 import { joinThreadIfTarget } from "../services/ForumThreadJoinService.js";
-
-const NOW_PLAYING_FORUM_ID: string = '1059875931356938240';
-const WHATCHA_PLAYING_CHANNEL_ID: string = '360819470836695042';
+import { NOW_PLAYING_FORUM_ID, WHATCHA_PLAYING_CHANNEL_ID } from "../config/channels.js";
 
 @Discord()
 export class ThreadCreated {

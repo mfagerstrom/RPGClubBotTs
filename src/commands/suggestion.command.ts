@@ -31,8 +31,8 @@ import {
   countSuggestions,
 } from "../classes/Suggestion.js";
 import { createIssue } from "../services/GithubIssuesService.js";
+import { BOT_DEV_CHANNEL_ID } from "../config/channels.js";
 
-const BOT_DEV_CHANNEL_ID = "1466475139402170450";
 const BOT_DEV_PING_USER_ID = "191938640413327360";
 const SUGGESTION_APPROVE_PREFIX = "suggestion-approve";
 const SUGGESTION_LABEL_SELECT_PREFIX = "suggestion-labels";

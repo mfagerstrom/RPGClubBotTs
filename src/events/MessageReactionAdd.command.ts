@@ -23,11 +23,11 @@ import { createIgdbSession, type IgdbSelectOption } from "../services/IgdbSelect
 import { igdbService, type IGDBGameDetails } from "../services/IgdbService.js";
 import { stripModalInput } from "../functions/InteractionUtils.js";
 import { notifyUnknownCompletionPlatform } from "../functions/CompletionHelpers.js";
+import { COMPLETION_REACTION_DEV_CHANNEL_ID } from "../config/channels.js";
 
 const PUSH_PIN_EMOJI = "📌";
 const PLUS_EMOJI = "➕";
 const PLUS_EMOJI_NAME = "heavy_plus_sign";
-const BOT_DEV_CHANNEL_ID = "549603388334014464";
 
 type CompletionReactionSession = {
   sessionId: string;
@@ -197,7 +197,7 @@ export class MessageReactionAdd {
 
       const row = buildCompletionTypeRow(sessionId);
       const titleRow = buildCompletionTitleRow(sessionId);
-      const targetChannel = await _client.channels.fetch(BOT_DEV_CHANNEL_ID).catch(() => null);
+      const targetChannel = await _client.channels.fetch(COMPLETION_REACTION_DEV_CHANNEL_ID).catch(() => null);
       if (!targetChannel || !("send" in targetChannel)) {
         await user.send({
           content: "Bot dev channel not found. Cannot start completion flow.",

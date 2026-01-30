@@ -5,8 +5,7 @@ import type {
   ThreadChannel,
 } from "discord.js";
 import { upsertThreadRecord } from "../classes/Thread.js";
-
-const NOW_PLAYING_FORUM_ID = "1059875931356938240";
+import { NOW_PLAYING_FORUM_ID } from "../config/channels.js";
 const DEFAULT_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 
 function isTargetForum(thread: AnyThreadChannel | ThreadChannel | null): boolean {

@@ -1,5 +1,9 @@
-export const GOTM_NOMINATION_CHANNEL_ID = "361717372970598401";
-export const NR_GOTM_NOMINATION_CHANNEL_ID = "1148682094936064010";
+import {
+  GOTM_NOMINATION_CHANNEL_ID,
+  NR_GOTM_NOMINATION_CHANNEL_ID,
+} from "./channels.js";
+
+export { GOTM_NOMINATION_CHANNEL_ID, NR_GOTM_NOMINATION_CHANNEL_ID };
 
 // Kept for reminder service and any bulk sends.
 export const NOMINATION_DISCUSSION_CHANNEL_IDS: string[] = [

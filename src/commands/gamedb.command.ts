@@ -65,9 +65,9 @@ import {
 import { notifyUnknownCompletionPlatform } from "../functions/CompletionHelpers.js";
 import { searchHltb } from "../scripts/SearchHltb.js";
 import { formatPlatformDisplayName } from "../functions/PlatformDisplay.js";
+import { NOW_PLAYING_FORUM_ID } from "../config/channels.js";
 
 const GAME_SEARCH_PAGE_SIZE = 25;
-const NOW_PLAYING_FORUM_ID = "1059875931356938240";
 const NOW_PLAYING_SIDEGAME_TAG_ID = "1059912719366635611";
 const COMPONENTS_V2_FLAG = 1 << 15;
 const GAME_SEARCH_SESSIONS = new Map<

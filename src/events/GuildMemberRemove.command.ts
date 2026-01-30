@@ -2,8 +2,7 @@ import { AuditLogEvent, EmbedBuilder } from "discord.js";
 import type { ArgsOf, Client } from "discordx";
 import { Discord, On } from "discordx";
 import { formatTimestampWithDay } from "../utilities/DiscordLogUtils.js";
-
-const JOIN_LEAVE_LOG_CHANNEL_ID = "1138532206378242139";
+import { JOIN_LEAVE_LOG_CHANNEL_ID } from "../config/channels.js";
 const KICK_LOG_WINDOW_MS = 30_000;
 const KICK_LOG_RETRY_COUNT = 3;
 const KICK_LOG_RETRY_DELAY_MS = 750;

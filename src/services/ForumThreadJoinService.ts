@@ -1,10 +1,11 @@
 import type { ForumChannel, ThreadChannel } from "discord.js";
 import { ChannelType } from "discord.js";
 import type { Client } from "discordx";
+import { LIVE_EVENT_FORUM_ID, NOW_PLAYING_FORUM_ID } from "../config/channels.js";
 
 const TARGET_FORUM_IDS: string[] = [
-  "1059875931356938240", // Now Playing forum
-  "1059887890991165490", // Live Event forum
+  NOW_PLAYING_FORUM_ID,
+  LIVE_EVENT_FORUM_ID,
 ];
 
 function isForumChannel(channel: unknown): channel is ForumChannel {

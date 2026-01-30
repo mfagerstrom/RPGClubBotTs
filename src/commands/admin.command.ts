@@ -23,6 +23,7 @@ import {
   safeUpdate,
   sanitizeUserInput,
 } from "../functions/InteractionUtils.js";
+import { ADMIN_CHANNEL_ID, NOW_PLAYING_FORUM_ID } from "../config/channels.js";
 import { bot } from "../RPGClub_GameDB.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
 import Gotm, {
@@ -551,9 +552,8 @@ export class Admin {
       const gotmPoll = buildPoll("GOTM", normalizedGotmAnswers);
       const nrPoll = buildPoll("NR-GOTM", normalizedNrAnswers);
 
-      const adminChannelId = "428142514222923776";
-      const adminChannel = adminChannelId
-        ? await interaction.client.channels.fetch(adminChannelId).catch(() => null)
+      const adminChannel = ADMIN_CHANNEL_ID
+        ? await interaction.client.channels.fetch(ADMIN_CHANNEL_ID).catch(() => null)
         : null;
 
       const messageContent = `GOTM:\n\`\`\`\n${gotmPoll}\n\`\`\`\nNR-GOTM:\n\`\`\`\n${nrPoll}\n\`\`\``;
@@ -1849,10 +1849,8 @@ function calculateNextVoteDate(): Date {
   return d;
 }
 
-const NOW_PLAYING_FORUM_ID = "1059875931356938240";
 const GOTM_FORUM_TAG_ID = "1059913568545415330";
 const NR_GOTM_FORUM_TAG_ID = "1148709881784832030";
-const ADMIN_CHANNEL_ID = "428142514222923776";
 const VOTING_TITLE_MAX_LEN = 38;
 
 type WizardAction = {
