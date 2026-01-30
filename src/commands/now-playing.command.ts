@@ -176,22 +176,21 @@ async function confirmDuplicateCompletion(
   const payload = {
     components: [container, row],
     flags: buildComponentsV2Flags(true),
-    fetchReply: true,
   };
 
   let message: Message | null = null;
   try {
     if (interaction.deferred || interaction.replied) {
       const reply = await interaction.followUp(payload as any);
-      message = reply as unknown as Message;
+      message = reply as Message;
     } else {
-      const reply = await interaction.reply(payload as any);
-      message = reply as unknown as Message;
+      const reply = await interaction.reply({ ...payload, withResponse: true } as any);
+      message = reply.resource?.message ?? null;
     }
   } catch {
     try {
       const reply = await interaction.followUp(payload as any);
-      message = reply as unknown as Message;
+      message = reply as Message;
     } catch {
       return false;
     }

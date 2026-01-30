@@ -665,6 +665,19 @@ export default class Member {
     if (platformId != null && (!Number.isInteger(platformId) || platformId <= 0)) {
       throw new Error("Invalid platform selection.");
     }
+    if (finalPlaytimeHours != null) {
+      if (!Number.isFinite(finalPlaytimeHours) || finalPlaytimeHours < 0) {
+        throw new Error("Playtime must be a non-negative number.");
+      }
+      const maxPlaytime = 999999.99;
+      if (finalPlaytimeHours > maxPlaytime) {
+        throw new Error(`Playtime must be ${maxPlaytime} hours or less.`);
+      }
+      const rounded = Math.round(finalPlaytimeHours * 100) / 100;
+      if (Math.abs(finalPlaytimeHours - rounded) > 0.000001) {
+        throw new Error("Playtime must have at most 2 decimal places.");
+      }
+    }
     const connection = await getOraclePool().getConnection();
     const normalizedNote = note?.trim();
     const noteValue = normalizedNote ? normalizedNote : null;

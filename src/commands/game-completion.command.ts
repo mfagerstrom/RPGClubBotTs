@@ -2009,22 +2009,21 @@ export class GameCompletionCommands {
         "Add another completion anyway?",
       components: [row],
       flags: MessageFlags.Ephemeral,
-      fetchReply: true,
     };
 
     let message: Message | null = null;
     try {
       if (interaction.deferred || interaction.replied) {
         const reply = await interaction.followUp(payload);
-        message = reply as unknown as Message;
+        message = reply as Message;
       } else {
-        const reply = await interaction.reply(payload);
-        message = reply as unknown as Message;
+        const reply = await interaction.reply({ ...payload, withResponse: true });
+        message = reply.resource?.message ?? null;
       }
     } catch {
       try {
         const reply = await interaction.followUp(payload);
-        message = reply as unknown as Message;
+        message = reply as Message;
       } catch {
         return false;
       }

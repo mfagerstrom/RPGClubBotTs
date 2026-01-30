@@ -20,6 +20,29 @@ import Game, { type IGame } from "../classes/Game.js";
 import Member from "../classes/Member.js";
 import { ANNOUNCEMENT_CHANNEL_ID, BOT_DEV_CHANNEL_ID } from "../config/channels.js";
 
+const MAX_PLAYTIME_HOURS = 999999.99;
+
+export function validateCompletionPlaytimeInput(
+  input: string,
+): { value: number | null; error: string | null } {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return { value: null, error: null };
+  }
+  const num = Number(trimmed);
+  if (!Number.isFinite(num) || num < 0) {
+    return { value: null, error: "Playtime must be a non-negative number." };
+  }
+  if (num > MAX_PLAYTIME_HOURS) {
+    return { value: null, error: `Playtime must be ${MAX_PLAYTIME_HOURS} hours or less.` };
+  }
+  const decimalPart = trimmed.split(".")[1];
+  if (decimalPart && decimalPart.length > 2) {
+    return { value: null, error: "Playtime must have at most 2 decimal places." };
+  }
+  return { value: num, error: null };
+}
+
 export async function saveCompletion(
   interaction: CommandInteraction | StringSelectMenuInteraction,
   userId: string,
@@ -214,22 +237,21 @@ export async function promptRemoveFromNowPlaying(
     content: `Remove **${gameTitle}** from your Now Playing list?`,
     components: [row],
     flags: MessageFlags.Ephemeral,
-    fetchReply: true,
   };
 
   let message: Message | null = null;
   try {
     if (interaction.deferred || interaction.replied) {
       const reply = await interaction.followUp(payload as any);
-      message = reply as unknown as Message;
+      message = reply as Message;
     } else {
-      const reply = await interaction.reply(payload as any);
-      message = reply as unknown as Message;
+      const reply = await interaction.reply({ ...payload, withResponse: true } as any);
+      message = reply.resource?.message ?? null;
     }
   } catch {
     try {
       const reply = await interaction.followUp(payload as any);
-      message = reply as unknown as Message;
+      message = reply as Message;
     } catch {
       return false;
     }

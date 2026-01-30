@@ -88,6 +88,10 @@ export default [
           selector: "Property[key.name='ephemeral'][value.value=true]",
           message: "Use 'flags: MessageFlags.Ephemeral' instead of 'ephemeral: true'.",
         },
+        {
+          selector: "Property[key.name='fetchReply']",
+          message: "Use 'withResponse: true' or fetch after replying instead of 'fetchReply'.",
+        },
       ],
     },
   },
