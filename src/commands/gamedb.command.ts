@@ -842,7 +842,7 @@ export class GameDb {
         if (hltbCache.coOp) hltbLines.push(`**Co-Op:** ${hltbCache.coOp}`);
         if (hltbCache.vs) hltbLines.push(`**Vs.:** ${hltbCache.vs}`);
         if (hltbLines.length) {
-          bodyParts.push(`**⏱️ HowLongToBeat™**\n${hltbLines.join("\n")}`);
+          bodyParts.push(`**HowLongToBeat™**\n${hltbLines.join("\n")}`);
         }
       }
 
