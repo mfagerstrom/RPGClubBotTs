@@ -38,6 +38,7 @@ import {
 import { createIssue } from "../services/GithubIssuesService.js";
 import { BOT_DEV_CHANNEL_ID, GAMEDB_UPDATES_CHANNEL_ID } from "../config/channels.js";
 import { BOT_DEV_PING_USER_ID } from "../config/users.js";
+import { COMPONENTS_V2_FLAG } from "../config/flags.js";
 
 const SUGGESTION_APPROVE_PREFIX = "suggestion-approve";
 const SUGGESTION_LABEL_SELECT_PREFIX = "suggestion-labels";
@@ -58,7 +59,6 @@ const SUGGESTION_REVIEW_PREFIX = "suggestion-review";
 const SUGGESTION_REJECT_MODAL_PREFIX = "suggestion-reject";
 const SUGGESTION_REJECT_REASON_ID = "suggestion-reject-reason";
 const SUGGESTION_REVIEW_TTL_MS = 15 * 60 * 1000;
-const COMPONENTS_V2_FLAG = 1 << 15;
 type SuggestionReviewSession = {
   userId: string;
   suggestionIds: number[];

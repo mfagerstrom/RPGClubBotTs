@@ -67,6 +67,7 @@ import {
   formatTableDate,
   parseCompletionDateInput,
 } from "../commands/profile.command.js";
+import { COMPONENTS_V2_FLAG } from "../config/flags.js";
 
 const MAX_NOW_PLAYING = 10;
 const MAX_NOW_PLAYING_NOTE_LEN = 500;
@@ -90,7 +91,6 @@ const NOW_PLAYING_COMPLETE_ANNOUNCE_SELECT_PREFIX = "np-complete-announce";
 const NOW_PLAYING_COMPLETE_NOTE_SELECT_PREFIX = "np-complete-note";
 const NOW_PLAYING_COMPLETE_DETAILS_PREFIX = "np-complete-details";
 const NOW_PLAYING_COMPLETE_PLATFORM_SELECT_PREFIX = "np-complete-platform";
-const COMPONENTS_V2_FLAG = 1 << 15;
 const NOW_PLAYING_GALLERY_MAX = 5;
 type NowPlayingAddSession = {
   userId: string;

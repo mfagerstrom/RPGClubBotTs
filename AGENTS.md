@@ -23,3 +23,4 @@ Whenever I report an error, assess and report if a custom lint rule would be use
 All channel ID constants belong in src/config/channels.ts.
 All user ID constants belong in src/config/users.ts.
 All tag ID constants belong in src/config/tags.ts.
+All message Flag ID constants belong in src/config/tags.ts.

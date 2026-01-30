@@ -48,6 +48,7 @@ import {
   type IGithubIssueComment,
   type IGithubIssue,
 } from "../services/GithubIssuesService.js";
+import { COMPONENTS_V2_FLAG } from "../config/flags.js";
 
 const TODO_LABELS = ["New Feature", "Improvement", "Bug", "Blocked"] as const;
 const LIST_STATES = ["open", "closed", "all"] as const;
@@ -91,7 +92,6 @@ const TODO_QUERY_MODAL_PREFIX = "todo-query-modal";
 const TODO_QUERY_INPUT_ID = "todo-query-input";
 const TODO_CREATE_TITLE_ID = "todo-create-title";
 const TODO_CREATE_BODY_ID = "todo-create-body";
-const COMPONENTS_V2_FLAG = 1 << 15;
 const TODO_PAYLOAD_TOKEN_MAX_LENGTH = 30;
 
 async function getSuggestionReviewCount(): Promise<number> {

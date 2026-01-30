@@ -16,8 +16,8 @@ import {
 import { SeparatorSpacingSize } from "discord-api-types/v10";
 import type { INominationEntry } from "../classes/Nomination.js";
 import Game from "../classes/Game.js";
+import { COMPONENTS_V2_FLAG } from "../config/flags.js";
 
-const COMPONENTS_V2_FLAG = 1 << 15;
 const MAX_THUMBNAILS = 10;
 const MAX_SECTIONS_PER_CONTAINER = 10;
 const MAX_REASON_LENGTH = 200;

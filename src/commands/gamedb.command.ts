@@ -75,10 +75,10 @@ import { searchHltb } from "../scripts/SearchHltb.js";
 import { formatPlatformDisplayName } from "../functions/PlatformDisplay.js";
 import { NOW_PLAYING_FORUM_ID } from "../config/channels.js";
 import { NOW_PLAYING_SIDEGAME_TAG_ID } from "../config/tags.js";
+import { COMPONENTS_V2_FLAG } from "../config/flags.js";
 import { padCommandName } from "./help.command.js";
 
 const GAME_SEARCH_PAGE_SIZE = 10;
-const COMPONENTS_V2_FLAG = 1 << 15;
 const MAX_COMPONENT_CUSTOM_ID_LENGTH = 100;
 const COMPLETION_WIZARD_SESSIONS = new Map<string, CompletionWizardSession>();
 
