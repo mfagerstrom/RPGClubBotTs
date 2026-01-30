@@ -6,6 +6,10 @@ import {
   ButtonStyle,
   ContainerBuilder,
   MessageFlags,
+  ModalBuilder,
+  ModalSubmitInteraction,
+  TextInputBuilder,
+  TextInputStyle,
   TextDisplayBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
@@ -13,6 +17,7 @@ import {
 import {
   ButtonComponent,
   Discord,
+  ModalComponent,
   SelectMenuComponent,
   Slash,
   SlashOption,
@@ -31,7 +36,7 @@ import {
   countSuggestions,
 } from "../classes/Suggestion.js";
 import { createIssue } from "../services/GithubIssuesService.js";
-import { BOT_DEV_CHANNEL_ID } from "../config/channels.js";
+import { BOT_DEV_CHANNEL_ID, GAMEDB_UPDATES_CHANNEL_ID } from "../config/channels.js";
 
 const BOT_DEV_PING_USER_ID = "191938640413327360";
 const SUGGESTION_APPROVE_PREFIX = "suggestion-approve";
@@ -50,6 +55,8 @@ type SuggestionDraft = {
 const SUGGESTION_DRAFT_TTL_MS = 10 * 60 * 1000;
 const suggestionDrafts = new Map<string, SuggestionDraft>();
 const SUGGESTION_REVIEW_PREFIX = "suggestion-review";
+const SUGGESTION_REJECT_MODAL_PREFIX = "suggestion-reject";
+const SUGGESTION_REJECT_REASON_ID = "suggestion-reject-reason";
 const SUGGESTION_REVIEW_TTL_MS = 15 * 60 * 1000;
 const COMPONENTS_V2_FLAG = 1 << 15;
 type SuggestionReviewSession = {
@@ -78,6 +85,38 @@ function parseSuggestionReviewActionId(
   }
   const [, action, sessionId] = parts;
   return action && sessionId ? { action, sessionId } : null;
+}
+
+function buildSuggestionRejectModalId(sessionId: string, suggestionId: number): string {
+  return `${SUGGESTION_REJECT_MODAL_PREFIX}:${sessionId}:${suggestionId}`;
+}
+
+function parseSuggestionRejectModalId(
+  customId: string,
+): { sessionId: string; suggestionId: number } | null {
+  const parts = customId.split(":");
+  if (parts.length !== 3 || parts[0] !== SUGGESTION_REJECT_MODAL_PREFIX) {
+    return null;
+  }
+  const suggestionId = Number(parts[2]);
+  if (!Number.isInteger(suggestionId) || suggestionId <= 0) {
+    return null;
+  }
+  return { sessionId: parts[1], suggestionId };
+}
+
+function buildSuggestionRejectModal(sessionId: string, suggestionId: number): ModalBuilder {
+  const reasonInput = new TextInputBuilder()
+    .setCustomId(SUGGESTION_REJECT_REASON_ID)
+    .setLabel("Reason for rejection")
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(true)
+    .setMaxLength(1000);
+
+  return new ModalBuilder()
+    .setCustomId(buildSuggestionRejectModalId(sessionId, suggestionId))
+    .setTitle("Reject Suggestion")
+    .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(reasonInput));
 }
 
 function createSuggestionReviewSession(
@@ -236,6 +275,26 @@ async function buildSuggestionReviewPayload(
   );
   const buttons = buildSuggestionReviewButtons(sessionId, hasSuggestion, hasNext);
   return { components: [container, ...buttons] };
+}
+
+function getSuggestionAuthorMention(
+  suggestion: Awaited<ReturnType<typeof getSuggestionById>>,
+): string {
+  return suggestion?.createdBy ? `<@${suggestion.createdBy}>` : "Unknown user";
+}
+
+async function sendSuggestionUpdateMessage(
+  interaction: CommandInteraction | ButtonInteraction | ModalSubmitInteraction,
+  content: string,
+): Promise<void> {
+  try {
+    const channel = await interaction.client.channels.fetch(GAMEDB_UPDATES_CHANNEL_ID);
+    if (channel && "send" in channel) {
+      await (channel as any).send({ content });
+    }
+  } catch {
+    // ignore notification failures
+  }
 }
 
 function buildSuggestionApproveId(suggestionId: number): string {
@@ -476,8 +535,9 @@ export class SuggestionCommand {
       ? suggestion.labels.split(",").map((label) => label.trim()).filter(Boolean)
       : [];
 
+    let issue;
     try {
-      await createIssue({
+      issue = await createIssue({
         title: suggestion.title,
         body,
         labels,
@@ -490,6 +550,12 @@ export class SuggestionCommand {
       });
       return;
     }
+
+    const authorMention = getSuggestionAuthorMention(suggestion);
+    await sendSuggestionUpdateMessage(
+      interaction,
+      `${authorMention} Your suggestion was accepted and logged as GitHub issue #${issue.number}: ${issue.htmlUrl}`,
+    );
 
     const approvedRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
@@ -576,8 +642,9 @@ export class SuggestionCommand {
         ? current.suggestion.labels.split(",").map((label) => label.trim()).filter(Boolean)
         : [];
 
+      let issue;
       try {
-        await createIssue({
+        issue = await createIssue({
           title: current.suggestion.title,
           body,
           labels,
@@ -590,6 +657,12 @@ export class SuggestionCommand {
         });
         return;
       }
+
+      const authorMention = getSuggestionAuthorMention(current.suggestion);
+      await sendSuggestionUpdateMessage(
+        interaction,
+        `${authorMention} Your suggestion was accepted and logged as GitHub issue #${issue.number}: ${issue.htmlUrl}`,
+      );
 
       session.suggestionIds.splice(session.index, 1);
       session.totalCount = Math.max(0, session.totalCount - 1);
@@ -614,9 +687,56 @@ export class SuggestionCommand {
         });
         return;
       }
+      await interaction
+        .showModal(buildSuggestionRejectModal(parsed.sessionId, current.suggestion.suggestionId))
+        .catch(() => {});
+    }
+  }
 
+  @ModalComponent({ id: /^suggestion-reject:.+:\d+$/ })
+  async submitSuggestionReject(interaction: ModalSubmitInteraction): Promise<void> {
+    const parsed = parseSuggestionRejectModalId(interaction.customId);
+    if (!parsed) {
+      await safeReply(interaction, {
+        content: "This rejection form expired.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const session = getSuggestionReviewSession(parsed.sessionId);
+    if (!session) {
+      await safeReply(interaction, {
+        content: "This suggestion review has expired. Run /suggestion-review again.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (session.userId !== interaction.user.id) {
+      await safeReply(interaction, {
+        content: "This review prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const rawReason = interaction.fields.getTextInputValue(SUGGESTION_REJECT_REASON_ID);
+    const reason = sanitizeUserInput(rawReason, { preserveNewlines: true });
+    if (!reason) {
+      await safeReply(interaction, {
+        content: "Rejection reason cannot be empty.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const suggestion = await getSuggestionById(parsed.suggestionId);
+    if (suggestion) {
       try {
-        await deleteSuggestion(current.suggestion.suggestionId);
+        await deleteSuggestion(parsed.suggestionId);
       } catch (err: any) {
         await safeReply(interaction, {
           content: err?.message ?? "Failed to reject suggestion.",
@@ -625,16 +745,36 @@ export class SuggestionCommand {
         return;
       }
 
-      session.suggestionIds.splice(session.index, 1);
-      session.totalCount = Math.max(0, session.totalCount - 1);
-      session.createdAt = Date.now();
-      suggestionReviewSessions.set(parsed.sessionId, session);
+      const authorMention = getSuggestionAuthorMention(suggestion);
+      await sendSuggestionUpdateMessage(
+        interaction,
+        `${authorMention} Your suggestion "${suggestion.title}" was not accepted. Reason: ${reason}`,
+      );
+    }
 
-      const payload = await buildSuggestionReviewPayload(parsed.sessionId, session);
-      await safeUpdate(interaction, {
-        ...payload,
-        flags: buildComponentsV2Flags(true),
-      });
+    const removeIndex = session.suggestionIds.indexOf(parsed.suggestionId);
+    if (removeIndex !== -1) {
+      session.suggestionIds.splice(removeIndex, 1);
+      if (session.index > removeIndex) {
+        session.index -= 1;
+      }
+      if (session.index >= session.suggestionIds.length) {
+        session.index = Math.max(0, session.suggestionIds.length - 1);
+      }
+      session.totalCount = Math.max(0, session.totalCount - 1);
+    }
+    session.createdAt = Date.now();
+    suggestionReviewSessions.set(parsed.sessionId, session);
+
+    const payload = await buildSuggestionReviewPayload(parsed.sessionId, session);
+    if (interaction.message) {
+      await interaction.message.edit({ components: payload.components }).catch(() => {});
+    }
+
+    try {
+      await interaction.deleteReply();
+    } catch {
+      // ignore
     }
   }
 
