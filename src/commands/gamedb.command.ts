@@ -822,7 +822,7 @@ export class GameDb {
       }
 
       const bodyParts: string[] = [];
-      bodyParts.push(`**Description**\n${description}`);
+      bodyParts.push(`**Description**\n${this.formatQuotedDescription(description)}`);
 
       const padWidth = 14;
 
@@ -940,6 +940,16 @@ export class GameDb {
     return chunks;
   }
 
+  private formatQuotedDescription(description: string): string {
+    if (!description.trim()) {
+      return "> No description available.";
+    }
+    return description
+      .split(/\r?\n/)
+      .map((line) => (line.trim().length ? `> ${line}` : ""))
+      .join("\n");
+  }
+
   private buildListFieldValue(lines: string[], maxLength: number): string {
     if (!lines.length) return "None";
     const output: string[] = [];
@@ -972,6 +982,7 @@ export class GameDb {
     hasThread: boolean,
     featuredVideoUrl: string | null,
     canImportHltb: boolean,
+    disableVideo = false,
   ): ActionRowBuilder<ButtonBuilder> {
     const addNowPlaying = new ButtonBuilder()
       .setCustomId(`gamedb-action:nowplaying:${gameId}`)
@@ -984,7 +995,8 @@ export class GameDb {
     const viewFeaturedVideo = new ButtonBuilder()
       .setCustomId(`gamedb-action:video:${gameId}`)
       .setLabel("View Featured Video")
-      .setStyle(ButtonStyle.Secondary);
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(disableVideo);
 
     const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       addNowPlaying,
@@ -1062,9 +1074,35 @@ export class GameDb {
         });
         return;
       }
-      await safeReply(interaction, {
+      let updatedMessage = false;
+      const profile = await this.buildGameProfile(gameId, interaction);
+      if (profile) {
+        const actionRow = this.buildGameProfileActionRow(
+          gameId,
+          profile.hasThread,
+          profile.featuredVideoUrl,
+          profile.canImportHltb,
+          true,
+        );
+        const existingComponents = interaction.message?.components ?? [];
+        const searchRows = getSearchRowsFromComponents(existingComponents);
+        try {
+          await interaction.update({
+            embeds: [],
+            files: profile.files,
+            components: [...profile.components, actionRow, ...searchRows],
+            flags: buildComponentsV2Flags(false),
+          });
+          updatedMessage = true;
+        } catch {
+          // fall through to deferUpdate
+        }
+      }
+      if (!updatedMessage) {
+        await interaction.deferUpdate().catch(() => {});
+      }
+      await interaction.followUp({
         content: `Warning: videos may contain spoilers. ${videoUrl}`,
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }
