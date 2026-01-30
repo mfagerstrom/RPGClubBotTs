@@ -76,7 +76,7 @@ import { formatPlatformDisplayName } from "../functions/PlatformDisplay.js";
 import { NOW_PLAYING_FORUM_ID } from "../config/channels.js";
 import { padCommandName } from "./help.command.js";
 
-const GAME_SEARCH_PAGE_SIZE = 25;
+const GAME_SEARCH_PAGE_SIZE = 10;
 const NOW_PLAYING_SIDEGAME_TAG_ID = "1059912719366635611";
 const COMPONENTS_V2_FLAG = 1 << 15;
 const MAX_COMPONENT_CUSTOM_ID_LENGTH = 100;
