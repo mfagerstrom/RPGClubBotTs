@@ -91,9 +91,8 @@ const TODO_QUERY_MODAL_PREFIX = "todo-query-modal";
 const TODO_QUERY_INPUT_ID = "todo-query-input";
 const TODO_CREATE_TITLE_ID = "todo-create-title";
 const TODO_CREATE_BODY_ID = "todo-create-body";
-const TODO_LIST_SESSION_TTL_MS = 30 * 60 * 1000;
-const TODO_CREATE_SESSION_TTL_MS = 10 * 60 * 1000;
 const COMPONENTS_V2_FLAG = 1 << 15;
+const TODO_PAYLOAD_TOKEN_MAX_LENGTH = 30;
 
 async function getSuggestionReviewCount(): Promise<number> {
   try {
@@ -116,25 +115,31 @@ type TodoListPayload = {
   isPublic: boolean;
 };
 
-type TodoListSession = {
-  payload: Omit<TodoListPayload, "page">;
-  createdAt: number;
-  channelId?: string;
-  messageId?: string;
-};
-
 type TodoCreateSession = {
   userId: string;
-  listSessionId: string;
+  payloadToken: string;
   page: number;
+  channelId: string;
+  messageId: string;
   title: string;
   body: string;
   labels: TodoLabel[];
-  createdAt: number;
 };
 
-const todoListSessions = new Map<string, TodoListSession>();
 const todoCreateSessions = new Map<string, TodoCreateSession>();
+
+const TODO_LABEL_CODE_MAP: Record<TodoLabel, string> = {
+  "New Feature": "N",
+  Improvement: "I",
+  Bug: "B",
+  Blocked: "K",
+};
+const TODO_LABEL_CODE_TO_LABEL: Record<string, TodoLabel> = {
+  N: "New Feature",
+  I: "Improvement",
+  B: "Bug",
+  K: "Blocked",
+};
 
 function buildComponentsV2Flags(isEphemeral: boolean): number {
   return (isEphemeral ? MessageFlags.Ephemeral : 0) | COMPONENTS_V2_FLAG;
@@ -142,6 +147,113 @@ function buildComponentsV2Flags(isEphemeral: boolean): number {
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function encodeTodoLabels(labels: TodoLabel[]): string {
+  return labels.map((label) => TODO_LABEL_CODE_MAP[label]).sort().join("");
+}
+
+function decodeTodoLabels(value: string): TodoLabel[] {
+  if (!value) return [];
+  return value
+    .split("")
+    .map((token) => TODO_LABEL_CODE_TO_LABEL[token])
+    .filter((label): label is TodoLabel => Boolean(label));
+}
+
+function decodeTodoQuery(encoded: string | undefined): string | undefined {
+  if (!encoded) return undefined;
+  try {
+    const decoded = Buffer.from(encoded, "base64url").toString("utf8");
+    return decoded.length ? decoded : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function encodeTodoQuery(query: string | undefined, maxLength: number): string {
+  if (!query) return "";
+  let trimmed = query;
+  let encoded = Buffer.from(trimmed, "utf8").toString("base64url");
+  if (encoded.length <= maxLength) return encoded;
+  for (let i = trimmed.length - 1; i >= 0; i -= 1) {
+    trimmed = trimmed.slice(0, i + 1);
+    encoded = Buffer.from(trimmed, "utf8").toString("base64url");
+    if (encoded.length <= maxLength) return encoded;
+  }
+  return "";
+}
+
+function buildTodoPayloadToken(
+  payload: Omit<TodoListPayload, "page">,
+  maxLength: number,
+): string {
+  const stateCode = payload.state === "open"
+    ? "o"
+    : payload.state === "closed"
+      ? "c"
+      : "a";
+  const sortCode = payload.sort === "created" ? "c" : "u";
+  const dirCode = payload.direction === "asc" ? "a" : "d";
+  const labelToken = encodeTodoLabels(payload.labels);
+  const base = [
+    `s${stateCode}`,
+    `o${sortCode}`,
+    `d${dirCode}`,
+    `p${payload.perPage}`,
+    `l${labelToken}`,
+    `b${payload.excludeBlocked ? "1" : "0"}`,
+    `u${payload.isPublic ? "1" : "0"}`,
+    "q",
+  ].join(";");
+  const maxQueryLength = Math.max(maxLength - base.length, 0);
+  const queryToken = encodeTodoQuery(payload.query, maxQueryLength);
+  return `${base}${queryToken}`;
+}
+
+function parseTodoPayloadToken(
+  token: string,
+): Omit<TodoListPayload, "page"> | null {
+  if (!token) return null;
+  const parts = token.split(";");
+  const map = new Map<string, string>();
+  parts.forEach((part) => {
+    if (!part) return;
+    const key = part.slice(0, 1);
+    const value = part.slice(1);
+    map.set(key, value);
+  });
+
+  const stateCode = map.get("s");
+  const sortCode = map.get("o");
+  const dirCode = map.get("d");
+  if (!stateCode || !sortCode || !dirCode) return null;
+  const perPage = Number(map.get("p"));
+  const labelToken = map.get("l") ?? "";
+  const excludeBlocked = map.get("b") === "1";
+  const isPublic = map.get("u") === "1";
+  const query = decodeTodoQuery(map.get("q"));
+
+  const state = stateCode === "o" ? "open" : stateCode === "c" ? "closed" : "all";
+  const sort = sortCode === "c" ? "created" : "updated";
+  const direction = dirCode === "a" ? "asc" : "desc";
+
+  if (!Number.isFinite(perPage) || perPage <= 0) return null;
+
+  const labels = decodeTodoLabels(labelToken);
+  const stateFilters = normalizeStateFilters(state === "all" ? ["open", "closed"] : [state]);
+
+  return {
+    perPage,
+    state,
+    stateFilters,
+    labels,
+    excludeBlocked,
+    query,
+    sort,
+    direction,
+    isPublic,
+  };
 }
 
 function parseTodoLabels(rawValue: string | undefined): {
@@ -353,106 +465,40 @@ function buildIssueCommentsText(comments: IGithubIssueComment[]): string {
   return lines.join("\n");
 }
 
-function createTodoListSession(payload: Omit<TodoListPayload, "page">): string {
-  const sessionId = `todo-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-  todoListSessions.set(sessionId, { payload, createdAt: Date.now() });
-  return sessionId;
+function buildTodoListCustomId(payloadToken: string, page: number): string {
+  return [TODO_LIST_ID_PREFIX, payloadToken, page].join(":");
 }
 
-function buildTodoListCustomId(sessionId: string, page: number): string {
-  return [TODO_LIST_ID_PREFIX, sessionId, page].join(":");
+function buildTodoListBackId(payloadToken: string, page: number): string {
+  return [TODO_LIST_BACK_ID_PREFIX, payloadToken, page].join(":");
 }
 
-function buildTodoListBackId(sessionId: string, page: number): string {
-  return [TODO_LIST_BACK_ID_PREFIX, sessionId, page].join(":");
+function buildTodoCreateButtonId(payloadToken: string, page: number): string {
+  return [TODO_CREATE_BUTTON_PREFIX, payloadToken, page].join(":");
 }
 
-function buildTodoCreateButtonId(sessionId: string, page: number): string {
-  return [TODO_CREATE_BUTTON_PREFIX, sessionId, page].join(":");
-}
-
-function buildTodoCreateModalId(sessionId: string, page: number): string {
-  return [TODO_CREATE_MODAL_PREFIX, sessionId, page].join(":");
-}
-
-function buildTodoCloseButtonId(sessionId: string, page: number): string {
-  return [TODO_CLOSE_BUTTON_PREFIX, sessionId, page].join(":");
-}
-
-function buildTodoCloseSelectId(sessionId: string, page: number): string {
-  return [TODO_CLOSE_SELECT_PREFIX, sessionId, page].join(":");
-}
-
-function buildTodoCloseCancelId(sessionId: string): string {
-  return [TODO_CLOSE_CANCEL_PREFIX, sessionId].join(":");
-}
-
-function buildTodoCommentButtonId(sessionId: string, page: number, issueNumber: number): string {
-  return [TODO_COMMENT_BUTTON_PREFIX, sessionId, page, issueNumber].join(":");
-}
-
-function buildTodoCommentModalId(sessionId: string, page: number, issueNumber: number): string {
-  return [TODO_COMMENT_MODAL_PREFIX, sessionId, page, issueNumber].join(":");
-}
-
-function buildTodoEditTitleButtonId(
-  sessionId: string,
+function buildTodoCreateModalId(
+  payloadToken: string,
   page: number,
-  issueNumber: number,
 ): string {
-  return [TODO_EDIT_TITLE_BUTTON_PREFIX, sessionId, page, issueNumber].join(":");
+  return [TODO_CREATE_MODAL_PREFIX, payloadToken, page].join(":");
 }
 
-function buildTodoEditTitleModalId(
-  sessionId: string,
+function buildTodoCloseButtonId(payloadToken: string, page: number): string {
+  return [TODO_CLOSE_BUTTON_PREFIX, payloadToken, page].join(":");
+}
+
+function buildTodoCloseSelectId(
+  payloadToken: string,
   page: number,
-  issueNumber: number,
+  channelId: string,
+  messageId: string,
 ): string {
-  return [TODO_EDIT_TITLE_MODAL_PREFIX, sessionId, page, issueNumber].join(":");
+  return [TODO_CLOSE_SELECT_PREFIX, payloadToken, page, channelId, messageId].join(":");
 }
 
-function buildTodoEditDescButtonId(
-  sessionId: string,
-  page: number,
-  issueNumber: number,
-): string {
-  return [TODO_EDIT_DESC_BUTTON_PREFIX, sessionId, page, issueNumber].join(":");
-}
-
-function buildTodoEditDescModalId(
-  sessionId: string,
-  page: number,
-  issueNumber: number,
-): string {
-  return [TODO_EDIT_DESC_MODAL_PREFIX, sessionId, page, issueNumber].join(":");
-}
-
-function buildTodoCloseViewId(sessionId: string, page: number, issueNumber: number): string {
-  return [TODO_CLOSE_VIEW_PREFIX, sessionId, page, issueNumber].join(":");
-}
-
-function buildTodoLabelEditButtonId(
-  sessionId: string,
-  page: number,
-  issueNumber: number,
-): string {
-  return [TODO_LABEL_EDIT_BUTTON_PREFIX, sessionId, page, issueNumber].join(":");
-}
-
-function buildTodoLabelEditSelectId(
-  sessionId: string,
-  page: number,
-  issueNumber: number,
-): string {
-  return [TODO_LABEL_EDIT_SELECT_PREFIX, sessionId, page, issueNumber].join(":");
-}
-
-function buildTodoQueryButtonId(sessionId: string, page: number): string {
-  return [TODO_QUERY_BUTTON_PREFIX, sessionId, page].join(":");
-}
-
-function buildTodoQueryModalId(sessionId: string, page: number): string {
-  return [TODO_QUERY_MODAL_PREFIX, sessionId, page].join(":");
+function buildTodoCloseCancelId(payloadToken: string, page: number): string {
+  return [TODO_CLOSE_CANCEL_PREFIX, payloadToken, page].join(":");
 }
 
 function buildTodoCreateLabelId(sessionId: string): string {
@@ -467,56 +513,159 @@ function buildTodoCreateCancelId(sessionId: string): string {
   return [TODO_CREATE_CANCEL_PREFIX, sessionId].join(":");
 }
 
-function buildTodoViewId(sessionId: string, page: number, issueNumber: number): string {
-  return [TODO_VIEW_ID_PREFIX, sessionId, page, issueNumber].join(":");
+function buildTodoCommentButtonId(payloadToken: string, page: number, issueNumber: number): string {
+  return [TODO_COMMENT_BUTTON_PREFIX, payloadToken, page, issueNumber].join(":");
 }
 
-function parseTodoListCustomId(id: string): { sessionId: string; page: number } | null {
+function buildTodoCommentModalId(
+  payloadToken: string,
+  page: number,
+  issueNumber: number,
+  channelId: string,
+  messageId: string,
+): string {
+  return [TODO_COMMENT_MODAL_PREFIX, payloadToken, page, issueNumber, channelId, messageId].join(":");
+}
+
+function buildTodoEditTitleButtonId(
+  payloadToken: string,
+  page: number,
+  issueNumber: number,
+): string {
+  return [TODO_EDIT_TITLE_BUTTON_PREFIX, payloadToken, page, issueNumber].join(":");
+}
+
+function buildTodoEditTitleModalId(
+  payloadToken: string,
+  page: number,
+  issueNumber: number,
+  channelId: string,
+  messageId: string,
+): string {
+  return [TODO_EDIT_TITLE_MODAL_PREFIX, payloadToken, page, issueNumber, channelId, messageId].join(":");
+}
+
+function buildTodoEditDescButtonId(
+  payloadToken: string,
+  page: number,
+  issueNumber: number,
+): string {
+  return [TODO_EDIT_DESC_BUTTON_PREFIX, payloadToken, page, issueNumber].join(":");
+}
+
+function buildTodoEditDescModalId(
+  payloadToken: string,
+  page: number,
+  issueNumber: number,
+  channelId: string,
+  messageId: string,
+): string {
+  return [TODO_EDIT_DESC_MODAL_PREFIX, payloadToken, page, issueNumber, channelId, messageId].join(":");
+}
+
+function buildTodoCloseViewId(payloadToken: string, page: number, issueNumber: number): string {
+  return [TODO_CLOSE_VIEW_PREFIX, payloadToken, page, issueNumber].join(":");
+}
+
+function buildTodoLabelEditButtonId(
+  payloadToken: string,
+  page: number,
+  issueNumber: number,
+): string {
+  return [TODO_LABEL_EDIT_BUTTON_PREFIX, payloadToken, page, issueNumber].join(":");
+}
+
+function buildTodoLabelEditSelectId(
+  payloadToken: string,
+  page: number,
+  issueNumber: number,
+  channelId: string,
+  messageId: string,
+): string {
+  return [TODO_LABEL_EDIT_SELECT_PREFIX, payloadToken, page, issueNumber, channelId, messageId].join(":");
+}
+
+function buildTodoQueryButtonId(payloadToken: string, page: number): string {
+  return [TODO_QUERY_BUTTON_PREFIX, payloadToken, page].join(":");
+}
+
+function buildTodoQueryModalId(
+  payloadToken: string,
+  page: number,
+  channelId: string,
+  messageId: string,
+): string {
+  return [TODO_QUERY_MODAL_PREFIX, payloadToken, page, channelId, messageId].join(":");
+}
+
+function buildTodoViewId(payloadToken: string, page: number, issueNumber: number): string {
+  return [TODO_VIEW_ID_PREFIX, payloadToken, page, issueNumber].join(":");
+}
+
+function parseTodoListCustomId(id: string): { payloadToken: string; page: number } | null {
   const parts = id.split(":");
   if (parts.length !== 3 || parts[0] !== TODO_LIST_ID_PREFIX) {
     return null;
   }
 
-  const sessionId = parts[1];
+  const payloadToken = parts[1];
   const page = Number(parts[2]);
-  if (!sessionId || !page) {
+  if (!payloadToken || !page) {
     return null;
   }
 
-  return { sessionId, page };
+  return { payloadToken, page };
 }
 
-function parseTodoListBackId(id: string): { sessionId: string; page: number } | null {
+function parseTodoListBackId(id: string): { payloadToken: string; page: number } | null {
   const parts = id.split(":");
   if (parts.length !== 3 || parts[0] !== TODO_LIST_BACK_ID_PREFIX) {
     return null;
   }
 
-  const sessionId = parts[1];
+  const payloadToken = parts[1];
   const page = Number(parts[2]);
-  if (!sessionId || !page) {
+  if (!payloadToken || !page) {
     return null;
   }
 
-  return { sessionId, page };
+  return { payloadToken, page };
 }
 
-function parseTodoCreateId(
+function parseTodoCreateButtonId(
   id: string,
   prefix: string,
-): { sessionId: string; page: number } | null {
+): { payloadToken: string; page: number } | null {
   const parts = id.split(":");
   if (parts.length !== 3 || parts[0] !== prefix) {
     return null;
   }
 
-  const sessionId = parts[1];
+  const payloadToken = parts[1];
   const page = Number(parts[2]);
-  if (!sessionId || !page) {
+  if (!payloadToken || !page) {
     return null;
   }
 
-  return { sessionId, page };
+  return { payloadToken, page };
+}
+
+function parseTodoCreateModalId(
+  id: string,
+  prefix: string,
+): { payloadToken: string; page: number } | null {
+  const parts = id.split(":");
+  if (parts.length !== 3 || parts[0] !== prefix) {
+    return null;
+  }
+
+  const payloadToken = parts[1];
+  const page = Number(parts[2]);
+  if (!payloadToken || !page) {
+    return null;
+  }
+
+  return { payloadToken, page };
 }
 
 function parseTodoCreateSessionId(
@@ -539,182 +688,208 @@ function parseTodoCreateSessionId(
 function parseTodoCloseId(
   id: string,
   prefix: string,
-): { sessionId: string; page: number } | null {
+): { payloadToken: string; page: number } | null {
   const parts = id.split(":");
   if (parts.length !== 3 || parts[0] !== prefix) {
     return null;
   }
 
-  const sessionId = parts[1];
+  const payloadToken = parts[1];
   const page = Number(parts[2]);
-  if (!sessionId || !page) {
+  if (!payloadToken || !page) {
     return null;
   }
 
-  return { sessionId, page };
+  return { payloadToken, page };
+}
+
+function parseTodoCloseSelectId(
+  id: string,
+  prefix: string,
+): { payloadToken: string; page: number; channelId: string; messageId: string } | null {
+  const parts = id.split(":");
+  if (parts.length !== 5 || parts[0] !== prefix) {
+    return null;
+  }
+
+  const payloadToken = parts[1];
+  const page = Number(parts[2]);
+  const channelId = parts[3];
+  const messageId = parts[4];
+  if (!payloadToken || !page || !channelId || !messageId) {
+    return null;
+  }
+
+  return { payloadToken, page, channelId, messageId };
 }
 
 function parseTodoViewId(
   id: string,
-): { sessionId: string; page: number; issueNumber: number } | null {
+): { payloadToken: string; page: number; issueNumber: number } | null {
   const parts = id.split(":");
   if (parts.length !== 4 || parts[0] !== TODO_VIEW_ID_PREFIX) {
     return null;
   }
 
-  const sessionId = parts[1];
+  const payloadToken = parts[1];
   const page = Number(parts[2]);
   const issueNumber = Number(parts[3]);
-  if (!sessionId || !page || !issueNumber) {
+  if (!payloadToken || !page || !issueNumber) {
     return null;
   }
 
-  return { sessionId, page, issueNumber };
+  return { payloadToken, page, issueNumber };
 }
 
-function parseTodoCommentId(
+function parseTodoIssueActionId(
   id: string,
   prefix: string,
-): { sessionId: string; page: number; issueNumber: number } | null {
+): { payloadToken: string; page: number; issueNumber: number } | null {
   const parts = id.split(":");
   if (parts.length !== 4 || parts[0] !== prefix) {
     return null;
   }
 
-  const sessionId = parts[1];
+  const payloadToken = parts[1];
   const page = Number(parts[2]);
   const issueNumber = Number(parts[3]);
-  if (!sessionId || !page || !issueNumber) {
+  if (!payloadToken || !page || !issueNumber) {
     return null;
   }
 
-  return { sessionId, page, issueNumber };
+  return { payloadToken, page, issueNumber };
+}
+
+function parseTodoIssueModalId(
+  id: string,
+  prefix: string,
+): { payloadToken: string; page: number; issueNumber: number; channelId: string; messageId: string } | null {
+  const parts = id.split(":");
+  if (parts.length !== 6 || parts[0] !== prefix) {
+    return null;
+  }
+
+  const payloadToken = parts[1];
+  const page = Number(parts[2]);
+  const issueNumber = Number(parts[3]);
+  const channelId = parts[4];
+  const messageId = parts[5];
+  if (!payloadToken || !page || !issueNumber || !channelId || !messageId) {
+    return null;
+  }
+
+  return { payloadToken, page, issueNumber, channelId, messageId };
 }
 
 function parseTodoCloseViewId(
   id: string,
   prefix: string,
-): { sessionId: string; page: number; issueNumber: number } | null {
-  const parts = id.split(":");
-  if (parts.length !== 4 || parts[0] !== prefix) {
-    return null;
-  }
-
-  const sessionId = parts[1];
-  const page = Number(parts[2]);
-  const issueNumber = Number(parts[3]);
-  if (!sessionId || !page || !issueNumber) {
-    return null;
-  }
-
-  return { sessionId, page, issueNumber };
+): { payloadToken: string; page: number; issueNumber: number } | null {
+  return parseTodoIssueActionId(id, prefix);
 }
 
 function parseTodoLabelEditId(
   id: string,
   prefix: string,
-): { sessionId: string; page: number; issueNumber: number } | null {
-  const parts = id.split(":");
-  if (parts.length !== 4 || parts[0] !== prefix) {
-    return null;
-  }
+): { payloadToken: string; page: number; issueNumber: number } | null {
+  return parseTodoIssueActionId(id, prefix);
+}
 
-  const sessionId = parts[1];
-  const page = Number(parts[2]);
-  const issueNumber = Number(parts[3]);
-  if (!sessionId || !page || !issueNumber) {
-    return null;
-  }
-
-  return { sessionId, page, issueNumber };
+function parseTodoLabelEditSelectId(
+  id: string,
+  prefix: string,
+): { payloadToken: string; page: number; issueNumber: number; channelId: string; messageId: string } | null {
+  return parseTodoIssueModalId(id, prefix);
 }
 
 function parseTodoQueryId(
   id: string,
   prefix: string,
-): { sessionId: string; page: number } | null {
+): { payloadToken: string; page: number } | null {
   const parts = id.split(":");
   if (parts.length !== 3 || parts[0] !== prefix) {
     return null;
   }
 
-  const sessionId = parts[1];
+  const payloadToken = parts[1];
   const page = Number(parts[2]);
-  if (!sessionId || !page) {
+  if (!payloadToken || !page) {
     return null;
   }
 
-  return { sessionId, page };
+  return { payloadToken, page };
+}
+
+function parseTodoQueryModalId(
+  id: string,
+  prefix: string,
+): { payloadToken: string; page: number; channelId: string; messageId: string } | null {
+  const parts = id.split(":");
+  if (parts.length !== 5 || parts[0] !== prefix) {
+    return null;
+  }
+
+  const payloadToken = parts[1];
+  const page = Number(parts[2]);
+  const channelId = parts[3];
+  const messageId = parts[4];
+  if (!payloadToken || !page || !channelId || !messageId) {
+    return null;
+  }
+
+  return { payloadToken, page, channelId, messageId };
 }
 
 function parseTodoFilterId(
   id: string,
   prefix: string,
-): { sessionId: string; page: number } | null {
+): { payloadToken: string; page: number } | null {
   const parts = id.split(":");
   if (parts.length !== 3 || parts[0] !== prefix) {
     return null;
   }
 
-  const sessionId = parts[1];
+  const payloadToken = parts[1];
   const page = Number(parts[2]);
-  if (!sessionId || !page) {
+  if (!payloadToken || !page) {
     return null;
   }
 
-  return { sessionId, page };
+  return { payloadToken, page };
 }
 
-function getTodoListSession(sessionId: string): TodoListSession | null {
-  const session = todoListSessions.get(sessionId);
-  if (!session) return null;
-  if (Date.now() - session.createdAt > TODO_LIST_SESSION_TTL_MS) {
-    todoListSessions.delete(sessionId);
-    return null;
-  }
-  return session;
-}
-
-function updateTodoListSessionMessage(
-  sessionId: string,
-  channelId: string | null,
-  messageId: string | null,
-): void {
-  if (!channelId || !messageId) return;
-  const session = getTodoListSession(sessionId);
-  if (!session) return;
-  session.channelId = channelId;
-  session.messageId = messageId;
-  session.createdAt = Date.now();
-  todoListSessions.set(sessionId, session);
-}
-
-function getTodoCreateSession(sessionId: string): TodoCreateSession | null {
-  const session = todoCreateSessions.get(sessionId);
-  if (!session) return null;
-  if (Date.now() - session.createdAt > TODO_CREATE_SESSION_TTL_MS) {
-    todoCreateSessions.delete(sessionId);
-    return null;
-  }
-  return session;
+async function replyTodoExpired(interaction: AnyRepliable): Promise<void> {
+  await safeReply(interaction, {
+    content: "This /todo view expired. Run /todo again to refresh it.",
+    flags: MessageFlags.Ephemeral,
+  });
 }
 
 function createTodoCreateSession(
   userId: string,
-  listSessionId: string,
+  payloadToken: string,
   page: number,
+  channelId: string,
+  messageId: string,
+  title: string,
+  body: string,
 ): string {
   const sessionId = `todo-create-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
   todoCreateSessions.set(sessionId, {
     userId,
-    listSessionId,
+    payloadToken,
     page,
-    title: "",
-    body: "",
+    channelId,
+    messageId,
+    title,
+    body,
     labels: [],
-    createdAt: Date.now(),
   });
   return sessionId;
+}
+
+function getTodoCreateSession(sessionId: string): TodoCreateSession | null {
+  return todoCreateSessions.get(sessionId) ?? null;
 }
 
 function buildTodoCreateFormComponents(
@@ -770,7 +945,7 @@ function buildIssueListComponents(
   issues: IGithubIssue[],
   totalIssues: number,
   payload: TodoListPayload,
-  sessionId: string,
+  payloadToken: string,
   suggestionCount: number,
 ): { components: Array<ContainerBuilder | ActionRowBuilder<any>> } {
   const totalPages = Math.max(1, Math.ceil(totalIssues / payload.perPage));
@@ -800,7 +975,7 @@ function buildIssueListComponents(
       );
       section.setButtonAccessory(
         new V2ButtonBuilder()
-          .setCustomId(buildTodoViewId(sessionId, payload.page, issue.number))
+          .setCustomId(buildTodoViewId(payloadToken, payload.page, issue.number))
           .setLabel("View")
           .setStyle(ButtonStyle.Primary),
       );
@@ -819,7 +994,7 @@ function buildIssueListComponents(
   );
 
   const labelSelect = new StringSelectMenuBuilder()
-    .setCustomId(`todo-filter-label:${sessionId}:${payload.page}`)
+    .setCustomId(`todo-filter-label:${payloadToken}:${payload.page}`)
     .setPlaceholder("Filter by Label...")
     .setMinValues(1)
     .setMaxValues(1)
@@ -845,17 +1020,17 @@ function buildIssueListComponents(
   const labelRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(labelSelect);
 
   const queryButton = new ButtonBuilder()
-    .setCustomId(buildTodoQueryButtonId(sessionId, payload.page))
+    .setCustomId(buildTodoQueryButtonId(payloadToken, payload.page))
     .setLabel(payload.query ? "Edit Query" : "Filter by Query")
     .setStyle(ButtonStyle.Secondary);
 
   const createButton = new ButtonBuilder()
-    .setCustomId(buildTodoCreateButtonId(sessionId, payload.page))
+    .setCustomId(buildTodoCreateButtonId(payloadToken, payload.page))
     .setLabel("Create Issue")
     .setStyle(ButtonStyle.Success);
 
   const closeButton = new ButtonBuilder()
-    .setCustomId(buildTodoCloseButtonId(sessionId, payload.page))
+    .setCustomId(buildTodoCloseButtonId(payloadToken, payload.page))
     .setLabel("Close Issue")
     .setStyle(ButtonStyle.Danger);
 
@@ -875,12 +1050,12 @@ function buildIssueListComponents(
     const nextDisabled = payload.page >= totalPages;
     actionRow.addComponents(
       new ButtonBuilder()
-        .setCustomId(buildTodoListCustomId(sessionId, payload.page - 1))
+        .setCustomId(buildTodoListCustomId(payloadToken, payload.page - 1))
         .setLabel("Prev Page")
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(prevDisabled),
       new ButtonBuilder()
-        .setCustomId(buildTodoListCustomId(sessionId, payload.page + 1))
+        .setCustomId(buildTodoListCustomId(payloadToken, payload.page + 1))
         .setLabel("Next Page")
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(nextDisabled),
@@ -894,7 +1069,7 @@ function buildIssueViewComponents(
   issue: IGithubIssue,
   comments: IGithubIssueComment[],
   payload: TodoListPayload,
-  sessionId: string,
+  payloadToken: string,
 ): { components: Array<ContainerBuilder | ActionRowBuilder<ButtonBuilder>> } {
   const container = new ContainerBuilder();
   const titleText = issue.htmlUrl
@@ -928,30 +1103,30 @@ function buildIssueViewComponents(
 
   const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(buildTodoCommentButtonId(sessionId, payload.page, issue.number))
+      .setCustomId(buildTodoCommentButtonId(payloadToken, payload.page, issue.number))
       .setLabel("Add Comment")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId(buildTodoEditTitleButtonId(sessionId, payload.page, issue.number))
+      .setCustomId(buildTodoEditTitleButtonId(payloadToken, payload.page, issue.number))
       .setLabel("Edit Title")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId(buildTodoEditDescButtonId(sessionId, payload.page, issue.number))
+      .setCustomId(buildTodoEditDescButtonId(payloadToken, payload.page, issue.number))
       .setLabel("Edit Description")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId(buildTodoLabelEditButtonId(sessionId, payload.page, issue.number))
+      .setCustomId(buildTodoLabelEditButtonId(payloadToken, payload.page, issue.number))
       .setLabel("Add/Edit Labels")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId(buildTodoCloseViewId(sessionId, payload.page, issue.number))
+      .setCustomId(buildTodoCloseViewId(payloadToken, payload.page, issue.number))
       .setLabel("Close Issue")
       .setStyle(ButtonStyle.Danger),
   );
 
   const backRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(buildTodoListBackId(sessionId, payload.page))
+      .setCustomId(buildTodoListBackId(payloadToken, payload.page))
       .setLabel("Back")
       .setStyle(ButtonStyle.Secondary),
   );
@@ -1086,7 +1261,8 @@ export class TodoCommand {
       direction: direction ?? "desc",
       isPublic,
     };
-    const sessionId = createTodoListSession({
+    const suggestionCount = await getSuggestionReviewCount();
+    const payloadToken = buildTodoPayloadToken({
       perPage: payload.perPage,
       state: payload.state,
       stateFilters: payload.stateFilters,
@@ -1096,13 +1272,12 @@ export class TodoCommand {
       sort: payload.sort,
       direction: payload.direction,
       isPublic: payload.isPublic,
-    });
-    const suggestionCount = await getSuggestionReviewCount();
+    }, TODO_PAYLOAD_TOKEN_MAX_LENGTH);
     const listPayload = buildIssueListComponents(
       pageIssues,
       totalIssues,
       payload,
-      sessionId,
+      payloadToken,
       suggestionCount,
     );
 
@@ -1112,34 +1287,27 @@ export class TodoCommand {
       allowedMentions: { parse: [] },
     });
 
-    try {
-      const reply = await interaction.fetchReply();
-      updateTodoListSessionMessage(sessionId, interaction.channelId, reply.id);
-    } catch {
-      // ignore fetch failures
-    }
   }
 
   private async buildTodoListPayload(
-    sessionId: string,
+    payloadToken: string,
     page: number,
   ): Promise<{
     components: Array<ContainerBuilder | ActionRowBuilder<any>>;
     payload: TodoListPayload;
     pageIssues: IGithubIssue[];
   } | null> {
-    const session = getTodoListSession(sessionId);
-    if (!session) return null;
+    const basePayload = parseTodoPayloadToken(payloadToken);
+    if (!basePayload) return null;
 
     const payload: TodoListPayload = {
-      ...session.payload,
+      ...basePayload,
       page,
     };
     const safePerPage = clampNumber(payload.perPage, 1, MAX_PAGE_SIZE);
     if (safePerPage !== payload.perPage) {
       payload.perPage = safePerPage;
-      session.payload.perPage = safePerPage;
-      todoListSessions.set(sessionId, session);
+      payload.perPage = safePerPage;
     }
 
     let issues: IGithubIssue[];
@@ -1170,113 +1338,41 @@ export class TodoCommand {
     const pageIssues = issues.slice(startIndex, startIndex + payload.perPage);
 
     const suggestionCount = await getSuggestionReviewCount();
+    const updatedPayload: TodoListPayload = { ...payload, page: safePage };
+    const nextToken = buildTodoPayloadToken({
+      perPage: updatedPayload.perPage,
+      state: updatedPayload.state,
+      stateFilters: updatedPayload.stateFilters,
+      labels: updatedPayload.labels,
+      excludeBlocked: updatedPayload.excludeBlocked,
+      query: updatedPayload.query,
+      sort: updatedPayload.sort,
+      direction: updatedPayload.direction,
+      isPublic: updatedPayload.isPublic,
+    }, TODO_PAYLOAD_TOKEN_MAX_LENGTH);
     const listPayload = buildIssueListComponents(
       pageIssues,
       totalIssues,
-      { ...payload, page: safePage },
-      sessionId,
+      updatedPayload,
+      nextToken,
       suggestionCount,
     );
 
     return {
       components: listPayload.components,
-      payload: { ...payload, page: safePage },
+      payload: updatedPayload,
       pageIssues,
     };
-  }
-
-  private async refreshExpiredList(interaction: AnyRepliable): Promise<void> {
-    const isOwner = interaction.guild?.ownerId === interaction.user?.id;
-    if (!isOwner) {
-      await safeReply(interaction, {
-        content: "This list view expired, so it has been refreshed. Please try again.",
-        flags: MessageFlags.Ephemeral,
-      });
-    }
-
-    try {
-      if ("message" in interaction && interaction.message?.deletable) {
-        await interaction.message.delete();
-      }
-    } catch {
-      // ignore delete failures
-    }
-
-    const channel = interaction.channel;
-    if (!channel || !("send" in channel)) {
-      return;
-    }
-
-    const payload: TodoListPayload = {
-      page: 1,
-      perPage: DEFAULT_PAGE_SIZE,
-      state: "open",
-      stateFilters: ["open"],
-      labels: [],
-      excludeBlocked: true,
-      query: undefined,
-      sort: "updated",
-      direction: "desc",
-      isPublic: true,
-    };
-
-    let issues: IGithubIssue[];
-    try {
-      issues = await listAllIssues({
-        state: payload.state,
-        sort: payload.sort,
-        direction: payload.direction,
-      });
-    } catch {
-      return;
-    }
-
-    const totalIssues = issues.length;
-    const totalPages = Math.max(1, Math.ceil(totalIssues / payload.perPage));
-    const safePage = clampNumber(payload.page, 1, totalPages);
-    const startIndex = (safePage - 1) * payload.perPage;
-    const pageIssues = issues.slice(startIndex, startIndex + payload.perPage);
-    const suggestionCount = await getSuggestionReviewCount();
-
-    const sessionId = createTodoListSession({
-      perPage: payload.perPage,
-      state: payload.state,
-      stateFilters: payload.stateFilters,
-      labels: payload.labels,
-      excludeBlocked: payload.excludeBlocked,
-      query: payload.query,
-      sort: payload.sort,
-      direction: payload.direction,
-      isPublic: payload.isPublic,
-    });
-
-    const listPayload = buildIssueListComponents(
-      pageIssues,
-      totalIssues,
-      { ...payload, page: safePage },
-      sessionId,
-      suggestionCount,
-    );
-
-    try {
-      const message = await (channel as any).send({
-        components: listPayload.components,
-        flags: buildComponentsV2Flags(false),
-      });
-      updateTodoListSessionMessage(sessionId, channel.id, message.id);
-    } catch {
-      // ignore send failures
-    }
   }
 
   private async renderTodoListPage(
     interaction: ButtonInteraction | StringSelectMenuInteraction,
-    sessionId: string,
+    payloadToken: string,
     page: number,
   ): Promise<void> {
-    const listPayload = await this.buildTodoListPayload(sessionId, page);
+    const listPayload = await this.buildTodoListPayload(payloadToken, page);
     if (!listPayload) {
-      await this.refreshExpiredList(interaction);
+      await replyTodoExpired(interaction);
       return;
     }
 
@@ -1284,35 +1380,33 @@ export class TodoCommand {
       components: listPayload.components,
       flags: buildComponentsV2Flags(!listPayload.payload.isPublic),
     });
-
-    updateTodoListSessionMessage(sessionId, interaction.channelId, interaction.message?.id ?? null);
   }
 
-  @ButtonComponent({ id: /^todo-list-page:todo-\d+-\d+:\d+$/ })
+  @ButtonComponent({ id: /^todo-list-page:[^:]+:\d+$/ })
   async listPage(interaction: ButtonInteraction): Promise<void> {
     const parsed = parseTodoListCustomId(interaction.customId);
     if (!parsed) {
-      await this.refreshExpiredList(interaction);
+      await replyTodoExpired(interaction);
       return;
     }
-    await this.renderTodoListPage(interaction, parsed.sessionId, parsed.page);
+    await this.renderTodoListPage(interaction, parsed.payloadToken, parsed.page);
   }
 
-  @ButtonComponent({ id: /^todo-list-back:todo-\d+-\d+:\d+$/ })
+  @ButtonComponent({ id: /^todo-list-back:[^:]+:\d+$/ })
   async listBack(interaction: ButtonInteraction): Promise<void> {
     const parsed = parseTodoListBackId(interaction.customId);
     if (!parsed) {
-      await this.refreshExpiredList(interaction);
+      await replyTodoExpired(interaction);
       return;
     }
-    await this.renderTodoListPage(interaction, parsed.sessionId, parsed.page);
+    await this.renderTodoListPage(interaction, parsed.payloadToken, parsed.page);
   }
 
-  @ButtonComponent({ id: /^todo-create-button:todo-\d+-\d+:\d+$/ })
+  @ButtonComponent({ id: /^todo-create-button:[^:]+:\d+$/ })
   async createFromList(interaction: ButtonInteraction): Promise<void> {
-    const parsed = parseTodoCreateId(interaction.customId, TODO_CREATE_BUTTON_PREFIX);
+    const parsed = parseTodoCreateButtonId(interaction.customId, TODO_CREATE_BUTTON_PREFIX);
     if (!parsed) {
-      await this.refreshExpiredList(interaction);
+      await replyTodoExpired(interaction);
       return;
     }
 
@@ -1320,7 +1414,7 @@ export class TodoCommand {
     if (!ok) return;
 
     const modal = new ModalBuilder()
-      .setCustomId(buildTodoCreateModalId(parsed.sessionId, parsed.page))
+      .setCustomId(buildTodoCreateModalId(parsed.payloadToken, parsed.page))
       .setTitle("Create GitHub Issue");
 
     const titleInput = new TextInputBuilder()
@@ -1345,20 +1439,20 @@ export class TodoCommand {
     await interaction.showModal(modal);
   }
 
-  @ButtonComponent({ id: /^todo-close-button:todo-\d+-\d+:\d+$/ })
+  @ButtonComponent({ id: /^todo-close-button:[^:]+:\d+$/ })
   async closeFromList(interaction: ButtonInteraction): Promise<void> {
     const parsed = parseTodoCloseId(interaction.customId, TODO_CLOSE_BUTTON_PREFIX);
     if (!parsed) {
-      await this.refreshExpiredList(interaction);
+      await replyTodoExpired(interaction);
       return;
     }
 
     const ok = await requireOwner(interaction);
     if (!ok) return;
 
-    const listPayload = await this.buildTodoListPayload(parsed.sessionId, parsed.page);
+    const listPayload = await this.buildTodoListPayload(parsed.payloadToken, parsed.page);
     if (!listPayload) {
-      await this.refreshExpiredList(interaction);
+      await replyTodoExpired(interaction);
       return;
     }
     if (listPayload.pageIssues.length === 0) {
@@ -1369,8 +1463,10 @@ export class TodoCommand {
       return;
     }
 
+    const channelId = interaction.channelId;
+    const messageId = interaction.message?.id ?? "";
     const select = new StringSelectMenuBuilder()
-      .setCustomId(buildTodoCloseSelectId(parsed.sessionId, parsed.page))
+      .setCustomId(buildTodoCloseSelectId(parsed.payloadToken, parsed.page, channelId, messageId))
       .setPlaceholder("Select an issue to close")
       .setMinValues(1)
       .setMaxValues(1)
@@ -1384,7 +1480,7 @@ export class TodoCommand {
 
     const cancelRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
-        .setCustomId(buildTodoCloseCancelId(parsed.sessionId))
+        .setCustomId(buildTodoCloseCancelId(parsed.payloadToken, parsed.page))
         .setLabel("Cancel")
         .setStyle(ButtonStyle.Secondary),
     );
@@ -1396,83 +1492,42 @@ export class TodoCommand {
     });
   }
 
-  @SelectMenuComponent({ id: /^todo-filter-label:todo-\d+-\d+:\d+$/ })
+  @SelectMenuComponent({ id: /^todo-filter-label:[^:]+:\d+$/ })
   async filterLabel(interaction: StringSelectMenuInteraction): Promise<void> {
     const parsed = parseTodoFilterId(interaction.customId, "todo-filter-label");
     if (!parsed) {
-      await this.refreshExpiredList(interaction);
+      await replyTodoExpired(interaction);
       return;
     }
 
-    const session = getTodoListSession(parsed.sessionId);
-    if (!session) {
-      await this.refreshExpiredList(interaction);
+    const basePayload = parseTodoPayloadToken(parsed.payloadToken);
+    if (!basePayload) {
+      await replyTodoExpired(interaction);
       return;
     }
 
     const selected = interaction.values[0];
     if (selected === "all") {
-      session.payload.labels = [];
-      session.payload.excludeBlocked = false;
+      basePayload.labels = [];
+      basePayload.excludeBlocked = false;
     } else if (selected === "not-blocked") {
-      session.payload.labels = [];
-      session.payload.excludeBlocked = true;
+      basePayload.labels = [];
+      basePayload.excludeBlocked = true;
     } else {
-      session.payload.labels = selected && TODO_LABELS.includes(selected as TodoLabel)
+      basePayload.labels = selected && TODO_LABELS.includes(selected as TodoLabel)
         ? [selected as TodoLabel]
         : [];
-      session.payload.excludeBlocked = false;
+      basePayload.excludeBlocked = false;
     }
-    session.createdAt = Date.now();
-    todoListSessions.set(parsed.sessionId, session);
 
-    await this.renderTodoListPage(interaction, parsed.sessionId, 1);
+    const nextToken = buildTodoPayloadToken(basePayload, TODO_PAYLOAD_TOKEN_MAX_LENGTH);
+    await this.renderTodoListPage(interaction, nextToken, 1);
   }
 
-  @SelectMenuComponent({ id: /^todo-create-label:todo-create-\d+-\d+$/ })
-  async setCreateLabels(interaction: StringSelectMenuInteraction): Promise<void> {
-    const parsed = parseTodoCreateSessionId(interaction.customId, TODO_CREATE_LABEL_PREFIX);
-    if (!parsed) {
-      await safeUpdate(interaction, {
-        components: [],
-        content: "This create form expired.",
-        flags: buildComponentsV2Flags(true),
-      });
-      return;
-    }
 
-    const session = getTodoCreateSession(parsed.sessionId);
-    if (!session || session.userId !== interaction.user.id) {
-      await safeUpdate(interaction, {
-        components: [],
-        content: "This create form expired.",
-        flags: buildComponentsV2Flags(true),
-      });
-      return;
-    }
-
-    const selectedValues = interaction.values;
-    if (selectedValues.includes("all")) {
-      session.labels = [];
-    } else {
-      session.labels = selectedValues
-        .map((value) => TODO_LABELS.find((label) => label === value))
-        .filter((label): label is TodoLabel => Boolean(label));
-    }
-
-    session.createdAt = Date.now();
-    todoCreateSessions.set(parsed.sessionId, session);
-
-    const formPayload = buildTodoCreateFormComponents(session, parsed.sessionId);
-    await safeUpdate(interaction, {
-      ...formPayload,
-      flags: buildComponentsV2Flags(true),
-    });
-  }
-
-  @SelectMenuComponent({ id: /^todo-close-select:todo-\d+-\d+:\d+$/ })
+  @SelectMenuComponent({ id: /^todo-close-select:[^:]+:\d+:\d+:\d+$/ })
   async closeSelect(interaction: StringSelectMenuInteraction): Promise<void> {
-    const parsed = parseTodoCloseId(interaction.customId, TODO_CLOSE_SELECT_PREFIX);
+    const parsed = parseTodoCloseSelectId(interaction.customId, TODO_CLOSE_SELECT_PREFIX);
     if (!parsed) {
       await safeUpdate(interaction, {
         components: [],
@@ -1522,32 +1577,21 @@ export class TodoCommand {
       return;
     }
 
-    const session = getTodoListSession(parsed.sessionId);
-    if (!session?.channelId || !session?.messageId) {
-      try {
-        await interaction.deleteReply();
-      } catch {
-        // ignore
-      }
-      return;
-    }
-
-    const listPayload = await this.buildTodoListPayload(parsed.sessionId, parsed.page);
+    const listPayload = await this.buildTodoListPayload(parsed.payloadToken, parsed.page);
     if (!listPayload) {
       return;
     }
 
-    const channel = interaction.client.channels.cache.get(session.channelId);
+    const channel = interaction.client.channels.cache.get(parsed.channelId);
     if (!channel || !("messages" in channel)) {
       return;
     }
 
     try {
-      const message = await (channel as any).messages.fetch(session.messageId);
+      const message = await (channel as any).messages.fetch(parsed.messageId);
       await message.edit({
         components: listPayload.components,
       });
-      updateTodoListSessionMessage(parsed.sessionId, session.channelId, session.messageId);
     } catch {
       // ignore refresh failures
     }
@@ -1559,9 +1603,9 @@ export class TodoCommand {
     }
   }
 
-  @SelectMenuComponent({ id: /^todo-label-edit-select:todo-\d+-\d+:\d+:\d+$/ })
+  @SelectMenuComponent({ id: /^todo-label-edit-select:[^:]+:\d+:\d+:\d+:\d+$/ })
   async labelEditSelect(interaction: StringSelectMenuInteraction): Promise<void> {
-    const parsed = parseTodoLabelEditId(interaction.customId, TODO_LABEL_EDIT_SELECT_PREFIX);
+    const parsed = parseTodoLabelEditSelectId(interaction.customId, TODO_LABEL_EDIT_SELECT_PREFIX);
     if (!parsed) {
       await safeReply(interaction, {
         content: "This label editor expired.",
@@ -1604,16 +1648,6 @@ export class TodoCommand {
       return;
     }
 
-    const session = getTodoListSession(parsed.sessionId);
-    if (!session?.channelId || !session?.messageId) {
-      try {
-        await interaction.deleteReply();
-      } catch {
-        // ignore
-      }
-      return;
-    }
-
     let issue: IGithubIssue | null;
     let comments: IGithubIssueComment[] = [];
     try {
@@ -1626,22 +1660,28 @@ export class TodoCommand {
     }
 
     if (issue) {
-      const payload: TodoListPayload = {
-        ...session.payload,
-        page: parsed.page,
-      };
+      const basePayload = parseTodoPayloadToken(parsed.payloadToken);
+      if (!basePayload) {
+        try {
+          await interaction.deleteReply();
+        } catch {
+          // ignore
+        }
+        return;
+      }
+      const payload: TodoListPayload = { ...basePayload, page: parsed.page };
 
       const viewPayload = buildIssueViewComponents(
         issue,
         comments,
         payload,
-        parsed.sessionId,
+        parsed.payloadToken,
       );
 
-      const channel = interaction.client.channels.cache.get(session.channelId);
+      const channel = interaction.client.channels.cache.get(parsed.channelId);
       if (channel && "messages" in channel) {
         try {
-          const message = await (channel as any).messages.fetch(session.messageId);
+          const message = await (channel as any).messages.fetch(parsed.messageId);
           await message.edit({
             components: viewPayload.components,
           });
@@ -1658,9 +1698,9 @@ export class TodoCommand {
     }
   }
 
-  @ButtonComponent({ id: /^todo-close-cancel:todo-\d+-\d+$/ })
+  @ButtonComponent({ id: /^todo-close-cancel:[^:]+:\d+$/ })
   async closeCancel(interaction: ButtonInteraction): Promise<void> {
-    const parsed = parseTodoCreateSessionId(interaction.customId, TODO_CLOSE_CANCEL_PREFIX);
+    const parsed = parseTodoCloseId(interaction.customId, TODO_CLOSE_CANCEL_PREFIX);
     if (!parsed) {
       await safeUpdate(interaction, {
         components: [],
@@ -1677,421 +1717,39 @@ export class TodoCommand {
     });
   }
 
-  @ModalComponent({ id: /^todo-create-modal:todo-\d+-\d+:\d+$/ })
-  async submitCreateModal(interaction: ModalSubmitInteraction): Promise<void> {
-    const parsed = parseTodoCreateId(interaction.customId, TODO_CREATE_MODAL_PREFIX);
+  @SelectMenuComponent({ id: /^todo-create-label:todo-create-\d+-\d+$/ })
+  async setCreateLabels(interaction: StringSelectMenuInteraction): Promise<void> {
+    const parsed = parseTodoCreateSessionId(interaction.customId, TODO_CREATE_LABEL_PREFIX);
     if (!parsed) {
-      await safeReply(interaction, {
+      await safeUpdate(interaction, {
+        components: [],
         content: "This create form expired.",
-        flags: MessageFlags.Ephemeral,
+        flags: buildComponentsV2Flags(true),
       });
       return;
     }
 
-    const ok = await requireModeratorOrAdminOrOwner(interaction);
-    if (!ok) return;
-
-    const rawTitle = interaction.fields.getTextInputValue(TODO_CREATE_TITLE_ID);
-    const rawBody = interaction.fields.getTextInputValue(TODO_CREATE_BODY_ID);
-    const trimmedTitle = sanitizeTodoText(rawTitle, false);
-    if (!trimmedTitle) {
-      await safeReply(interaction, {
-        content: "Title cannot be empty.",
-        flags: MessageFlags.Ephemeral,
+    const session = getTodoCreateSession(parsed.sessionId);
+    if (!session || session.userId !== interaction.user.id) {
+      await safeUpdate(interaction, {
+        components: [],
+        content: "This create form expired.",
+        flags: buildComponentsV2Flags(true),
       });
       return;
     }
 
-    const trimmedBody = rawBody
-      ? sanitizeTodoText(rawBody, true)
-      : "";
-    if (!trimmedBody) {
-      await safeReply(interaction, {
-        content: "Description cannot be empty.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
+    const selectedValues = interaction.values;
+    session.labels = selectedValues
+      .map((value) => TODO_LABELS.find((label) => label === value))
+      .filter((label): label is TodoLabel => Boolean(label));
+    todoCreateSessions.set(parsed.sessionId, session);
 
-    const createSessionId = createTodoCreateSession(
-      interaction.user.id,
-      parsed.sessionId,
-      parsed.page,
-    );
-    const session = getTodoCreateSession(createSessionId);
-    if (!session) {
-      await safeReply(interaction, {
-        content: "Unable to start issue creation.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    session.title = trimmedTitle;
-    session.body = trimmedBody.slice(0, MAX_ISSUE_BODY);
-    session.createdAt = Date.now();
-    todoCreateSessions.set(createSessionId, session);
-
-    const formPayload = buildTodoCreateFormComponents(session, createSessionId);
-    await safeReply(interaction, {
+    const formPayload = buildTodoCreateFormComponents(session, parsed.sessionId);
+    await safeUpdate(interaction, {
       ...formPayload,
       flags: buildComponentsV2Flags(true),
     });
-  }
-
-  @ModalComponent({ id: /^todo-comment-modal:todo-\d+-\d+:\d+:\d+$/ })
-  async submitCommentModal(interaction: ModalSubmitInteraction): Promise<void> {
-    const parsed = parseTodoCommentId(interaction.customId, TODO_COMMENT_MODAL_PREFIX);
-    if (!parsed) {
-      await safeReply(interaction, {
-        content: "This comment form expired.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-
-    const rawComment = interaction.fields.getTextInputValue(TODO_COMMENT_INPUT_ID);
-    const trimmedComment = sanitizeTodoText(rawComment, true);
-    if (!trimmedComment) {
-      await safeReply(interaction, {
-        content: "Comment cannot be empty.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const prefixedComment = `${interaction.user.username}: ${trimmedComment}`.slice(
-      0,
-      MAX_ISSUE_BODY,
-    );
-
-    try {
-      await addComment(parsed.issueNumber, prefixedComment);
-    } catch (err: any) {
-      await safeReply(interaction, {
-        content: getGithubErrorMessage(err),
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const session = getTodoListSession(parsed.sessionId);
-    if (!session?.channelId || !session?.messageId) {
-      try {
-        await interaction.deleteReply();
-      } catch {
-        // ignore
-      }
-      return;
-    }
-
-    let issue: IGithubIssue | null;
-    let comments: IGithubIssueComment[] = [];
-    try {
-      issue = await getIssue(parsed.issueNumber);
-      if (issue) {
-        comments = await listIssueComments(parsed.issueNumber);
-      }
-    } catch {
-      issue = null;
-    }
-
-    if (!issue) {
-      try {
-        await interaction.deleteReply();
-      } catch {
-        // ignore
-      }
-      return;
-    }
-
-    const payload: TodoListPayload = {
-      ...session.payload,
-      page: parsed.page,
-    };
-
-    const viewPayload = buildIssueViewComponents(
-      issue,
-      comments,
-      payload,
-      parsed.sessionId,
-    );
-
-    const channel = interaction.client.channels.cache.get(session.channelId);
-    if (!channel || !("messages" in channel)) {
-      try {
-        await interaction.deleteReply();
-      } catch {
-        // ignore
-      }
-      return;
-    }
-
-    try {
-      const message = await (channel as any).messages.fetch(session.messageId);
-      await message.edit({
-        components: viewPayload.components,
-      });
-    } catch {
-      // ignore refresh failures
-    }
-
-    try {
-      await interaction.deleteReply();
-    } catch {
-      // ignore
-    }
-  }
-
-  @ModalComponent({ id: /^todo-edit-title-modal:todo-\d+-\d+:\d+:\d+$/ })
-  async submitEditTitleModal(interaction: ModalSubmitInteraction): Promise<void> {
-    const parsed = parseTodoCommentId(interaction.customId, TODO_EDIT_TITLE_MODAL_PREFIX);
-    if (!parsed) {
-      await safeReply(interaction, {
-        content: "This edit prompt expired.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const ok = await requireOwner(interaction);
-    if (!ok) return;
-
-    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-
-    const rawTitle = interaction.fields.getTextInputValue(TODO_EDIT_TITLE_INPUT_ID);
-    const trimmedTitle = sanitizeTodoText(rawTitle, false);
-    if (!trimmedTitle) {
-      await safeReply(interaction, {
-        content: "Title cannot be empty.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    try {
-      await updateIssue(parsed.issueNumber, {
-        title: trimmedTitle,
-      });
-    } catch (err: any) {
-      await safeReply(interaction, {
-        content: getGithubErrorMessage(err),
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const session = getTodoListSession(parsed.sessionId);
-    if (!session?.channelId || !session?.messageId) {
-      try {
-        await interaction.deleteReply();
-      } catch {
-        // ignore
-      }
-      return;
-    }
-
-    let issue: IGithubIssue | null;
-    let comments: IGithubIssueComment[] = [];
-    try {
-      issue = await getIssue(parsed.issueNumber);
-      if (issue) {
-        comments = await listIssueComments(parsed.issueNumber);
-      }
-    } catch {
-      issue = null;
-    }
-
-    if (!issue) {
-      try {
-        await interaction.deleteReply();
-      } catch {
-        // ignore
-      }
-      return;
-    }
-
-    const payload: TodoListPayload = {
-      ...session.payload,
-      page: parsed.page,
-    };
-
-    const viewPayload = buildIssueViewComponents(
-      issue,
-      comments,
-      payload,
-      parsed.sessionId,
-    );
-
-    const channel = interaction.client.channels.cache.get(session.channelId);
-    if (channel && "messages" in channel) {
-      try {
-        const message = await (channel as any).messages.fetch(session.messageId);
-        await message.edit({
-          components: viewPayload.components,
-        });
-      } catch {
-        // ignore refresh failures
-      }
-    }
-
-    try {
-      await interaction.deleteReply();
-    } catch {
-      // ignore
-    }
-  }
-
-  @ModalComponent({ id: /^todo-edit-desc-modal:todo-\d+-\d+:\d+:\d+$/ })
-  async submitEditDescriptionModal(interaction: ModalSubmitInteraction): Promise<void> {
-    const parsed = parseTodoCommentId(interaction.customId, TODO_EDIT_DESC_MODAL_PREFIX);
-    if (!parsed) {
-      await safeReply(interaction, {
-        content: "This edit prompt expired.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const ok = await requireOwner(interaction);
-    if (!ok) return;
-
-    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-
-    const rawBody = interaction.fields.getTextInputValue(TODO_EDIT_DESC_INPUT_ID);
-    const trimmedBody = sanitizeTodoText(rawBody, true);
-    if (!trimmedBody) {
-      await safeReply(interaction, {
-        content: "Description cannot be empty.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    try {
-      await updateIssue(parsed.issueNumber, {
-        body: trimmedBody.slice(0, MAX_ISSUE_BODY),
-      });
-    } catch (err: any) {
-      await safeReply(interaction, {
-        content: getGithubErrorMessage(err),
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const session = getTodoListSession(parsed.sessionId);
-    if (!session?.channelId || !session?.messageId) {
-      try {
-        await interaction.deleteReply();
-      } catch {
-        // ignore
-      }
-      return;
-    }
-
-    let issue: IGithubIssue | null;
-    let comments: IGithubIssueComment[] = [];
-    try {
-      issue = await getIssue(parsed.issueNumber);
-      if (issue) {
-        comments = await listIssueComments(parsed.issueNumber);
-      }
-    } catch {
-      issue = null;
-    }
-
-    if (!issue) {
-      try {
-        await interaction.deleteReply();
-      } catch {
-        // ignore
-      }
-      return;
-    }
-
-    const payload: TodoListPayload = {
-      ...session.payload,
-      page: parsed.page,
-    };
-
-    const viewPayload = buildIssueViewComponents(
-      issue,
-      comments,
-      payload,
-      parsed.sessionId,
-    );
-
-    const channel = interaction.client.channels.cache.get(session.channelId);
-    if (channel && "messages" in channel) {
-      try {
-        const message = await (channel as any).messages.fetch(session.messageId);
-        await message.edit({
-          components: viewPayload.components,
-        });
-      } catch {
-        // ignore refresh failures
-      }
-    }
-
-    try {
-      await interaction.deleteReply();
-    } catch {
-      // ignore
-    }
-  }
-
-  @ModalComponent({ id: /^todo-query-modal:todo-\d+-\d+:\d+$/ })
-  async submitQueryModal(interaction: ModalSubmitInteraction): Promise<void> {
-    const parsed = parseTodoQueryId(interaction.customId, TODO_QUERY_MODAL_PREFIX);
-    if (!parsed) {
-      await safeReply(interaction, {
-        content: "This query prompt expired.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-
-    const rawQuery = interaction.fields.getTextInputValue(TODO_QUERY_INPUT_ID);
-    const query = normalizeQuery(rawQuery);
-
-    const session = getTodoListSession(parsed.sessionId);
-    if (!session) {
-      await this.refreshExpiredList(interaction);
-      return;
-    }
-
-    session.payload.query = query;
-    session.createdAt = Date.now();
-    todoListSessions.set(parsed.sessionId, session);
-
-    const listPayload = await this.buildTodoListPayload(parsed.sessionId, parsed.page);
-    if (!listPayload) {
-      await this.refreshExpiredList(interaction);
-      return;
-    }
-
-    const channel = interaction.client.channels.cache.get(session.channelId ?? "");
-    if (channel && "messages" in channel && session.messageId) {
-      try {
-        const message = await (channel as any).messages.fetch(session.messageId);
-        await message.edit({
-          components: listPayload.components,
-        });
-      } catch {
-        // ignore refresh failures
-      }
-    }
-
-    try {
-      await interaction.deleteReply();
-    } catch {
-      // ignore
-    }
   }
 
   @ButtonComponent({ id: /^todo-create-submit:todo-create-\d+-\d+$/ })
@@ -2157,37 +1815,24 @@ export class TodoCommand {
       return;
     }
 
-    todoCreateSessions.delete(parsed.sessionId);
-
-    const listSession = getTodoListSession(session.listSessionId);
-    if (!listSession?.channelId || !listSession?.messageId) {
-      return;
-    }
-
-    const listPayload = await this.buildTodoListPayload(session.listSessionId, session.page);
+    const listPayload = await this.buildTodoListPayload(session.payloadToken, session.page);
     if (!listPayload) {
       return;
     }
 
-    const channel = interaction.client.channels.cache.get(listSession.channelId);
-    if (!channel || !("messages" in channel)) {
-      return;
+    const channel = interaction.client.channels.cache.get(session.channelId);
+    if (channel && "messages" in channel) {
+      try {
+        const message = await (channel as any).messages.fetch(session.messageId);
+        await message.edit({
+          components: listPayload.components,
+        });
+      } catch {
+        // ignore refresh failures
+      }
     }
 
-    try {
-      const message = await (channel as any).messages.fetch(listSession.messageId);
-      await message.edit({
-        components: listPayload.components,
-      });
-      updateTodoListSessionMessage(
-        session.listSessionId,
-        listSession.channelId,
-        listSession.messageId,
-      );
-    } catch {
-      // ignore refresh failures
-    }
-
+    todoCreateSessions.delete(parsed.sessionId);
     try {
       await interaction.deleteReply();
     } catch {
@@ -2219,18 +1864,414 @@ export class TodoCommand {
     }
   }
 
-
-  @ButtonComponent({ id: /^todo-view:todo-\d+-\d+:\d+:\d+$/ })
-  async viewFromList(interaction: ButtonInteraction): Promise<void> {
-    const parsed = parseTodoViewId(interaction.customId);
+  @ModalComponent({ id: /^todo-create-modal:[^:]+:\d+$/ })
+  async submitCreateModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const parsed = parseTodoCreateModalId(interaction.customId, TODO_CREATE_MODAL_PREFIX);
     if (!parsed) {
-      await this.refreshExpiredList(interaction);
+      await safeReply(interaction, {
+        content: "This create form expired.",
+        flags: MessageFlags.Ephemeral,
+      });
       return;
     }
 
-    const session = getTodoListSession(parsed.sessionId);
+    const ok = await requireModeratorOrAdminOrOwner(interaction);
+    if (!ok) return;
+
+    const rawTitle = interaction.fields.getTextInputValue(TODO_CREATE_TITLE_ID);
+    const rawBody = interaction.fields.getTextInputValue(TODO_CREATE_BODY_ID);
+    const trimmedTitle = sanitizeTodoText(rawTitle, false);
+    if (!trimmedTitle) {
+      await safeReply(interaction, {
+        content: "Title cannot be empty.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const trimmedBody = rawBody
+      ? sanitizeTodoText(rawBody, true)
+      : "";
+    if (!trimmedBody) {
+      await safeReply(interaction, {
+        content: "Description cannot be empty.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const baseBody = sanitizeTodoText(trimmedBody, true);
+    const sessionId = createTodoCreateSession(
+      interaction.user.id,
+      parsed.payloadToken,
+      parsed.page,
+      interaction.channelId ?? "",
+      interaction.message?.id ?? "",
+      trimmedTitle,
+      baseBody.slice(0, MAX_ISSUE_BODY),
+    );
+    const session = getTodoCreateSession(sessionId);
     if (!session) {
-      await this.refreshExpiredList(interaction);
+      await safeReply(interaction, {
+        content: "Unable to start issue creation.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const formPayload = buildTodoCreateFormComponents(session, sessionId);
+    await safeReply(interaction, {
+      ...formPayload,
+      flags: buildComponentsV2Flags(true),
+    });
+  }
+
+  @ModalComponent({ id: /^todo-comment-modal:[^:]+:\d+:\d+:\d+:\d+$/ })
+  async submitCommentModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const parsed = parseTodoIssueModalId(interaction.customId, TODO_COMMENT_MODAL_PREFIX);
+    if (!parsed) {
+      await safeReply(interaction, {
+        content: "This comment form expired.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const rawComment = interaction.fields.getTextInputValue(TODO_COMMENT_INPUT_ID);
+    const trimmedComment = sanitizeTodoText(rawComment, true);
+    if (!trimmedComment) {
+      await safeReply(interaction, {
+        content: "Comment cannot be empty.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const prefixedComment = `${interaction.user.username}: ${trimmedComment}`.slice(
+      0,
+      MAX_ISSUE_BODY,
+    );
+
+    try {
+      await addComment(parsed.issueNumber, prefixedComment);
+    } catch (err: any) {
+      await safeReply(interaction, {
+        content: getGithubErrorMessage(err),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    let issue: IGithubIssue | null;
+    let comments: IGithubIssueComment[] = [];
+    try {
+      issue = await getIssue(parsed.issueNumber);
+      if (issue) {
+        comments = await listIssueComments(parsed.issueNumber);
+      }
+    } catch {
+      issue = null;
+    }
+
+    if (!issue) {
+      try {
+        await interaction.deleteReply();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    const basePayload = parseTodoPayloadToken(parsed.payloadToken);
+    if (!basePayload) {
+      try {
+        await interaction.deleteReply();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    const payload: TodoListPayload = { ...basePayload, page: parsed.page };
+
+    const viewPayload = buildIssueViewComponents(
+      issue,
+      comments,
+      payload,
+      parsed.payloadToken,
+    );
+
+    const channel = interaction.client.channels.cache.get(parsed.channelId);
+    if (!channel || !("messages" in channel)) {
+      try {
+        await interaction.deleteReply();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    try {
+      const message = await (channel as any).messages.fetch(parsed.messageId);
+      await message.edit({
+        components: viewPayload.components,
+      });
+    } catch {
+      // ignore refresh failures
+    }
+
+    try {
+      await interaction.deleteReply();
+    } catch {
+      // ignore
+    }
+  }
+
+  @ModalComponent({ id: /^todo-edit-title-modal:[^:]+:\d+:\d+:\d+:\d+$/ })
+  async submitEditTitleModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const parsed = parseTodoIssueModalId(interaction.customId, TODO_EDIT_TITLE_MODAL_PREFIX);
+    if (!parsed) {
+      await safeReply(interaction, {
+        content: "This edit prompt expired.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
+
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const rawTitle = interaction.fields.getTextInputValue(TODO_EDIT_TITLE_INPUT_ID);
+    const trimmedTitle = sanitizeTodoText(rawTitle, false);
+    if (!trimmedTitle) {
+      await safeReply(interaction, {
+        content: "Title cannot be empty.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    try {
+      await updateIssue(parsed.issueNumber, {
+        title: trimmedTitle,
+      });
+    } catch (err: any) {
+      await safeReply(interaction, {
+        content: getGithubErrorMessage(err),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    let issue: IGithubIssue | null;
+    let comments: IGithubIssueComment[] = [];
+    try {
+      issue = await getIssue(parsed.issueNumber);
+      if (issue) {
+        comments = await listIssueComments(parsed.issueNumber);
+      }
+    } catch {
+      issue = null;
+    }
+
+    if (!issue) {
+      try {
+        await interaction.deleteReply();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    const basePayload = parseTodoPayloadToken(parsed.payloadToken);
+    if (!basePayload) {
+      try {
+        await interaction.deleteReply();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    const payload: TodoListPayload = { ...basePayload, page: parsed.page };
+
+    const viewPayload = buildIssueViewComponents(
+      issue,
+      comments,
+      payload,
+      parsed.payloadToken,
+    );
+
+    const channel = interaction.client.channels.cache.get(parsed.channelId);
+    if (channel && "messages" in channel) {
+      try {
+        const message = await (channel as any).messages.fetch(parsed.messageId);
+        await message.edit({
+          components: viewPayload.components,
+        });
+      } catch {
+        // ignore refresh failures
+      }
+    }
+
+    try {
+      await interaction.deleteReply();
+    } catch {
+      // ignore
+    }
+  }
+
+  @ModalComponent({ id: /^todo-edit-desc-modal:[^:]+:\d+:\d+:\d+:\d+$/ })
+  async submitEditDescriptionModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const parsed = parseTodoIssueModalId(interaction.customId, TODO_EDIT_DESC_MODAL_PREFIX);
+    if (!parsed) {
+      await safeReply(interaction, {
+        content: "This edit prompt expired.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
+
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const rawBody = interaction.fields.getTextInputValue(TODO_EDIT_DESC_INPUT_ID);
+    const trimmedBody = sanitizeTodoText(rawBody, true);
+    if (!trimmedBody) {
+      await safeReply(interaction, {
+        content: "Description cannot be empty.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    try {
+      await updateIssue(parsed.issueNumber, {
+        body: trimmedBody.slice(0, MAX_ISSUE_BODY),
+      });
+    } catch (err: any) {
+      await safeReply(interaction, {
+        content: getGithubErrorMessage(err),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    let issue: IGithubIssue | null;
+    let comments: IGithubIssueComment[] = [];
+    try {
+      issue = await getIssue(parsed.issueNumber);
+      if (issue) {
+        comments = await listIssueComments(parsed.issueNumber);
+      }
+    } catch {
+      issue = null;
+    }
+
+    if (!issue) {
+      try {
+        await interaction.deleteReply();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    const basePayload = parseTodoPayloadToken(parsed.payloadToken);
+    if (!basePayload) {
+      try {
+        await interaction.deleteReply();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    const payload: TodoListPayload = { ...basePayload, page: parsed.page };
+
+    const viewPayload = buildIssueViewComponents(
+      issue,
+      comments,
+      payload,
+      parsed.payloadToken,
+    );
+
+    const channel = interaction.client.channels.cache.get(parsed.channelId);
+    if (channel && "messages" in channel) {
+      try {
+        const message = await (channel as any).messages.fetch(parsed.messageId);
+        await message.edit({
+          components: viewPayload.components,
+        });
+      } catch {
+        // ignore refresh failures
+      }
+    }
+
+    try {
+      await interaction.deleteReply();
+    } catch {
+      // ignore
+    }
+  }
+
+  @ModalComponent({ id: /^todo-query-modal:[^:]+:\d+:\d+:\d+$/ })
+  async submitQueryModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const parsed = parseTodoQueryModalId(interaction.customId, TODO_QUERY_MODAL_PREFIX);
+    if (!parsed) {
+      await safeReply(interaction, {
+        content: "This query prompt expired.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const rawQuery = interaction.fields.getTextInputValue(TODO_QUERY_INPUT_ID);
+    const query = normalizeQuery(rawQuery);
+
+    const basePayload = parseTodoPayloadToken(parsed.payloadToken);
+    if (!basePayload) {
+      await replyTodoExpired(interaction);
+      return;
+    }
+    basePayload.query = query;
+
+    const nextToken = buildTodoPayloadToken(basePayload, TODO_PAYLOAD_TOKEN_MAX_LENGTH);
+    const listPayload = await this.buildTodoListPayload(nextToken, parsed.page);
+    if (!listPayload) {
+      await replyTodoExpired(interaction);
+      return;
+    }
+
+    const channel = interaction.client.channels.cache.get(parsed.channelId);
+    if (channel && "messages" in channel) {
+      try {
+        const message = await (channel as any).messages.fetch(parsed.messageId);
+        await message.edit({
+          components: listPayload.components,
+        });
+      } catch {
+        // ignore refresh failures
+      }
+    }
+
+    try {
+      await interaction.deleteReply();
+    } catch {
+      // ignore
+    }
+  }
+
+
+  @ButtonComponent({ id: /^todo-view:[^:]+:\d+:\d+$/ })
+  async viewFromList(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseTodoViewId(interaction.customId);
+    if (!parsed) {
+      await replyTodoExpired(interaction);
       return;
     }
 
@@ -2259,15 +2300,17 @@ export class TodoCommand {
       return;
     }
 
-    const payload: TodoListPayload = {
-      ...session.payload,
-      page: parsed.page,
-    };
+    const basePayload = parseTodoPayloadToken(parsed.payloadToken);
+    if (!basePayload) {
+      await replyTodoExpired(interaction);
+      return;
+    }
+    const payload: TodoListPayload = { ...basePayload, page: parsed.page };
     const viewPayload = buildIssueViewComponents(
       issue,
       comments,
       payload,
-      parsed.sessionId,
+      parsed.payloadToken,
     );
 
     await safeUpdate(interaction, {
@@ -2276,11 +2319,11 @@ export class TodoCommand {
     });
   }
 
-  @ButtonComponent({ id: /^todo-close-view:todo-\d+-\d+:\d+:\d+$/ })
+  @ButtonComponent({ id: /^todo-close-view:[^:]+:\d+:\d+$/ })
   async closeFromView(interaction: ButtonInteraction): Promise<void> {
     const parsed = parseTodoCloseViewId(interaction.customId, TODO_CLOSE_VIEW_PREFIX);
     if (!parsed) {
-      await this.refreshExpiredList(interaction);
+      await replyTodoExpired(interaction);
       return;
     }
 
@@ -2314,9 +2357,9 @@ export class TodoCommand {
       return;
     }
 
-    const listPayload = await this.buildTodoListPayload(parsed.sessionId, parsed.page);
+    const listPayload = await this.buildTodoListPayload(parsed.payloadToken, parsed.page);
     if (!listPayload) {
-      await this.refreshExpiredList(interaction);
+      await replyTodoExpired(interaction);
       return;
     }
 
@@ -2325,33 +2368,21 @@ export class TodoCommand {
         components: listPayload.components,
       });
     } catch {
-      await this.refreshExpiredList(interaction);
+      await replyTodoExpired(interaction);
       return;
     }
-
-    updateTodoListSessionMessage(
-      parsed.sessionId,
-      interaction.channelId,
-      interaction.message?.id ?? null,
-    );
   }
 
-  @ButtonComponent({ id: /^todo-label-edit-button:todo-\d+-\d+:\d+:\d+$/ })
+  @ButtonComponent({ id: /^todo-label-edit-button:[^:]+:\d+:\d+$/ })
   async editLabelsFromView(interaction: ButtonInteraction): Promise<void> {
     const parsed = parseTodoLabelEditId(interaction.customId, TODO_LABEL_EDIT_BUTTON_PREFIX);
     if (!parsed) {
-      await this.refreshExpiredList(interaction);
+      await replyTodoExpired(interaction);
       return;
     }
 
     const ok = await requireModeratorOrAdminOrOwner(interaction);
     if (!ok) return;
-
-    const session = getTodoListSession(parsed.sessionId);
-    if (!session) {
-      await this.refreshExpiredList(interaction);
-      return;
-    }
 
     let issue: IGithubIssue | null;
     try {
@@ -2373,7 +2404,15 @@ export class TodoCommand {
     }
 
     const select = new StringSelectMenuBuilder()
-      .setCustomId(buildTodoLabelEditSelectId(parsed.sessionId, parsed.page, parsed.issueNumber))
+      .setCustomId(
+        buildTodoLabelEditSelectId(
+          parsed.payloadToken,
+          parsed.page,
+          parsed.issueNumber,
+          interaction.channelId,
+          interaction.message?.id ?? "",
+        ),
+      )
       .setPlaceholder("Select Label(s)...")
       .setMinValues(0)
       .setMaxValues(TODO_LABELS.length)
@@ -2392,23 +2431,30 @@ export class TodoCommand {
     });
   }
 
-  @ButtonComponent({ id: /^todo-query-button:todo-\d+-\d+:\d+$/ })
+  @ButtonComponent({ id: /^todo-query-button:[^:]+:\d+$/ })
   async queryFromList(interaction: ButtonInteraction): Promise<void> {
     const parsed = parseTodoQueryId(interaction.customId, TODO_QUERY_BUTTON_PREFIX);
     if (!parsed) {
-      await this.refreshExpiredList(interaction);
+      await replyTodoExpired(interaction);
       return;
     }
 
-    const session = getTodoListSession(parsed.sessionId);
-    if (!session) {
-      await this.refreshExpiredList(interaction);
+    const basePayload = parseTodoPayloadToken(parsed.payloadToken);
+    if (!basePayload) {
+      await replyTodoExpired(interaction);
       return;
     }
 
     const modal = new ModalBuilder()
-      .setCustomId(buildTodoQueryModalId(parsed.sessionId, parsed.page))
-      .setTitle(session.payload.query ? "Edit Query" : "Filter by Query");
+      .setCustomId(
+        buildTodoQueryModalId(
+          parsed.payloadToken,
+          parsed.page,
+          interaction.channelId,
+          interaction.message?.id ?? "",
+        ),
+      )
+      .setTitle(basePayload.query ? "Edit Query" : "Filter by Query");
 
     const queryInput = new TextInputBuilder()
       .setCustomId(TODO_QUERY_INPUT_ID)
@@ -2417,30 +2463,32 @@ export class TodoCommand {
       .setRequired(false)
       .setMaxLength(200);
 
-    if (session.payload.query) {
-      queryInput.setValue(session.payload.query);
+    if (basePayload.query) {
+      queryInput.setValue(basePayload.query);
     }
 
     modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(queryInput));
     await interaction.showModal(modal);
   }
 
-  @ButtonComponent({ id: /^todo-comment-button:todo-\d+-\d+:\d+:\d+$/ })
+  @ButtonComponent({ id: /^todo-comment-button:[^:]+:\d+:\d+$/ })
   async addCommentFromView(interaction: ButtonInteraction): Promise<void> {
-    const parsed = parseTodoCommentId(interaction.customId, TODO_COMMENT_BUTTON_PREFIX);
+    const parsed = parseTodoIssueActionId(interaction.customId, TODO_COMMENT_BUTTON_PREFIX);
     if (!parsed) {
-      await this.refreshExpiredList(interaction);
-      return;
-    }
-
-    const session = getTodoListSession(parsed.sessionId);
-    if (!session) {
-      await this.refreshExpiredList(interaction);
+      await replyTodoExpired(interaction);
       return;
     }
 
     const modal = new ModalBuilder()
-      .setCustomId(buildTodoCommentModalId(parsed.sessionId, parsed.page, parsed.issueNumber))
+      .setCustomId(
+        buildTodoCommentModalId(
+          parsed.payloadToken,
+          parsed.page,
+          parsed.issueNumber,
+          interaction.channelId,
+          interaction.message?.id ?? "",
+        ),
+      )
       .setTitle("Add Comment");
 
     const commentInput = new TextInputBuilder()
@@ -2455,11 +2503,11 @@ export class TodoCommand {
     await interaction.showModal(modal);
   }
 
-  @ButtonComponent({ id: /^todo-edit-title-button:todo-\d+-\d+:\d+:\d+$/ })
+  @ButtonComponent({ id: /^todo-edit-title-button:[^:]+:\d+:\d+$/ })
   async editTitleFromView(interaction: ButtonInteraction): Promise<void> {
-    const parsed = parseTodoCommentId(interaction.customId, TODO_EDIT_TITLE_BUTTON_PREFIX);
+    const parsed = parseTodoIssueActionId(interaction.customId, TODO_EDIT_TITLE_BUTTON_PREFIX);
     if (!parsed) {
-      await this.refreshExpiredList(interaction);
+      await replyTodoExpired(interaction);
       return;
     }
 
@@ -2482,7 +2530,15 @@ export class TodoCommand {
     }
 
     const modal = new ModalBuilder()
-      .setCustomId(buildTodoEditTitleModalId(parsed.sessionId, parsed.page, parsed.issueNumber))
+      .setCustomId(
+        buildTodoEditTitleModalId(
+          parsed.payloadToken,
+          parsed.page,
+          parsed.issueNumber,
+          interaction.channelId,
+          interaction.message?.id ?? "",
+        ),
+      )
       .setTitle("Edit Title");
 
     const titleInput = new TextInputBuilder()
@@ -2498,11 +2554,11 @@ export class TodoCommand {
     await interaction.showModal(modal);
   }
 
-  @ButtonComponent({ id: /^todo-edit-desc-button:todo-\d+-\d+:\d+:\d+$/ })
+  @ButtonComponent({ id: /^todo-edit-desc-button:[^:]+:\d+:\d+$/ })
   async editDescriptionFromView(interaction: ButtonInteraction): Promise<void> {
-    const parsed = parseTodoCommentId(interaction.customId, TODO_EDIT_DESC_BUTTON_PREFIX);
+    const parsed = parseTodoIssueActionId(interaction.customId, TODO_EDIT_DESC_BUTTON_PREFIX);
     if (!parsed) {
-      await this.refreshExpiredList(interaction);
+      await replyTodoExpired(interaction);
       return;
     }
 
@@ -2525,7 +2581,15 @@ export class TodoCommand {
     }
 
     const modal = new ModalBuilder()
-      .setCustomId(buildTodoEditDescModalId(parsed.sessionId, parsed.page, parsed.issueNumber))
+      .setCustomId(
+        buildTodoEditDescModalId(
+          parsed.payloadToken,
+          parsed.page,
+          parsed.issueNumber,
+          interaction.channelId,
+          interaction.message?.id ?? "",
+        ),
+      )
       .setTitle("Edit Description");
 
     const descriptionInput = new TextInputBuilder()
