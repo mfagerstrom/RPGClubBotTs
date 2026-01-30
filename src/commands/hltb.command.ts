@@ -49,6 +49,14 @@ function formatGameTitleWithYear(
   return `${game.title}${yearText}`;
 }
 
+function buildKeepTypingOption(query: string): { name: string; value: string } {
+  const label = `Keep typing: "${query}"`;
+  return {
+    name: label.slice(0, 100),
+    value: query,
+  };
+}
+
 async function autocompleteHltbTitle(
   interaction: AutocompleteInteraction,
 ): Promise<void> {
@@ -65,7 +73,7 @@ async function autocompleteHltbTitle(
     const title = String(game.title ?? "");
     titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
   });
-  const options = results.slice(0, 25).map((game) => {
+  const resultOptions = results.slice(0, 24).map((game) => {
     const title = String(game.title ?? "");
     const isDuplicate = (titleCounts.get(title) ?? 0) > 1;
     const label = formatGameTitleWithYear(game, isDuplicate);
@@ -74,6 +82,7 @@ async function autocompleteHltbTitle(
       value: label,
     };
   });
+  const options = [buildKeepTypingOption(query), ...resultOptions];
   await interaction.respond(options);
 }
 

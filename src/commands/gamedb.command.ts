@@ -1,3 +1,4 @@
+/* eslint-disable no-irregular-whitespace */
 import {
   ApplicationCommandOptionType,
   CommandInteraction,
@@ -60,12 +61,14 @@ import { NowPlayingCommand } from "./now-playing.command.js";
 import {
   COMPLETION_TYPES,
   type CompletionType,
+  formatTableDate,
   parseCompletionDateInput,
 } from "./profile.command.js";
 import { notifyUnknownCompletionPlatform } from "../functions/CompletionHelpers.js";
 import { searchHltb } from "../scripts/SearchHltb.js";
 import { formatPlatformDisplayName } from "../functions/PlatformDisplay.js";
 import { NOW_PLAYING_FORUM_ID } from "../config/channels.js";
+import { padCommandName } from "./help.command.js";
 
 const GAME_SEARCH_PAGE_SIZE = 25;
 const NOW_PLAYING_SIDEGAME_TAG_ID = "1059912719366635611";
@@ -138,6 +141,14 @@ function getSearchRowsFromComponents(
   }) as ActionRow<MessageActionRowComponent>[];
 }
 
+function buildKeepTypingOption(query: string): { name: string; value: string } {
+  const label = `Keep typing: "${query}"`;
+  return {
+    name: label.slice(0, 100),
+    value: query,
+  };
+}
+
 async function autocompleteGameDbViewTitle(
   interaction: AutocompleteInteraction,
 ): Promise<void> {
@@ -154,7 +165,7 @@ async function autocompleteGameDbViewTitle(
     const title = String(game.title ?? "");
     titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
   });
-  const options = results.slice(0, 25).map((game) => {
+  const resultOptions = results.slice(0, 24).map((game) => {
     const title = String(game.title ?? "");
     const isDuplicate = (titleCounts.get(title) ?? 0) > 1;
     const label = formatTitleWithYear(game, isDuplicate);
@@ -163,6 +174,7 @@ async function autocompleteGameDbViewTitle(
       value: String(game.id),
     };
   });
+  const options = [buildKeepTypingOption(query), ...resultOptions];
   await interaction.respond(options);
 }
 
@@ -433,7 +445,7 @@ export class GameDb {
         ? `Platforms: ${platformNames.join(", ")}`
         : "Platforms: Unknown";
       const summary = game.summary || "No summary";
-      const description = `${platformLabel} — ${summary}`.substring(0, 95);
+      const description = `${platformLabel} - ${summary}`.substring(0, 95);
 
       return {
         id: game.id,
@@ -688,7 +700,7 @@ export class GameDb {
       const rpgClubSections: string[] = [];
       const pushRpgClubSection = (title: string, value: string | null): void => {
         if (!value) return;
-        rpgClubSections.push(`**${title}**\n${value}`);
+        rpgClubSections.push(`**${title}**\n> ${value}`);
       };
 
       const gotmNomineesByRound = new Map<number, string[]>();
@@ -811,36 +823,56 @@ export class GameDb {
 
       const bodyParts: string[] = [];
       bodyParts.push(`**Description**\n${description}`);
-      const initialReleaseDate = game.initialReleaseDate
-        ? game.initialReleaseDate.toLocaleDateString()
-        : "Unknown";
-      bodyParts.push(`**Initial Release Date**\n${initialReleaseDate}`);
+
+      const padWidth = 14;
 
       if (releases.length > 0) {
-        const releaseField = releases
-          .map((r) => {
-            const platformName = formatPlatformDisplayName(platformMap.get(r.platformId))
-              ?? "Unknown Platform";
-            const regionName = regionMap.get(r.regionId) || "Unknown Region";
-            const regionSuffix = regionName === "Worldwide" ? "" : ` (${regionName})`;
-            const releaseDate = r.releaseDate ? r.releaseDate.toLocaleDateString() : "TBD";
-            const format = r.format ? `(${r.format})` : "";
-            return `• **${platformName}**${regionSuffix} ${format} - ${releaseDate}`;
-          })
-          .join("\n");
-        bodyParts.push(`**Releases**\n${releaseField}`);
+        const sortedReleases = [...releases].sort((a, b) => {
+          const aTime = a.releaseDate ? a.releaseDate.getTime() : Number.POSITIVE_INFINITY;
+          const bTime = b.releaseDate ? b.releaseDate.getTime() : Number.POSITIVE_INFINITY;
+          return aTime - bTime;
+        });
+
+        const releasesByDate = new Map<string, string[]>();
+        sortedReleases.forEach((r) => {
+          const platformName = formatPlatformDisplayName(platformMap.get(r.platformId))
+            ?? "Unknown Platform";
+          const regionName = regionMap.get(r.regionId) || "Unknown Region";
+          const regionSuffix = regionName === "Worldwide" ? "" : ` (${regionName})`;
+          const releaseDate = r.releaseDate ? formatTableDate(r.releaseDate) : "TBD";
+          const format = r.format ? ` (${r.format})` : "";
+          const platformLabel = `${platformName} ${regionSuffix}${format}`;
+          const list = releasesByDate.get(releaseDate) ?? [];
+          list.push(platformLabel);
+          releasesByDate.set(releaseDate, list);
+        });
+
+        const releaseField = Array.from(releasesByDate.entries())
+          .map(([dateLabel, platformsForDate]) =>
+            `\n> **\`\` ${padCommandName(dateLabel, padWidth)}\`\`**  ` + 
+            platformsForDate.join(","),
+          )
+          .join("");
+        bodyParts.push(`**Releases** ${releaseField}`);
       }
 
       const hltbCache = await getHltbCacheByGameId(gameId);
       const canImportHltb = isHltbImportEligible(game, Boolean(hltbCache));
+      
       if (hltbCache) {
         const hltbLines: string[] = [];
-        if (hltbCache.main) hltbLines.push(`**Main:** ${hltbCache.main}`);
-        if (hltbCache.mainSides) hltbLines.push(`**Main + Sides:** ${hltbCache.mainSides}`);
-        if (hltbCache.completionist) hltbLines.push(`**Completionist:** ${hltbCache.completionist}`);
-        if (hltbCache.singlePlayer) hltbLines.push(`**Single-Player:** ${hltbCache.singlePlayer}`);
-        if (hltbCache.coOp) hltbLines.push(`**Co-Op:** ${hltbCache.coOp}`);
-        if (hltbCache.vs) hltbLines.push(`**Vs.:** ${hltbCache.vs}`);
+        if (hltbCache.main) 
+          hltbLines.push(`> **\`\` ${padCommandName('Main', padWidth)}\`\`**  ${hltbCache.main}`);
+        if (hltbCache.mainSides) 
+          hltbLines.push(`> **\`\` ${padCommandName('Main + Sides', padWidth)}\`\`**  ${hltbCache.mainSides}`);
+        if (hltbCache.completionist) 
+          hltbLines.push(`> **\`\` ${padCommandName('Completionist', padWidth)}\`\`**  ${hltbCache.completionist}`);
+        if (hltbCache.singlePlayer) 
+          hltbLines.push(`> **\`\` ${padCommandName('Single-Player', padWidth)}\`\`**  ${hltbCache.singlePlayer}`);
+        if (hltbCache.coOp) 
+          hltbLines.push(`> **\`\` ${padCommandName('Co-Op', padWidth)}\`\`**  ${hltbCache.coOp}`);
+        if (hltbCache.vs) 
+          hltbLines.push(`> **\`\` ${padCommandName('Vs.', padWidth)}\`\`**  ${hltbCache.vs}`);
         if (hltbLines.length) {
           bodyParts.push(`**HowLongToBeat™**\n${hltbLines.join("\n")}`);
         }
@@ -850,12 +882,12 @@ export class GameDb {
       const detailSections: string[] = [];
 
       if (series) {
-        detailSections.push(`**Series / Collection**\n${series}`);
+        detailSections.push(`**Series / Collection**\n> ${series}`);
       }
 
       if (alternateVersions.length) {
         const lines = alternateVersions.map(
-          (alt) => `• **${alt.title}** (GameDB #${alt.id})`,
+          (alt) => `**${alt.title}** (GameDB #${alt.id})`,
         );
         const value = this.buildListFieldValue(lines, 2000);
         detailSections.push(`**Alternate Versions**\n${value}`);

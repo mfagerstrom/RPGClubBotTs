@@ -144,6 +144,14 @@ type CompletionatorThreadContext = {
 
 const completionatorThreadContexts: Map<string, CompletionatorThreadContext> = new Map();
 
+function buildKeepTypingOption(query: string): { name: string; value: string } {
+  const label = `Keep typing: "${query}"`;
+  return {
+    name: label.slice(0, 100),
+    value: query,
+  };
+}
+
 async function autocompleteGameCompletionTitle(
   interaction: AutocompleteInteraction,
 ): Promise<void> {
@@ -159,10 +167,11 @@ async function autocompleteGameCompletionTitle(
     return;
   }
   const results = await Game.searchGames(query);
-  const options = results.slice(0, 25).map((game) => ({
+  const resultOptions = results.slice(0, 24).map((game) => ({
     name: game.title.slice(0, 100),
     value: game.title,
   }));
+  const options = [buildKeepTypingOption(query), ...resultOptions];
   await interaction.respond(options);
 }
 

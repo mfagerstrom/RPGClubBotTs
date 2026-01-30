@@ -333,13 +333,13 @@ function getCategoryById(id: string): (typeof HELP_CATEGORIES)[number] | undefin
   return HELP_CATEGORIES.find((cat) => cat.id === id);
 }
 
-function padCommandName(label: string, width = 15): string {
+export function padCommandName(label: string, width = 15): string {
   const name = label.startsWith("/") ? label.slice(1) : label;
   return name.padEnd(width, " ");
 }
 
 function formatCommandLine(label: string, summary: string, width = 15): string {
-  return `> **\`\` ${padCommandName(label, width)}\`\`** ${summary}`;
+  return `> **\`\` ${padCommandName(label, width)} \`\`** ${summary}`;
 }
 
 function buildHelpDetailsEmbed(topic: HelpTopic): EmbedBuilder {
