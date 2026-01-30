@@ -63,7 +63,7 @@ import {
   parseCompletionDateInput,
 } from "./profile.command.js";
 import { notifyUnknownCompletionPlatform } from "../functions/CompletionHelpers.js";
-import { searchHltb } from "../functions/SearchHltb.js";
+import { searchHltb } from "../scripts/SearchHltb.js";
 import { formatPlatformDisplayName } from "../functions/PlatformDisplay.js";
 
 const GAME_SEARCH_PAGE_SIZE = 25;
@@ -835,16 +835,14 @@ export class GameDb {
       const canImportHltb = isHltbImportEligible(game, Boolean(hltbCache));
       if (hltbCache) {
         const hltbLines: string[] = [];
-        if (hltbCache.main) hltbLines.push(`Main: ${hltbCache.main}`);
-        if (hltbCache.mainSides) hltbLines.push(`Main + Sides: ${hltbCache.mainSides}`);
-        if (hltbCache.completionist) hltbLines.push(`Completionist: ${hltbCache.completionist}`);
-        if (hltbCache.singlePlayer) hltbLines.push(`Single-Player: ${hltbCache.singlePlayer}`);
-        if (hltbCache.coOp) hltbLines.push(`Co-Op: ${hltbCache.coOp}`);
-        if (hltbCache.vs) hltbLines.push(`Vs.: ${hltbCache.vs}`);
-        const sourceLine = hltbCache.url ? `Source: ${hltbCache.url}` : null;
-        const textLines = sourceLine ? [sourceLine, ...hltbLines] : hltbLines;
-        if (textLines.length) {
-          bodyParts.push(`**How Long to Beat (cached)**\n${textLines.join("\n")}`);
+        if (hltbCache.main) hltbLines.push(`**Main:** ${hltbCache.main}`);
+        if (hltbCache.mainSides) hltbLines.push(`**Main + Sides:** ${hltbCache.mainSides}`);
+        if (hltbCache.completionist) hltbLines.push(`**Completionist:** ${hltbCache.completionist}`);
+        if (hltbCache.singlePlayer) hltbLines.push(`**Single-Player:** ${hltbCache.singlePlayer}`);
+        if (hltbCache.coOp) hltbLines.push(`**Co-Op:** ${hltbCache.coOp}`);
+        if (hltbCache.vs) hltbLines.push(`**Vs.:** ${hltbCache.vs}`);
+        if (hltbLines.length) {
+          bodyParts.push(`**⏱️ HowLongToBeat™**\n${hltbLines.join("\n")}`);
         }
       }
 

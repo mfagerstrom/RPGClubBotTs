@@ -2,7 +2,7 @@ import type { AutocompleteInteraction, CommandInteraction } from "discord.js";
 import { ApplicationCommandOptionType, MessageFlags } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import { EmbedBuilder } from "discord.js";
-import { searchHltb, type HltbSearchResult } from "../functions/SearchHltb.js";
+import { searchHltb, type HltbSearchResult } from "../scripts/SearchHltb.js";
 import Game from "../classes/Game.js";
 import { getHltbCacheByGameId, upsertHltbCache } from "../classes/HltbCache.js";
 import { safeDeferReply, safeReply, sanitizeUserInput } from "../functions/InteractionUtils.js";
