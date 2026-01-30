@@ -2,6 +2,7 @@ import pluginJs from "@eslint/js";
 import tseslint from "typescript-eslint";
 import stylistic from "@stylistic/eslint-plugin";
 import eslintConfigPrettier from "eslint-config-prettier";
+import localRules from "./eslint-rules/index.js";
 
 export default [
   { ignores: ["build/**"] },
@@ -13,6 +14,7 @@ export default [
     ignores: ["**/*.config.{ts}", "*.reference.ts"],
     plugins: {
       "@stylistic": stylistic,
+      local: localRules,
     },
     rules: {
       // all interfaces should be named starting with a capital I (ie. IUser, IAgency)
@@ -73,6 +75,7 @@ export default [
         property: "waitForURL",
         message: "Please use gotoAndCheckUrl instead of page.waitForURL",
       }],
+      "local/no-djs-button-in-v2-accessory": "error",
     },
   },
   {

@@ -39,6 +39,7 @@ import {
   SectionBuilder,
   TextDisplayBuilder,
   ThumbnailBuilder,
+  ButtonBuilder as V2ButtonBuilder,
 } from "@discordjs/builders";
 import {
   safeDeferReply,
@@ -73,10 +74,43 @@ import { padCommandName } from "./help.command.js";
 const GAME_SEARCH_PAGE_SIZE = 25;
 const NOW_PLAYING_SIDEGAME_TAG_ID = "1059912719366635611";
 const COMPONENTS_V2_FLAG = 1 << 15;
-const GAME_SEARCH_SESSIONS = new Map<
-  string,
-  { userId: string; results: any[]; query: string }
->();
+const MAX_COMPONENT_CUSTOM_ID_LENGTH = 100;
+
+function decodeSearchQuery(encoded: string): string {
+  if (!encoded) return "";
+  try {
+    return Buffer.from(encoded, "base64url").toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
+function encodeSearchQuery(query: string, maxLength: number): string {
+  let trimmed = query.trim();
+  let encoded = Buffer.from(trimmed, "utf8").toString("base64url");
+  if (encoded.length <= maxLength) return encoded;
+  for (let i = trimmed.length - 1; i >= 0; i -= 1) {
+    trimmed = trimmed.slice(0, i + 1);
+    encoded = Buffer.from(trimmed, "utf8").toString("base64url");
+    if (encoded.length <= maxLength) return encoded;
+  }
+  return "";
+}
+
+function buildSearchCustomId(
+  type: "select" | "page",
+  ownerId: string,
+  page: number,
+  query: string,
+  direction?: "next" | "prev",
+): string {
+  const base = `gamedb-search-${type}:${ownerId}:${page}:`;
+  const maxQueryLength = MAX_COMPONENT_CUSTOM_ID_LENGTH - base.length - (direction ? `:${direction}`.length : 0);
+  const encodedQuery = encodeSearchQuery(query, Math.max(maxQueryLength, 0));
+  return direction
+    ? `${base}${encodedQuery}:${direction}`
+    : `${base}${encodedQuery}`;
+}
 
 function isUniqueConstraintError(err: any): boolean {
   const msg = err?.message ?? "";
@@ -619,7 +653,6 @@ export class GameDb {
           gameId,
           profile.hasThread,
           profile.featuredVideoUrl,
-          profile.canImportHltb,
         ),
       );
     }
@@ -650,7 +683,6 @@ export class GameDb {
         gameId,
         profile.hasThread,
         profile.featuredVideoUrl,
-        profile.canImportHltb,
       ),
     ];
     await safeReply(interaction, {
@@ -669,7 +701,6 @@ export class GameDb {
     files: AttachmentBuilder[];
     hasThread: boolean;
     featuredVideoUrl: string | null;
-    canImportHltb: boolean;
   } | null> {
     try {
       const game = await Game.getGameById(gameId);
@@ -821,8 +852,8 @@ export class GameDb {
         pushRpgClubSection("NR-GOTM Nominations", lines.join(", "));
       }
 
-      const bodyParts: string[] = [];
-      bodyParts.push(`**Description**\n${this.formatQuotedDescription(description)}`);
+      const bodyParts: Array<{ content: string; accessory?: ButtonBuilder }> = [];
+      bodyParts.push({ content: `**Description**\n${this.formatQuotedDescription(description)}` });
 
       const padWidth = 14;
 
@@ -835,13 +866,13 @@ export class GameDb {
 
         const releasesByDate = new Map<string, string[]>();
         sortedReleases.forEach((r) => {
-          const platformName = formatPlatformDisplayName(platformMap.get(r.platformId))
-            ?? "Unknown Platform";
-          const regionName = regionMap.get(r.regionId) || "Unknown Region";
+          const platformName = (formatPlatformDisplayName(platformMap.get(r.platformId))
+            ?? "Unknown Platform").trim();
+          const regionName = (regionMap.get(r.regionId) || "Unknown Region").trim();
           const regionSuffix = regionName === "Worldwide" ? "" : ` (${regionName})`;
           const releaseDate = r.releaseDate ? formatTableDate(r.releaseDate) : "TBD";
-          const format = r.format ? ` (${r.format})` : "";
-          const platformLabel = `${platformName} ${regionSuffix}${format}`;
+          const format = r.format ? `(${r.format}) ` : "";
+          const platformLabel = `${platformName} ${regionSuffix}${format}`.trim();
           const list = releasesByDate.get(releaseDate) ?? [];
           list.push(platformLabel);
           releasesByDate.set(releaseDate, list);
@@ -850,10 +881,10 @@ export class GameDb {
         const releaseField = Array.from(releasesByDate.entries())
           .map(([dateLabel, platformsForDate]) =>
             `\n> **\`\` ${padCommandName(dateLabel, padWidth)}\`\`**  ` + 
-            platformsForDate.join(","),
+            platformsForDate.join(", "),
           )
           .join("");
-        bodyParts.push(`**Releases** ${releaseField}`);
+        bodyParts.push({ content: `**Releases** ${releaseField}` });
       }
 
       const hltbCache = await getHltbCacheByGameId(gameId);
@@ -874,8 +905,17 @@ export class GameDb {
         if (hltbCache.vs) 
           hltbLines.push(`> **\`\` ${padCommandName('Vs.', padWidth)}\`\`**  ${hltbCache.vs}`);
         if (hltbLines.length) {
-          bodyParts.push(`**HowLongToBeat™**\n${hltbLines.join("\n")}`);
+          bodyParts.push({ content: `**HowLongToBeat™**\n${hltbLines.join("\n")}` });
         }
+      } else if (canImportHltb) {
+        const importHltb = new V2ButtonBuilder()
+          .setCustomId(`gamedb-action:hltb-import:${gameId}`)
+          .setLabel("Import HLTB Data")
+          .setStyle(ButtonStyle.Secondary);
+        bodyParts.push({
+          content: "**HowLongToBeat™**\n> No HLTB data cached.",
+          accessory: importHltb,
+        });
       }
 
       const series = await Game.getGameSeries(gameId);
@@ -887,35 +927,68 @@ export class GameDb {
 
       if (alternateVersions.length) {
         const lines = alternateVersions.map(
-          (alt) => `**${alt.title}** (GameDB #${alt.id})`,
+          (alt) => `> **${alt.title}**`,
         );
         const value = this.buildListFieldValue(lines, 2000);
         detailSections.push(`**Alternate Versions**\n${value}`);
       }
 
       if (detailSections.length) {
-        bodyParts.push(detailSections.join("\n\n"));
+        bodyParts.push({ content: detailSections.join("\n\n") });
       }
 
       if (rpgClubSections.length) {
-        bodyParts.push(rpgClubSections.join("\n\n"));
+        bodyParts.push({ content: rpgClubSections.join("\n\n") });
       }
 
       const igdbIdText = game.igdbId ? String(game.igdbId) : "N/A";
-      bodyParts.push(`-# GameDB ID: ${game.id} | IGDB ID: ${igdbIdText}`);
+      bodyParts.push({ content: `-# GameDB ID: ${game.id} | IGDB ID: ${igdbIdText}` });
 
-      const content = this.trimTextDisplayContent(
-        [headerLines.join("\n"), bodyParts.join("\n\n")].filter(Boolean).join("\n"),
-      );
+      const headerBlock = this.trimTextDisplayContent(headerLines.join("\n"));
+      const bodyBlocks = bodyParts
+        .map((block) => ({
+          content: this.trimTextDisplayContent(block.content),
+          accessory: block.accessory,
+        }))
+        .filter((block) => block.content.length > 0);
+
       if (game.imageData) {
-        const headerSection = new SectionBuilder()
-          .addTextDisplayComponents(new TextDisplayBuilder().setContent(content))
-          .setThumbnailAccessory(
-            new ThumbnailBuilder().setURL("attachment://game_image.png"),
-          );
-        container.addSectionComponents(headerSection);
+        if (headerBlock.length > 0) {
+          container.addTextDisplayComponents(new TextDisplayBuilder().setContent(headerBlock));
+        }
+        const [descriptionBlock, ...remainingBlocks] = bodyBlocks;
+        if (descriptionBlock) {
+          const descriptionSection = new SectionBuilder()
+            .addTextDisplayComponents(new TextDisplayBuilder().setContent(descriptionBlock.content))
+            .setThumbnailAccessory(
+              new ThumbnailBuilder().setURL("attachment://game_image.png"),
+            );
+          container.addSectionComponents(descriptionSection);
+        }
+        remainingBlocks.forEach((block) => {
+          if (block.accessory) {
+            const section = new SectionBuilder()
+              .addTextDisplayComponents(new TextDisplayBuilder().setContent(block.content))
+              .setButtonAccessory(block.accessory);
+            container.addSectionComponents(section);
+          } else {
+            container.addTextDisplayComponents(new TextDisplayBuilder().setContent(block.content));
+          }
+        });
       } else {
-        container.addTextDisplayComponents(new TextDisplayBuilder().setContent(content));
+        if (headerBlock.length > 0) {
+          container.addTextDisplayComponents(new TextDisplayBuilder().setContent(headerBlock));
+        }
+        bodyBlocks.forEach((block) => {
+          if (block.accessory) {
+            const section = new SectionBuilder()
+              .addTextDisplayComponents(new TextDisplayBuilder().setContent(block.content))
+              .setButtonAccessory(block.accessory);
+            container.addSectionComponents(section);
+          } else {
+            container.addTextDisplayComponents(new TextDisplayBuilder().setContent(block.content));
+          }
+        });
       }
 
       return {
@@ -923,7 +996,6 @@ export class GameDb {
         files,
         hasThread: Boolean(threadId),
         featuredVideoUrl: game.featuredVideoUrl ?? null,
-        canImportHltb,
       };
     } catch (error: any) {
       console.error("Failed to build game profile:", error);
@@ -981,7 +1053,6 @@ export class GameDb {
     gameId: number,
     hasThread: boolean,
     featuredVideoUrl: string | null,
-    canImportHltb: boolean,
     disableVideo = false,
   ): ActionRowBuilder<ButtonBuilder> {
     const addNowPlaying = new ButtonBuilder()
@@ -1012,13 +1083,6 @@ export class GameDb {
         .setStyle(ButtonStyle.Secondary);
       actionRow.addComponents(addThread);
     }
-    if (canImportHltb) {
-      const importHltb = new ButtonBuilder()
-        .setCustomId(`gamedb-action:hltb-import:${gameId}`)
-        .setLabel("Import HLTB Data")
-        .setStyle(ButtonStyle.Secondary);
-      actionRow.addComponents(importHltb);
-    }
     return actionRow;
   }
 
@@ -1032,7 +1096,6 @@ export class GameDb {
       gameId,
       profile.hasThread,
       profile.featuredVideoUrl,
-      profile.canImportHltb,
     );
     const existingComponents = interaction.message?.components ?? [];
     const searchRows = getSearchRowsFromComponents(existingComponents);
@@ -1081,7 +1144,6 @@ export class GameDb {
           gameId,
           profile.hasThread,
           profile.featuredVideoUrl,
-          profile.canImportHltb,
           true,
         );
         const existingComponents = interaction.message?.components ?? [];
@@ -1334,7 +1396,6 @@ export class GameDb {
           gameId,
           profile.hasThread,
           profile.featuredVideoUrl,
-          profile.canImportHltb,
         );
         const existingComponents = interaction.message?.components ?? [];
         const updatedComponents = existingComponents.length
@@ -1790,16 +1851,10 @@ export class GameDb {
       return;
     }
 
-    const sessionId = interaction.id;
-    GAME_SEARCH_SESSIONS.set(sessionId, {
-      userId: interaction.user.id,
-      results,
-      query: searchTerm,
-    });
-
     const response = this.buildSearchResponse(
-      sessionId,
-      GAME_SEARCH_SESSIONS.get(sessionId)!,
+      searchTerm,
+      results,
+      interaction.user.id,
       0,
       true,
     );
@@ -1807,12 +1862,12 @@ export class GameDb {
     await safeReply(interaction, response);
   }
 
-  @SelectMenuComponent({ id: /^gamedb-search-select:[^:]+:\d+:\d+$/ })
+  @SelectMenuComponent({ id: /^gamedb-search-select:\d+:\d+:[A-Za-z0-9_-]*$/ })
   async handleSearchSelect(interaction: StringSelectMenuInteraction): Promise<void> {
     const parts = interaction.customId.split(":");
-    const sessionId = parts[1];
-    const ownerId = parts[2];
-    const page = Number(parts[3]);
+    const ownerId = parts[1];
+    const page = Number(parts[2]);
+    const encodedQuery = parts[3] ?? "";
 
     if (interaction.user.id !== ownerId) {
       await interaction
@@ -1824,16 +1879,18 @@ export class GameDb {
       return;
     }
 
-    const session = GAME_SEARCH_SESSIONS.get(sessionId);
-    if (!session) {
+    const searchTerm = sanitizeUserInput(decodeSearchQuery(encodedQuery), { preserveNewlines: false });
+    if (!searchTerm) {
       await interaction
         .reply({
-          content: "This search session has expired.",
+          content: "This search request is no longer valid.",
           flags: MessageFlags.Ephemeral,
         })
         .catch(() => {});
       return;
     }
+
+    const results = await Game.searchGames(searchTerm);
 
     const gameId = Number(interaction.values?.[0]);
     if (!Number.isFinite(gameId)) {
@@ -1863,12 +1920,11 @@ export class GameDb {
       return;
     }
 
-    const response = this.buildSearchResponse(sessionId, session, page, false);
+    const response = this.buildSearchResponse(searchTerm, results, ownerId, page, false);
     const actionRow = this.buildGameProfileActionRow(
       gameId,
       profile.hasThread,
       profile.featuredVideoUrl,
-      profile.canImportHltb,
     );
 
     try {
@@ -1883,12 +1939,12 @@ export class GameDb {
     }
   }
 
-  @ButtonComponent({ id: /^gamedb-search-page:[^:]+:\d+:\d+:(next|prev)$/ })
+  @ButtonComponent({ id: /^gamedb-search-page:\d+:\d+:[A-Za-z0-9_-]*:(next|prev)$/ })
   async handleSearchPage(interaction: ButtonInteraction): Promise<void> {
     const parts = interaction.customId.split(":");
-    const sessionId = parts[1];
-    const ownerId = parts[2];
-    const page = Number(parts[3]);
+    const ownerId = parts[1];
+    const page = Number(parts[2]);
+    const encodedQuery = parts[3] ?? "";
     const direction = parts[4];
 
     if (interaction.user.id !== ownerId) {
@@ -1901,20 +1957,21 @@ export class GameDb {
       return;
     }
 
-    const session = GAME_SEARCH_SESSIONS.get(sessionId);
-    if (!session) {
+    const searchTerm = sanitizeUserInput(decodeSearchQuery(encodedQuery), { preserveNewlines: false });
+    if (!searchTerm) {
       await interaction
         .reply({
-          content: "This search session has expired.",
+          content: "This search request is no longer valid.",
           flags: MessageFlags.Ephemeral,
         })
         .catch(() => {});
       return;
     }
 
+    const results = await Game.searchGames(searchTerm);
     const totalPages = Math.max(
       1,
-      Math.ceil(session.results.length / GAME_SEARCH_PAGE_SIZE),
+      Math.ceil(results.length / GAME_SEARCH_PAGE_SIZE),
     );
     const delta = direction === "next" ? 1 : -1;
     const newPage = Math.min(Math.max(page + delta, 0), totalPages - 1);
@@ -1925,7 +1982,7 @@ export class GameDb {
       // ignore
     }
 
-    const response = this.buildSearchResponse(sessionId, session, newPage, true);
+    const response = this.buildSearchResponse(searchTerm, results, ownerId, newPage, true);
 
     try {
       await interaction.editReply(response);
@@ -1935,23 +1992,24 @@ export class GameDb {
   }
 
   private buildSearchResponse(
-    sessionId: string,
-    session: { userId: string; results: any[]; query: string },
+    searchTerm: string,
+    results: any[],
+    ownerId: string,
     page: number,
     includeList: boolean,
   ): { components: Array<ContainerBuilder | ActionRowBuilder<any>>; flags: number } {
     const totalPages = Math.max(
       1,
-      Math.ceil(session.results.length / GAME_SEARCH_PAGE_SIZE),
+      Math.ceil(results.length / GAME_SEARCH_PAGE_SIZE),
     );
     const safePage = Math.min(Math.max(page, 0), totalPages - 1);
     const start = safePage * GAME_SEARCH_PAGE_SIZE;
-    const displayedResults = session.results.slice(
+    const displayedResults = results.slice(
       start,
       start + GAME_SEARCH_PAGE_SIZE,
     );
     const titleCounts = new Map<string, number>();
-    session.results.forEach((game) => {
+    results.forEach((game) => {
       const title = String(game.title ?? "");
       titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
     });
@@ -1971,11 +2029,11 @@ export class GameDb {
       return `• **${title}**${yearText}`;
     }).join("\n");
 
-    const title = session.query
-      ? `Search Results for "${session.query}" (Page ${safePage + 1}/${totalPages})`
+    const title = searchTerm
+      ? `Search Results for "${searchTerm}" (Page ${safePage + 1}/${totalPages})`
       : `All Games (Page ${safePage + 1}/${totalPages})`;
 
-    const selectCustomId = `gamedb-search-select:${sessionId}:${session.userId}:${safePage}`;
+    const selectCustomId = buildSearchCustomId("select", ownerId, safePage, searchTerm);
     const options = displayedResults.map((game) => {
       const title = String(game.title ?? "");
       const isDuplicate = (titleCounts.get(title) ?? 0) > 1;
@@ -2008,13 +2066,13 @@ export class GameDb {
     const nextDisabled = safePage >= totalPages - 1;
 
     const prevButton = new ButtonBuilder()
-      .setCustomId(`gamedb-search-page:${sessionId}:${session.userId}:${safePage}:prev`)
+      .setCustomId(buildSearchCustomId("page", ownerId, safePage, searchTerm, "prev"))
       .setLabel("Previous Page")
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(prevDisabled);
 
     const nextButton = new ButtonBuilder()
-      .setCustomId(`gamedb-search-page:${sessionId}:${session.userId}:${safePage}:next`)
+      .setCustomId(buildSearchCustomId("page", ownerId, safePage, searchTerm, "next"))
       .setLabel("Next Page")
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(nextDisabled);
@@ -2024,7 +2082,7 @@ export class GameDb {
     if (includeList) {
       const listText = resultList || "No results.";
       const content = this.trimTextDisplayContent(
-        `## ${title}\n\n${listText}\n\n*${session.results.length} results total*`,
+        `## ${title}\n\n${listText}\n\n*${results.length} results total*`,
       );
       const container = new ContainerBuilder().addTextDisplayComponents(
         new TextDisplayBuilder().setContent(content),

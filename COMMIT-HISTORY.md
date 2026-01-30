@@ -1,4 +1,5 @@
 2026-01-30 - Commit ID: 85144f3 - issue-106-and-100: fixed them.
+2026-01-29 - Commit ID: cf89236 - tweaks for UI on /gamedb view
 2026-01-29 - Commit ID: 271e7c7 - fixes
 2026-01-29 - Commit ID: b5ba719 - issue-96: corrected thread linking bug
 2026-01-29 - Commit ID: d30618c - issue-95: added 'not blocked' filter to /todo and made it the default
