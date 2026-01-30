@@ -49,13 +49,16 @@ import {
   stripModalInput,
   type AnyRepliable,
 } from "../functions/InteractionUtils.js";
-import Game from "../classes/Game.js";
+import Game, { type IGame } from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
 import {
   createIgdbSession,
   type IgdbSelectOption,
 } from "../services/IgdbSelectService.js";
-import { announceCompletion } from "../functions/CompletionHelpers.js";
+import {
+  announceCompletion,
+  notifyUnknownCompletionPlatform,
+} from "../functions/CompletionHelpers.js";
 import {
   COMPLETION_TYPES,
   type CompletionType,
@@ -86,6 +89,7 @@ const NOW_PLAYING_COMPLETE_REMOVE_SELECT_PREFIX = "np-complete-remove";
 const NOW_PLAYING_COMPLETE_ANNOUNCE_SELECT_PREFIX = "np-complete-announce";
 const NOW_PLAYING_COMPLETE_NOTE_SELECT_PREFIX = "np-complete-note";
 const NOW_PLAYING_COMPLETE_DETAILS_PREFIX = "np-complete-details";
+const NOW_PLAYING_COMPLETE_PLATFORM_SELECT_PREFIX = "np-complete-platform";
 const COMPONENTS_V2_FLAG = 1 << 15;
 const NOW_PLAYING_GALLERY_MAX = 5;
 type NowPlayingAddSession = {
@@ -106,6 +110,23 @@ type NowPlayingCompletionWizardSession = {
   returnToList: boolean;
 };
 const nowPlayingCompletionWizardSessions = new Map<string, NowPlayingCompletionWizardSession>();
+type NowPlayingCompletionPlatformSession = {
+  sessionId: string;
+  userId: string;
+  gameId: number;
+  completionType: CompletionType;
+  completedAt: Date | null;
+  finalPlaytimeHours: number | null;
+  note: string | null;
+  removeFromNowPlaying: boolean;
+  announce: boolean;
+  returnToList: boolean;
+  platforms: Array<{ id: number; name: string }>;
+};
+const nowPlayingCompletionPlatformSessions = new Map<
+  string,
+  NowPlayingCompletionPlatformSession
+>();
 type NowPlayingListContext = {
   channelId: string;
   messageId: string;
@@ -893,14 +914,181 @@ export class NowPlayingCommand {
       }
     }
 
+    await this.promptNowPlayingCompletionPlatformSelection(
+      interaction,
+      sessionId,
+      session,
+      game,
+      completedAt,
+      finalPlaytimeHours,
+      note,
+    );
+    return;
+  }
+
+  @SelectMenuComponent({ id: /^np-complete-platform:[^:]+$/ })
+  async handleNowPlayingCompletionPlatformSelect(
+    interaction: StringSelectMenuInteraction,
+  ): Promise<void> {
+    const [, platformSessionId] = interaction.customId.split(":");
+    const session = nowPlayingCompletionPlatformSessions.get(platformSessionId);
+    if (!session) {
+      const container = new ContainerBuilder().addTextDisplayComponents(
+        new TextDisplayBuilder().setContent("This completion prompt has expired."),
+      );
+      await safeReply(interaction, {
+        components: [container],
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    if (interaction.user.id !== session.userId) {
+      const container = new ContainerBuilder().addTextDisplayComponents(
+        new TextDisplayBuilder().setContent("This completion prompt isn't for you."),
+      );
+      await safeReply(interaction, {
+        components: [container],
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    const selected = interaction.values?.[0];
+    const isOther = selected === "other";
+    let platformId: number | null = null;
+    if (!isOther) {
+      const parsedId = Number(selected);
+      if (Number.isInteger(parsedId)) {
+        platformId = parsedId;
+      }
+    }
+    const valid = isOther || (
+      platformId !== null &&
+      session.platforms.some((platform) => platform.id === platformId)
+    );
+    if (!valid) {
+      const container = new ContainerBuilder().addTextDisplayComponents(
+        new TextDisplayBuilder().setContent("Invalid platform selection."),
+      );
+      await safeReply(interaction, {
+        components: [container],
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    await interaction.deferUpdate().catch(() => {});
+    nowPlayingCompletionPlatformSessions.delete(platformSessionId);
+
+    const game = await Game.getGameById(session.gameId);
+    if (!game) {
+      const container = new ContainerBuilder().addTextDisplayComponents(
+        new TextDisplayBuilder().setContent("That game could not be found."),
+      );
+      await safeReply(interaction, {
+        components: [container],
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    if (isOther) {
+      await notifyUnknownCompletionPlatform(interaction, game.title, game.id);
+    }
+
+    await this.finalizeNowPlayingCompletion(
+      interaction,
+      session.sessionId,
+      session,
+      game,
+      platformId,
+    );
+  }
+
+  private async promptNowPlayingCompletionPlatformSelection(
+    interaction: ModalSubmitInteraction,
+    sessionId: string,
+    session: NowPlayingCompletionWizardSession,
+    game: IGame,
+    completedAt: Date | null,
+    finalPlaytimeHours: number | null,
+    note: string | null,
+  ): Promise<void> {
+    const platforms = await Game.getPlatformsForGame(game.id);
+    if (!platforms.length) {
+      const container = new ContainerBuilder().addTextDisplayComponents(
+        new TextDisplayBuilder().setContent("No platform release data is available for this game."),
+      );
+      await safeReply(interaction, {
+        components: [container],
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    const platformOptions = platforms.map((platform) => ({
+      id: platform.id,
+      name: platform.name,
+    }));
+    const platformSessionId = `np-comp-platform-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    nowPlayingCompletionPlatformSessions.set(platformSessionId, {
+      sessionId,
+      userId: session.userId,
+      gameId: game.id,
+      completionType: session.completionType,
+      completedAt,
+      finalPlaytimeHours,
+      note,
+      removeFromNowPlaying: session.removeFromNowPlaying,
+      announce: session.announce,
+      returnToList: session.returnToList,
+      platforms: platformOptions,
+    });
+
+    const baseOptions = platformOptions.map((platform) => ({
+      label: platform.name.slice(0, 100),
+      value: String(platform.id),
+    }));
+    const options = [
+      ...baseOptions.slice(0, 24),
+      { label: "Other", value: "other" },
+    ];
+    const select = new StringSelectMenuBuilder()
+      .setCustomId(`${NOW_PLAYING_COMPLETE_PLATFORM_SELECT_PREFIX}:${platformSessionId}`)
+      .setPlaceholder("Select the platform")
+      .addOptions(options);
+    const content = platformOptions.length > 24
+      ? `Select the platform for **${game.title}** (showing first 24).`
+      : `Select the platform for **${game.title}**.`;
+    const container = new ContainerBuilder().addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(content),
+    );
+    await safeReply(interaction, {
+      components: [
+        container,
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select),
+      ],
+      flags: buildComponentsV2Flags(true),
+    });
+  }
+
+  private async finalizeNowPlayingCompletion(
+    interaction: StringSelectMenuInteraction,
+    sessionId: string,
+    session: NowPlayingCompletionPlatformSession,
+    game: IGame,
+    platformId: number | null,
+  ): Promise<void> {
     try {
       await Member.addCompletion({
         userId: session.userId,
-        gameId: session.gameId,
+        gameId: game.id,
         completionType: session.completionType,
-        completedAt,
-        finalPlaytimeHours,
-        note,
+        platformId,
+        completedAt: session.completedAt,
+        finalPlaytimeHours: session.finalPlaytimeHours,
+        note: session.note,
       });
     } catch (err: any) {
       const msg = err?.message ?? "Failed to save completion.";
@@ -915,7 +1103,7 @@ export class NowPlayingCommand {
     }
 
     if (session.removeFromNowPlaying) {
-      await Member.removeNowPlaying(session.userId, session.gameId).catch(() => {});
+      await Member.removeNowPlaying(session.userId, game.id).catch(() => {});
     }
 
     if (session.announce) {
@@ -924,8 +1112,8 @@ export class NowPlayingCommand {
         session.userId,
         game,
         session.completionType,
-        completedAt,
-        finalPlaytimeHours,
+        session.completedAt,
+        session.finalPlaytimeHours,
       );
     }
 
@@ -968,14 +1156,14 @@ export class NowPlayingCommand {
       "## Completion Added",
       `**Game:** ${game.title}`,
       `**Type:** ${session.completionType}`,
-      `**Date:** ${formatTableDate(completedAt)}`,
+      `**Date:** ${formatTableDate(session.completedAt)}`,
     ];
-    const playtimeText = formatPlaytimeHours(finalPlaytimeHours);
+    const playtimeText = formatPlaytimeHours(session.finalPlaytimeHours);
     if (playtimeText) {
       detailLines.push(`**Hours:** ${playtimeText}`);
     }
-    if (note) {
-      detailLines.push(`**Note:** ${note}`);
+    if (session.note) {
+      detailLines.push(`**Note:** ${session.note}`);
     }
     detailLines.push(
       `**Removed from Now Playing:** ${session.removeFromNowPlaying ? "Yes" : "No"}`,

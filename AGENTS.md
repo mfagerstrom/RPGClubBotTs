@@ -19,3 +19,4 @@ Aim for clean, centralized patterns (e.g., shared helpers/defaults) instead of d
 Do not keep making this mistake: use Discord flags for ephemerality instead of the deprecated `ephemeral` option when sending interaction responses.
 Do not keep making this mistake: when building Discord Components v2 responses, ensure the top-level components list only includes valid container types (type 1 ActionRow or proper ContainerBuilder), and keep each ActionRow to 1-5 components to avoid DiscordAPIError[50035] about UNION_TYPE_CHOICES or BASE_TYPE_BAD_LENGTH.
 you are not allowed to use emdashes.
+Whenever I report an error, assess and report if a custom lint rule would be useful for catching that error in the future.

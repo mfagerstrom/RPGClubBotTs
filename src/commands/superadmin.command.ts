@@ -37,7 +37,10 @@ import {
   type CompletionType,
   parseCompletionDateInput,
 } from "./profile.command.js";
-import { saveCompletion } from "../functions/CompletionHelpers.js";
+import {
+  notifyUnknownCompletionPlatform,
+  saveCompletion,
+} from "../functions/CompletionHelpers.js";
 
 type CompletionAddContext = {
   targetUserId: string;
@@ -51,6 +54,14 @@ type CompletionAddContext = {
 };
 
 const superadminCompletionAddSessions = new Map<string, CompletionAddContext>();
+type CompletionPlatformContext = CompletionAddContext & {
+  userId: string;
+  gameId: number;
+  gameTitle: string;
+  platforms: Array<{ id: number; name: string }>;
+};
+const superadminCompletionPlatformSessions = new Map<string, CompletionPlatformContext>();
+const SUPERADMIN_COMPLETION_PLATFORM_SELECT_PREFIX = "sa-comp-platform-select";
 
 type SuperAdminHelpTopicId =
   | "memberscan"
@@ -72,7 +83,7 @@ export const SUPERADMIN_HELP_TOPICS: SuperAdminHelpTopic[] = [
     label: "/superadmin completion-add-other",
     summary: "Add a game completion for another user.",
     syntax: "Syntax: /superadmin completion-add-other user:<user> completion_type:<type> title:<string> [completion_date:<string>] [final_playtime_hours:<number>] [announce:<bool>]",
-    notes: "Uses a search query to find or import the game.",
+    notes: "Uses a search query to find or import the game, then prompts for a platform.",
   },
   {
     id: "memberscan",
@@ -290,6 +301,72 @@ export class SuperAdmin {
     }
   }
 
+  @SelectMenuComponent({ id: /^sa-comp-platform-select:.+/ })
+  async handleSuperAdminCompletionPlatformSelect(
+    interaction: StringSelectMenuInteraction,
+  ): Promise<void> {
+    const [, sessionId] = interaction.customId.split(":");
+    const ctx = superadminCompletionPlatformSessions.get(sessionId);
+
+    if (!ctx) {
+      await interaction.reply({
+        content: "This completion prompt has expired.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    const okToUseCommand: boolean = await isSuperAdmin(interaction as any);
+    if (!okToUseCommand) return;
+
+    if (interaction.user.id !== ctx.userId) {
+      await interaction.reply({
+        content: "This completion prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    const selected = interaction.values?.[0];
+    const isOther = selected === "other";
+    let platformId: number | null = null;
+    if (!isOther) {
+      const parsedId = Number(selected);
+      if (Number.isInteger(parsedId)) {
+        platformId = parsedId;
+      }
+    }
+    const valid = isOther || (
+      platformId !== null &&
+      ctx.platforms.some((platform) => platform.id === platformId)
+    );
+    if (!valid) {
+      await interaction.reply({
+        content: "Invalid platform selection.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    await interaction.deferUpdate().catch(() => {});
+    superadminCompletionPlatformSessions.delete(sessionId);
+
+    const game = await Game.getGameById(ctx.gameId);
+    if (!game) {
+      await interaction.followUp({
+        content: "Selected game was not found in GameDB.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    if (isOther) {
+      await notifyUnknownCompletionPlatform(interaction, game.title, game.id);
+    }
+    await this.saveCompletionForContext(interaction, ctx, game, platformId);
+    await interaction.editReply({ components: [] }).catch(() => {});
+  }
+
   private async promptCompletionSelection(
     interaction: AnyRepliable,
     searchTerm: string,
@@ -326,6 +403,59 @@ export class SuperAdmin {
     }
 
     await this.promptIgdbSelection(interaction, searchTerm, ctx);
+  }
+
+  private createCompletionPlatformSession(ctx: CompletionPlatformContext): string {
+    const sessionId = `sacomp-platform-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    superadminCompletionPlatformSessions.set(sessionId, ctx);
+    return sessionId;
+  }
+
+  private async promptCompletionPlatformSelection(
+    interaction: AnyRepliable,
+    ctx: CompletionAddContext,
+    game: IGame,
+  ): Promise<void> {
+    const platforms = await Game.getPlatformsForGame(game.id);
+    if (!platforms.length) {
+      await safeReply(interaction, {
+        content: "No platform release data found for this game.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const platformOptions = platforms.map((platform) => ({
+      id: platform.id,
+      name: platform.name,
+    }));
+    const sessionId = this.createCompletionPlatformSession({
+      ...ctx,
+      userId: interaction.user.id,
+      gameId: game.id,
+      gameTitle: game.title,
+      platforms: platformOptions,
+    });
+    const baseOptions = platformOptions.map((platform) => ({
+      label: platform.name.slice(0, 100),
+      value: String(platform.id),
+    }));
+    const options = [
+      ...baseOptions.slice(0, 24),
+      { label: "Other", value: "other" },
+    ];
+    const select = new StringSelectMenuBuilder()
+      .setCustomId(`${SUPERADMIN_COMPLETION_PLATFORM_SELECT_PREFIX}:${sessionId}`)
+      .setPlaceholder("Select the platform")
+      .addOptions(options);
+    const content = platformOptions.length > 24
+      ? `Select the platform for **${game.title}** (showing first 24).`
+      : `Select the platform for **${game.title}**.`;
+    await safeReply(interaction, {
+      content,
+      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   private async promptIgdbSelection(
@@ -393,7 +523,7 @@ export class SuperAdmin {
           });
           return;
         }
-        await this.saveCompletionForContext(sel, ctx, game);
+        await this.promptCompletionPlatformSelection(sel, ctx, game);
       },
     );
 
@@ -547,7 +677,7 @@ export class SuperAdmin {
         return false;
       }
 
-      await this.saveCompletionForContext(interaction, ctx, game);
+      await this.promptCompletionPlatformSelection(interaction, ctx, game);
       return true;
     } catch (err: any) {
       const msg = err?.message ?? String(err);
@@ -599,11 +729,13 @@ export class SuperAdmin {
     interaction: StringSelectMenuInteraction,
     ctx: CompletionAddContext,
     game: IGame,
+    platformId: number | null,
   ): Promise<void> {
     await saveCompletion(
       interaction,
       ctx.targetUserId,
       game.id,
+      platformId,
       ctx.completionType,
       ctx.completedAt,
       ctx.finalPlaytimeHours,

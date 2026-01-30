@@ -22,6 +22,7 @@ import { COMPLETION_TYPES, type CompletionType } from "../commands/profile.comma
 import { createIgdbSession, type IgdbSelectOption } from "../services/IgdbSelectService.js";
 import { igdbService, type IGDBGameDetails } from "../services/IgdbService.js";
 import { stripModalInput } from "../functions/InteractionUtils.js";
+import { notifyUnknownCompletionPlatform } from "../functions/CompletionHelpers.js";
 
 const PUSH_PIN_EMOJI = "📌";
 const PLUS_EMOJI = "➕";
@@ -41,6 +42,12 @@ type CompletionReactionSession = {
 };
 
 const completionReactionSessions = new Map<string, CompletionReactionSession>();
+type CompletionReactionPlatformSession = CompletionReactionSession & {
+  gameId: number;
+  platforms: Array<{ id: number; name: string }>;
+};
+const completionReactionPlatformSessions = new Map<string, CompletionReactionPlatformSession>();
+const COMPLETION_REACTION_PLATFORM_SELECT_PREFIX = "completion-react-platform";
 
 const buildCompletionTypeRow = (sessionId: string): ActionRowBuilder<StringSelectMenuBuilder> => {
   const select = new StringSelectMenuBuilder()
@@ -71,6 +78,17 @@ const buildCompletionGameRow = (
     .setCustomId(`completion-react-game:${sessionId}`)
     .setPlaceholder("Select the game")
     .addOptions(gameOptions);
+  return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+};
+
+const buildCompletionPlatformRow = (
+  sessionId: string,
+  platformOptions: { label: string; value: string }[],
+): ActionRowBuilder<StringSelectMenuBuilder> => {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`${COMPLETION_REACTION_PLATFORM_SELECT_PREFIX}:${sessionId}`)
+    .setPlaceholder("Select the platform")
+    .addOptions(platformOptions);
   return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
 };
 
@@ -269,7 +287,6 @@ export class MessageReactionAdd {
 
     if (matches.length === 1) {
       await this.saveCompletionFromReaction(interaction, session, matches[0].id);
-      completionReactionSessions.delete(sessionId);
       return;
     }
 
@@ -318,6 +335,102 @@ export class MessageReactionAdd {
     }
 
     await this.saveCompletionFromReaction(interaction, session, gameId);
+  }
+
+  @SelectMenuComponent({ id: /^completion-react-platform:.+$/ })
+  async handleCompletionReactionPlatform(
+    interaction: StringSelectMenuInteraction,
+  ): Promise<void> {
+    const [, sessionId] = interaction.customId.split(":");
+    const session = completionReactionPlatformSessions.get(sessionId);
+    if (!session) {
+      await interaction.update({
+        content: "This completion prompt has expired.",
+        components: [],
+      }).catch(() => {});
+      return;
+    }
+
+    if (interaction.user.id !== session.requesterId) {
+      await interaction.reply({
+        content: "This completion prompt is not for you.",
+      }).catch(() => {});
+      return;
+    }
+
+    const selected = interaction.values?.[0];
+    const isOther = selected === "other";
+    let platformId: number | null = null;
+    if (!isOther) {
+      const parsedId = Number(selected);
+      if (Number.isInteger(parsedId)) {
+        platformId = parsedId;
+      }
+    }
+    const valid = isOther || (
+      platformId !== null &&
+      session.platforms.some((platform) => platform.id === platformId)
+    );
+    if (!valid) {
+      await interaction.update({
+        content: "Invalid platform selection.",
+        components: [],
+      }).catch(() => {});
+      completionReactionPlatformSessions.delete(sessionId);
+      completionReactionSessions.delete(sessionId);
+      return;
+    }
+
+    const completionType = session.completionType ?? (COMPLETION_TYPES[0] as CompletionType);
+    const game = await Game.getGameById(session.gameId);
+    if (!game) {
+      await interaction.update({
+        content: "Selected game was not found in GameDB.",
+        components: [],
+      }).catch(() => {});
+      completionReactionPlatformSessions.delete(sessionId);
+      completionReactionSessions.delete(sessionId);
+      return;
+    }
+
+    if (isOther) {
+      await notifyUnknownCompletionPlatform(interaction, game.title, game.id);
+    }
+
+    try {
+      await Member.addCompletion({
+        userId: session.targetUserId,
+        gameId: game.id,
+        completionType,
+        platformId,
+        completedAt: session.completedAt,
+        finalPlaytimeHours: null,
+        note: null,
+      });
+    } catch (err: any) {
+      const msg = err?.message ?? "Failed to save completion.";
+      await interaction.update({
+        content: `Could not save completion: ${msg}`,
+        components: [],
+      }).catch(() => {});
+      completionReactionPlatformSessions.delete(sessionId);
+      completionReactionSessions.delete(sessionId);
+      return;
+    }
+
+    await interaction.update({
+      content: [
+        "Completion added.",
+        `Member: <@${session.targetUserId}>`,
+        `Game: ${game.title}`,
+        `Type: ${completionType}`,
+        `Date: ${session.completedAt.toLocaleDateString()}`,
+        `Message: ${session.messageUrl}`,
+      ].join("\n"),
+      components: [],
+    }).catch(() => {});
+
+    completionReactionPlatformSessions.delete(sessionId);
     completionReactionSessions.delete(sessionId);
   }
 
@@ -427,36 +540,38 @@ export class MessageReactionAdd {
       await interaction.update(payload).catch(() => {});
     };
 
-    const completionType = session.completionType ?? (COMPLETION_TYPES[0] as CompletionType);
     const game = await Game.getGameById(gameId);
     if (!game) {
       await updateMessage("Selected game was not found in GameDB.");
       return;
     }
 
-    try {
-      await Member.addCompletion({
-        userId: session.targetUserId,
-        gameId: game.id,
-        completionType,
-        completedAt: session.completedAt,
-        finalPlaytimeHours: null,
-        note: null,
-      });
-    } catch (err: any) {
-      const msg = err?.message ?? "Failed to save completion.";
-      await updateMessage(`Could not save completion: ${msg}`);
+    const platforms = await Game.getPlatformsForGame(game.id);
+    if (!platforms.length) {
+      await updateMessage("No platform release data is available for this game.");
       return;
     }
 
-    await updateMessage([
-      "Completion added.",
-      `Member: <@${session.targetUserId}>`,
-      `Game: ${game.title}`,
-      `Type: ${completionType}`,
-      `Date: ${session.completedAt.toLocaleDateString()}`,
-      `Message: ${session.messageUrl}`,
-    ].join("\n"));
+    const baseOptions = platforms.map((platform) => ({
+      label: platform.name.slice(0, 100),
+      value: String(platform.id),
+    }));
+    const platformOptions = [
+      ...baseOptions.slice(0, 24),
+      { label: "Other", value: "other" },
+    ];
+    completionReactionPlatformSessions.set(session.sessionId, {
+      ...session,
+      gameId: game.id,
+      platforms: platforms.map((platform) => ({ id: platform.id, name: platform.name })),
+    });
+    const platformContent = platforms.length > 24
+      ? `Select the platform for "${game.title}" (showing first 24).`
+      : `Select the platform for "${game.title}".`;
+    await interaction.update({
+      content: platformContent,
+      components: [buildCompletionPlatformRow(session.sessionId, platformOptions)],
+    }).catch(() => {});
   }
 
   private async promptIgdbImport(

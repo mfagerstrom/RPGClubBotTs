@@ -1,3 +1,10 @@
+2026-01-29 - Commit ID: b5ba719 - issue-96: corrected thread linking bug
+2026-01-29 - Commit ID: d30618c - issue-95: added 'not blocked' filter to /todo and made it the default
+2026-01-29 - Commit ID: c920db3 - issue-93: todo menu tweak
+2026-01-29 - Commit ID: 0922f81 - issue-90: handle giveaway post more gracefully, don't keep recreating it
+2026-01-29 - Commit ID: b1629d7 - issue-92: added autocomplete to /gamedb view
+2026-01-29 - Commit ID: 2daf360 - issue-91: add import hltb data button on /gamedb view for 6+ month old games
+2026-01-29 - Commit ID: e8818b2 - issue-31: cache /hltb data for games over six months old to reduce scraping of the site
 2026-01-29 - Commit ID: d0481d1 - issue-87: added special server owner override to make all commands public in gamedev channel in order to save time and to show users examples of how things work (when they are usually private)
 2026-01-29 - Commit ID: 54c5705 - issue-88: corrected missing thread links on /now-playing list
 2026-01-29 - Commit ID: 11c5e2d - renamed /todo list to /todo

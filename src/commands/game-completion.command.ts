@@ -60,7 +60,12 @@ import {
   parseCompletionDateInput,
   formatTableDate,
 } from "./profile.command.js";
-import { promptRemoveFromNowPlaying, saveCompletion } from "../functions/CompletionHelpers.js";
+import { formatPlatformDisplayName } from "../functions/PlatformDisplay.js";
+import {
+  notifyUnknownCompletionPlatform,
+  promptRemoveFromNowPlaying,
+  saveCompletion,
+} from "../functions/CompletionHelpers.js";
 
 type CompletionAddContext = {
   userId: string;
@@ -74,6 +79,20 @@ type CompletionAddContext = {
 };
 
 const completionAddSessions = new Map<string, CompletionAddContext>();
+type CompletionPlatformContext = {
+  userId: string;
+  gameId: number;
+  gameTitle: string;
+  completionType: CompletionType;
+  completedAt: Date | null;
+  finalPlaytimeHours: number | null;
+  note: string | null;
+  announce?: boolean;
+  removeFromNowPlaying: boolean;
+  platforms: Array<{ id: number; name: string }>;
+};
+const completionPlatformSessions = new Map<string, CompletionPlatformContext>();
+const COMPLETION_PLATFORM_SELECT_PREFIX = "completion-platform-select";
 const COMPLETIONATOR_SKIP_SENTINEL = "skip";
 const COMPLETIONATOR_PAUSE_SENTINEL = "pause";
 const COMPLETIONATOR_STATUS_OPTIONS = ["start", "resume", "status", "pause", "cancel"] as const;
@@ -293,19 +312,17 @@ export class GameCompletionCommands {
         completedAt,
         false,
       );
-      await saveCompletion(
-        interaction,
+      await this.promptCompletionPlatformSelection(interaction, {
         userId,
-        exactMatch.id,
+        gameId: exactMatch.id,
+        gameTitle: exactMatch.title,
         completionType,
         completedAt,
-        playtime,
-        trimmedNote,
-        exactMatch.title,
+        finalPlaytimeHours: playtime,
+        note: trimmedNote,
         announce,
-        false,
         removeFromNowPlaying,
-      );
+      });
       return;
     }
 
@@ -541,6 +558,7 @@ export class GameCompletionCommands {
       "Game ID",
       "Title",
       "Type",
+      "Platform ID",
       "Completed Date",
       "Playtime (Hours)",
       "Note",
@@ -552,6 +570,7 @@ export class GameCompletionCommands {
         String(c.gameId),
         c.title,
         c.completionType,
+        c.platformId != null ? String(c.platformId) : "",
         c.completedAt ? c.completedAt.toISOString().split("T")[0] : "",
         c.finalPlaytimeHours != null ? String(c.finalPlaytimeHours) : "",
         c.note ?? "",
@@ -798,10 +817,19 @@ export class GameCompletionCommands {
         item.completedAt ?? null,
         true,
       );
+      const platformId = await this.resolveDefaultCompletionPlatformId(item.gameDbGameId);
+      if (!platformId) {
+        await interaction.reply({
+          content: "No platform release data found for this game.",
+          flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+        });
+        return;
+      }
       const completionId = await Member.addCompletion({
         userId: interaction.user.id,
         gameId: item.gameDbGameId,
         completionType: item.completionType ?? "Main Story",
+        platformId,
         completedAt: item.completedAt,
         finalPlaytimeHours: item.playtimeHours,
         note: null,
@@ -873,10 +901,19 @@ export class GameCompletionCommands {
         item.completedAt ?? null,
         true,
       );
+      const platformId = await this.resolveDefaultCompletionPlatformId(item.gameDbGameId);
+      if (!platformId) {
+        await interaction.reply({
+          content: "No platform release data found for this game.",
+          flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+        });
+        return;
+      }
       const completionId = await Member.addCompletion({
         userId: interaction.user.id,
         gameId: item.gameDbGameId,
         completionType: item.completionType ?? "Main Story",
+        platformId,
         completedAt: item.completedAt,
         finalPlaytimeHours: item.playtimeHours,
         note: null,
@@ -1805,6 +1842,129 @@ export class GameCompletionCommands {
     return sessionId;
   }
 
+  @SelectMenuComponent({ id: /^completion-platform-select:.+/ })
+  async handleCompletionPlatformSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const [, sessionId] = interaction.customId.split(":");
+    const ctx = completionPlatformSessions.get(sessionId);
+
+    if (!ctx) {
+      await interaction.reply({
+        content: "This completion prompt has expired.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    if (interaction.user.id !== ctx.userId) {
+      await interaction.reply({
+        content: "This completion prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    const selected = interaction.values?.[0];
+    const isOther = selected === "other";
+    let platformId: number | null = null;
+    if (!isOther) {
+      const parsedId = Number(selected);
+      if (Number.isInteger(parsedId)) {
+        platformId = parsedId;
+      }
+    }
+    const valid = isOther || (
+      platformId !== null &&
+      ctx.platforms.some((platform) => platform.id === platformId)
+    );
+    if (!valid) {
+      await interaction.reply({
+        content: "Invalid platform selection.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    await interaction.deferUpdate().catch(() => {});
+    completionPlatformSessions.delete(sessionId);
+
+    if (isOther) {
+      await notifyUnknownCompletionPlatform(interaction, ctx.gameTitle, ctx.gameId);
+    }
+
+    await saveCompletion(
+      interaction,
+      ctx.userId,
+      ctx.gameId,
+      platformId,
+      ctx.completionType,
+      ctx.completedAt,
+      ctx.finalPlaytimeHours,
+      ctx.note,
+      ctx.gameTitle,
+      ctx.announce,
+      false,
+      ctx.removeFromNowPlaying,
+    );
+
+    await interaction.editReply({ components: [] }).catch(() => {});
+  }
+
+  private createCompletionPlatformSession(ctx: CompletionPlatformContext): string {
+    const sessionId = `comp-platform-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    completionPlatformSessions.set(sessionId, ctx);
+    return sessionId;
+  }
+
+  private async promptCompletionPlatformSelection(
+    interaction: CommandInteraction | StringSelectMenuInteraction | ButtonInteraction,
+    ctx: Omit<CompletionPlatformContext, "platforms">,
+  ): Promise<void> {
+    const platforms = await Game.getPlatformsForGame(ctx.gameId);
+    if (!platforms.length) {
+      await safeReply(interaction, {
+        content: "No platform release data is available for this game.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const platformOptions = platforms.map((platform) => ({
+      id: platform.id,
+      name: platform.name,
+    }));
+    const sessionId = this.createCompletionPlatformSession({
+      ...ctx,
+      platforms: platformOptions,
+    });
+
+    const baseOptions = platformOptions.map((platform) => ({
+      label: platform.name.slice(0, 100),
+      value: String(platform.id),
+    }));
+    const options = [
+      ...baseOptions.slice(0, 24),
+      { label: "Other", value: "other" },
+    ];
+    const select = new StringSelectMenuBuilder()
+      .setCustomId(`${COMPLETION_PLATFORM_SELECT_PREFIX}:${sessionId}`)
+      .setPlaceholder("Select the platform")
+      .addOptions(options);
+    const content = platformOptions.length > 24
+      ? `Select the platform for **${ctx.gameTitle}** (showing first 24).`
+      : `Select the platform for **${ctx.gameTitle}**.`;
+
+    await safeReply(interaction, {
+      content,
+      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  private async resolveDefaultCompletionPlatformId(gameId: number): Promise<number | null> {
+    const platforms = await Game.getPlatformsForGame(gameId);
+    return platforms[0]?.id ?? null;
+  }
+
   private async confirmDuplicateCompletion(
     interaction: CommandInteraction | StringSelectMenuInteraction | ButtonInteraction,
     gameTitle: string,
@@ -2056,7 +2216,7 @@ export class GameCompletionCommands {
       .setDescription(`Row ${item.rowIndex} of ${session.totalCount}`)
       .addFields(
         { name: "Title", value: item.gameTitle, inline: false },
-        { name: "Platform", value: item.platformName ?? "Unknown", inline: true },
+        { name: "Platform", value: formatPlatformDisplayName(item.platformName) ?? "Unknown", inline: true },
         { name: "Region", value: item.regionName ?? "Unknown", inline: true },
         { name: "Type", value: item.sourceType ?? "Unknown", inline: true },
         { name: "Mapped", value: item.completionType ?? "Unknown", inline: true },
@@ -3025,6 +3185,8 @@ export class GameCompletionCommands {
       year,
       title: query,
     });
+    const platforms = await Game.getAllPlatforms();
+    const platformMap = new Map(platforms.map((platform) => [platform.id, platform.name]));
 
     allCompletions.sort((a, b) => {
       const yearA = a.completedAt ? a.completedAt.getFullYear() : null;
@@ -3081,10 +3243,16 @@ export class GameCompletionCommands {
 
       const idxBlock = `\`${idxLabel}\``;
       const dateBlock = dateLabel ? `\`${dateLabel}\`` : "";
-      const line = `${idxBlock} ${dateBlock} **${c.title}** (${typeAbbrev})`.replace(
-        /\s{2,}/g,
-        " ",
-      );
+      const rawPlatformName = c.platformId == null
+        ? null
+        : platformMap.get(c.platformId) ?? "Unknown Platform";
+      const platformName = formatPlatformDisplayName(rawPlatformName);
+      const platformLabel = platformName ? ` [${platformName}]` : "";
+      const line = `${idxBlock} ${dateBlock} **${c.title}**${platformLabel} (${typeAbbrev})`
+        .replace(
+          /\s{2,}/g,
+          " ",
+        );
       acc[yr].push(line);
       if (c.note) {
         acc[yr].push(`> ${c.note}`);
@@ -3485,19 +3653,17 @@ export class GameCompletionCommands {
           ctx.completedAt,
           false,
         );
-        await saveCompletion(
-          sel,
-          ctx.userId,
-          imported.gameId,
-          ctx.completionType,
-          ctx.completedAt,
-          ctx.finalPlaytimeHours,
-          ctx.note,
-          imported.title,
-          ctx.announce,
-          false,
+        await this.promptCompletionPlatformSelection(sel, {
+          userId: ctx.userId,
+          gameId: imported.gameId,
+          gameTitle: imported.title,
+          completionType: ctx.completionType,
+          completedAt: ctx.completedAt,
+          finalPlaytimeHours: ctx.finalPlaytimeHours,
+          note: ctx.note,
+          announce: ctx.announce,
           removeFromNowPlaying,
-        );
+        });
       },
     );
 
@@ -3612,19 +3778,17 @@ export class GameCompletionCommands {
         ctx.completedAt,
         false,
       );
-      await saveCompletion(
-        interaction,
-        ctx.userId,
+      await this.promptCompletionPlatformSelection(interaction, {
+        userId: ctx.userId,
         gameId,
-        ctx.completionType,
-        ctx.completedAt,
-        ctx.finalPlaytimeHours,
-        ctx.note,
-        gameTitle ?? undefined,
-        ctx.announce,
-        false,
+        gameTitle: gameTitle ?? "this game",
+        completionType: ctx.completionType,
+        completedAt: ctx.completedAt,
+        finalPlaytimeHours: ctx.finalPlaytimeHours,
+        note: ctx.note,
+        announce: ctx.announce,
         removeFromNowPlaying,
-      );
+      });
       return false;
     } catch (err: any) {
       const msg = err?.message ?? String(err);

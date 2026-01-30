@@ -115,6 +115,7 @@ export interface ICompletionRecord {
   gameId: number;
   title: string;
   completionType: string;
+  platformId: number | null;
   completedAt: Date | null;
   finalPlaytimeHours: number | null;
   createdAt: Date;
@@ -644,13 +645,25 @@ export default class Member {
     userId: string;
     gameId: number;
     completionType: string;
+    platformId: number | null;
     completedAt?: Date | null;
     finalPlaytimeHours?: number | null;
     note?: string | null;
   }): Promise<number> {
-    const { userId, gameId, completionType, completedAt, finalPlaytimeHours, note } = params;
+    const {
+      userId,
+      gameId,
+      completionType,
+      platformId,
+      completedAt,
+      finalPlaytimeHours,
+      note,
+    } = params;
     if (!Number.isInteger(gameId) || gameId <= 0) {
       throw new Error("Invalid GameDB id.");
+    }
+    if (platformId != null && (!Number.isInteger(platformId) || platformId <= 0)) {
+      throw new Error("Invalid platform selection.");
     }
     const connection = await getOraclePool().getConnection();
     const normalizedNote = note?.trim();
@@ -660,9 +673,10 @@ export default class Member {
       const result = await connection.execute<{ COMPLETION_ID: number }>(
         `
         INSERT INTO USER_GAME_COMPLETIONS (
-          USER_ID, GAMEDB_GAME_ID, COMPLETION_TYPE, COMPLETED_AT, FINAL_PLAYTIME_HRS, NOTE
+          USER_ID, GAMEDB_GAME_ID, COMPLETION_TYPE, PLATFORM_ID,
+          COMPLETED_AT, FINAL_PLAYTIME_HRS, NOTE
         ) VALUES (
-          :userId, :gameId, :type, :completedAt, :playtime, :note
+          :userId, :gameId, :type, :platformId, :completedAt, :playtime, :note
         )
         RETURNING COMPLETION_ID INTO :completionId
         `,
@@ -670,6 +684,7 @@ export default class Member {
           userId,
           gameId,
           type: completionType,
+          platformId,
           completedAt: completedAt ?? null,
           playtime: finalPlaytimeHours ?? null,
           note: noteValue,
@@ -709,6 +724,7 @@ export default class Member {
         GAME_ID: number;
         TITLE: string;
         COMPLETION_TYPE: string;
+        PLATFORM_ID: number | null;
         COMPLETED_AT: Date | null;
         FINAL_PLAYTIME_HRS: number | null;
         CREATED_AT: Date;
@@ -720,6 +736,7 @@ export default class Member {
                g.GAME_ID,
                g.TITLE,
                c.COMPLETION_TYPE,
+               c.PLATFORM_ID,
                c.COMPLETED_AT,
                c.FINAL_PLAYTIME_HRS,
                c.CREATED_AT,
@@ -752,6 +769,7 @@ export default class Member {
         gameId: Number(row.GAME_ID),
         title: String(row.TITLE),
         completionType: String(row.COMPLETION_TYPE),
+        platformId: row.PLATFORM_ID ? Number(row.PLATFORM_ID) : null,
         completedAt:
           row.COMPLETED_AT instanceof Date
             ? row.COMPLETED_AT
@@ -788,6 +806,7 @@ export default class Member {
         GAME_ID: number;
         TITLE: string;
         COMPLETION_TYPE: string;
+        PLATFORM_ID: number | null;
         COMPLETED_AT: Date | null;
         FINAL_PLAYTIME_HRS: number | null;
         CREATED_AT: Date;
@@ -799,6 +818,7 @@ export default class Member {
                g.GAME_ID,
                g.TITLE,
                c.COMPLETION_TYPE,
+               c.PLATFORM_ID,
                c.COMPLETED_AT,
                c.FINAL_PLAYTIME_HRS,
                c.CREATED_AT,
@@ -833,6 +853,7 @@ export default class Member {
         gameId: Number(row.GAME_ID),
         title: String(row.TITLE),
         completionType: String(row.COMPLETION_TYPE),
+        platformId: row.PLATFORM_ID ? Number(row.PLATFORM_ID) : null,
         completedAt:
           row.COMPLETED_AT instanceof Date
             ? row.COMPLETED_AT
@@ -886,6 +907,7 @@ export default class Member {
         GAME_ID: number;
         TITLE: string;
         COMPLETION_TYPE: string;
+        PLATFORM_ID: number | null;
         COMPLETED_AT: Date | null;
         FINAL_PLAYTIME_HRS: number | null;
         CREATED_AT: Date;
@@ -897,6 +919,7 @@ export default class Member {
                g.GAME_ID,
                g.TITLE,
                c.COMPLETION_TYPE,
+               c.PLATFORM_ID,
                c.COMPLETED_AT,
                c.FINAL_PLAYTIME_HRS,
                c.CREATED_AT,
@@ -928,6 +951,7 @@ export default class Member {
         gameId: Number(row.GAME_ID),
         title: String(row.TITLE),
         completionType: String(row.COMPLETION_TYPE),
+        platformId: row.PLATFORM_ID ? Number(row.PLATFORM_ID) : null,
         completedAt:
           row.COMPLETED_AT instanceof Date
             ? row.COMPLETED_AT
@@ -958,6 +982,7 @@ export default class Member {
         GAME_ID: number;
         TITLE: string;
         COMPLETION_TYPE: string;
+        PLATFORM_ID: number | null;
         COMPLETED_AT: Date | null;
         FINAL_PLAYTIME_HRS: number | null;
         CREATED_AT: Date;
@@ -969,6 +994,7 @@ export default class Member {
                g.GAME_ID,
                g.TITLE,
                c.COMPLETION_TYPE,
+               c.PLATFORM_ID,
                c.COMPLETED_AT,
                c.FINAL_PLAYTIME_HRS,
                c.CREATED_AT,
@@ -999,6 +1025,7 @@ export default class Member {
         gameId: Number(row.GAME_ID),
         title: String(row.TITLE),
         completionType: String(row.COMPLETION_TYPE),
+        platformId: row.PLATFORM_ID ? Number(row.PLATFORM_ID) : null,
         completedAt:
           row.COMPLETED_AT instanceof Date
             ? row.COMPLETED_AT
@@ -1531,6 +1558,7 @@ export default class Member {
         GAME_ID: number;
         TITLE: string;
         COMPLETION_TYPE: string;
+        PLATFORM_ID: number | null;
         COMPLETED_AT: Date | null;
         FINAL_PLAYTIME_HRS: number | null;
         CREATED_AT: Date;
@@ -1542,6 +1570,7 @@ export default class Member {
                g.GAME_ID,
                g.TITLE,
                c.COMPLETION_TYPE,
+               c.PLATFORM_ID,
                c.COMPLETED_AT,
                c.FINAL_PLAYTIME_HRS,
                c.CREATED_AT,
@@ -1578,6 +1607,7 @@ export default class Member {
         gameId: Number(row.GAME_ID),
         title: String(row.TITLE),
         completionType: String(row.COMPLETION_TYPE),
+        platformId: row.PLATFORM_ID ? Number(row.PLATFORM_ID) : null,
         completedAt:
           row.COMPLETED_AT instanceof Date
             ? row.COMPLETED_AT

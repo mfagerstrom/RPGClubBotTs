@@ -1070,6 +1070,32 @@ export default class Game {
     }
   }
 
+  static async getPlatformsForGame(gameId: number): Promise<IPlatformDef[]> {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+
+    try {
+      const result = await connection.execute<{
+        PLATFORM_ID: number;
+        PLATFORM_CODE: string;
+        PLATFORM_NAME: string;
+        IGDB_PLATFORM_ID: number | null;
+      }>(
+        `SELECT DISTINCT p.PLATFORM_ID, p.PLATFORM_CODE, p.PLATFORM_NAME, p.IGDB_PLATFORM_ID
+           FROM GAMEDB_RELEASES r
+           JOIN GAMEDB_PLATFORMS p ON p.PLATFORM_ID = r.PLATFORM_ID
+          WHERE r.GAME_ID = :gameId
+          ORDER BY p.PLATFORM_NAME ASC`,
+        { gameId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      return (result.rows ?? []).map(mapPlatformDefRow);
+    } finally {
+      await connection.close();
+    }
+  }
+
   static async getAllPlatforms(): Promise<IPlatformDef[]> {
     const pool = getOraclePool();
     const connection = await pool.getConnection();

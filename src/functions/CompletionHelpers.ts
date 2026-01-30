@@ -20,11 +20,13 @@ import Game, { type IGame } from "../classes/Game.js";
 import Member from "../classes/Member.js";
 
 const ANNOUNCEMENT_CHANNEL_ID = "360819470836695042";
+const BOT_DEV_CHANNEL_ID = "1466475139402170450";
 
 export async function saveCompletion(
   interaction: CommandInteraction | StringSelectMenuInteraction,
   userId: string,
   gameId: number,
+  platformId: number | null,
   completionType: CompletionType,
   completedAt: Date | null,
   finalPlaytimeHours: number | null,
@@ -56,6 +58,7 @@ export async function saveCompletion(
       userId,
       gameId,
       completionType,
+      platformId,
       completedAt,
       finalPlaytimeHours,
       note,
@@ -95,6 +98,33 @@ export async function saveCompletion(
       finalPlaytimeHours,
       isAdminOverride,
     );
+  }
+}
+
+export async function notifyUnknownCompletionPlatform(
+  interaction:
+    | CommandInteraction
+    | StringSelectMenuInteraction
+    | ButtonInteraction
+    | ModalSubmitInteraction,
+  gameTitle: string,
+  gameId: number,
+): Promise<void> {
+  try {
+    const channel = await interaction.client.channels.fetch(BOT_DEV_CHANNEL_ID).catch(() => null);
+    if (!channel || !("send" in channel)) {
+      return;
+    }
+    const username = interaction.user.username ?? interaction.user.id;
+    await (channel as any).send({
+      content:
+        `Unknown completion platform selected.\n` +
+        `User: ${username} (<@${interaction.user.id}>)\n` +
+        `Game: ${gameTitle} (GameDB #${gameId})`,
+      allowedMentions: { parse: [] },
+    });
+  } catch {
+    // ignore reporting errors
   }
 }
 

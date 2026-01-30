@@ -62,7 +62,9 @@ import {
   type CompletionType,
   parseCompletionDateInput,
 } from "./profile.command.js";
+import { notifyUnknownCompletionPlatform } from "../functions/CompletionHelpers.js";
 import { searchHltb } from "../functions/SearchHltb.js";
+import { formatPlatformDisplayName } from "../functions/PlatformDisplay.js";
 
 const GAME_SEARCH_PAGE_SIZE = 25;
 const NOW_PLAYING_FORUM_ID = "1059875931356938240";
@@ -425,7 +427,7 @@ export class GameDb {
         .map((platform) => platform.id)
         .filter((id) => Number.isInteger(id) && id > 0);
       const platformNames = ids
-        .map((id) => platformMap.get(id)?.name)
+        .map((id) => formatPlatformDisplayName(platformMap.get(id)?.name))
         .filter((name): name is string => Boolean(name));
       const platformLabel = platformNames.length
         ? `Platforms: ${platformNames.join(", ")}`
@@ -817,7 +819,8 @@ export class GameDb {
       if (releases.length > 0) {
         const releaseField = releases
           .map((r) => {
-            const platformName = platformMap.get(r.platformId) || "Unknown Platform";
+            const platformName = formatPlatformDisplayName(platformMap.get(r.platformId))
+              ?? "Unknown Platform";
             const regionName = regionMap.get(r.regionId) || "Unknown Region";
             const regionSuffix = regionName === "Worldwide" ? "" : ` (${regionName})`;
             const releaseDate = r.releaseDate ? r.releaseDate.toLocaleDateString() : "TBD";
@@ -1388,6 +1391,55 @@ export class GameDb {
         return null;
       }
     };
+    const wizardSelect = async (
+      question: string,
+      options: Array<{ label: string; value: string }>,
+    ): Promise<string | null> => {
+      await updateEmbed(`Prompt: **${question}**`);
+      const channel: any = thread ?? interaction.channel;
+      if (!channel || typeof channel.send !== "function") {
+        await updateEmbed("Cannot prompt for input in this channel.");
+        return null;
+      }
+
+      const promptId = `gamedb-select:${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+      const select = new StringSelectMenuBuilder()
+        .setCustomId(promptId)
+        .setPlaceholder(question)
+        .addOptions(options);
+      const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+      const promptMessage: Message | null = await channel.send({
+        content: `<@${interaction.user.id}> ${question}`,
+        components: [row],
+        allowedMentions: { users: [interaction.user.id] },
+      }).catch(() => null);
+      if (!promptMessage) {
+        await updateEmbed("Failed to send prompt.");
+        return null;
+      }
+
+      try {
+        const selection = await promptMessage.awaitMessageComponent({
+          componentType: ComponentType.StringSelect,
+          filter: (i) => i.user.id === interaction.user.id && i.customId === promptId,
+          time: 120_000,
+        });
+        await selection.deferUpdate().catch(() => {});
+        const value = selection.values?.[0];
+        await promptMessage.edit({ components: [] }).catch(() => {});
+        if (!value) {
+          await updateEmbed("No selection made.");
+          return null;
+        }
+        const chosenLabel = options.find((opt) => opt.value === value)?.label ?? value;
+        await updateEmbed(`Selected: *${chosenLabel}*`);
+        return value;
+      } catch {
+        await promptMessage.edit({ components: [] }).catch(() => {});
+        await updateEmbed("Timed out waiting for a selection.");
+        return null;
+      }
+    };
     await updateEmbed(`✅ Starting for **${gameTitle}**`);
 
     let completionType: CompletionType | null = null;
@@ -1480,6 +1532,34 @@ export class GameDb {
       }
     }
 
+    const platforms = await Game.getPlatformsForGame(gameId);
+    if (!platforms.length) {
+      await updateEmbed("❌ No platform release data is available for this game.");
+      return;
+    }
+    const baseOptions = platforms.map((platform) => ({
+      label: platform.name.slice(0, 100),
+      value: String(platform.id),
+    }));
+    const platformOptions = [
+      ...baseOptions.slice(0, 24),
+      { label: "Other", value: "other" },
+    ];
+    const platformChoice = await wizardSelect("Platform?", platformOptions);
+    if (!platformChoice) return;
+    const isOtherPlatform = platformChoice === "other";
+    let platformId: number | null = null;
+    if (!isOtherPlatform) {
+      const parsedId = Number(platformChoice);
+      if (!Number.isInteger(parsedId) || parsedId <= 0) {
+        await updateEmbed("❌ Invalid platform selection.");
+        return;
+      }
+      platformId = parsedId;
+    } else {
+      await notifyUnknownCompletionPlatform(interaction, gameTitle, gameId);
+    }
+
     let removeFromNowPlaying = false;
     const nowPlayingMeta = await Member.getNowPlayingEntryMeta(interaction.user.id, gameId);
     if (nowPlayingMeta) {
@@ -1501,6 +1581,7 @@ export class GameDb {
         userId: interaction.user.id,
         gameId,
         completionType: completionType ?? "Main Story",
+        platformId,
         completedAt,
         finalPlaytimeHours: playtime,
         note,
