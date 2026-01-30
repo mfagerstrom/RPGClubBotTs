@@ -68,6 +68,44 @@ Game metadata ingested from IGDB and stored for bot lookups. Schema created by
 | CREATED_AT | TIMESTAMP | No | Defaults to `CURRENT_TIMESTAMP`. |
 | CREATED_BY | VARCHAR2(64) | Yes | Discord user id who linked the versions. |
 
+## GAMEDB_SEARCH_SYNONYM_GROUPS
+
+- Primary/unique constraints: `GROUP_ID` primary key.
+
+| Column | Type | Nullable | Notes |
+| --- | --- | --- | --- |
+| GROUP_ID | NUMBER | No | Identity primary key. |
+| CREATED_AT | TIMESTAMP | No | Defaults to `CURRENT_TIMESTAMP`. |
+| CREATED_BY | VARCHAR2(64) | Yes | Discord user id who created the group. |
+
+## GAMEDB_SEARCH_SYNONYMS
+
+- Primary/unique constraints: `TERM_ID` primary key; unique `(GROUP_ID, TERM_NORM)`.
+- Indexes: `IDX_GAMEDB_SEARCH_SYNONYMS_GROUP` on `GROUP_ID`.
+- Purpose: stores search synonym terms grouped for bidirectional matching.
+
+| Column | Type | Nullable | Notes |
+| --- | --- | --- | --- |
+| TERM_ID | NUMBER | No | Identity primary key. |
+| GROUP_ID | NUMBER | No | FK to `GAMEDB_SEARCH_SYNONYM_GROUPS`. |
+| TERM_TEXT | VARCHAR2(255) | No | Synonym or alternate text. |
+| TERM_NORM | VARCHAR2(255) | No | Normalized text for search. |
+| CREATED_AT | TIMESTAMP | No | Defaults to `CURRENT_TIMESTAMP`. |
+| CREATED_BY | VARCHAR2(64) | Yes | Discord user id who added the term. |
+
+## GAMEDB_SEARCH_SYNONYM_DRAFTS
+
+- Primary/unique constraints: `DRAFT_ID` primary key.
+- Purpose: stores in-progress synonym additions for admin modal flows.
+
+| Column | Type | Nullable | Notes |
+| --- | --- | --- | --- |
+| DRAFT_ID | NUMBER | No | Identity primary key. |
+| USER_ID | VARCHAR2(64) | No | Discord user id who owns the draft. |
+| PAIRS_JSON | CLOB | Yes | JSON array of pending pairs. |
+| CREATED_AT | TIMESTAMP | No | Defaults to `CURRENT_TIMESTAMP`. |
+| UPDATED_AT | TIMESTAMP | No | Updated on save. |
+
 ## GAMEDB_PLATFORMS
 
 - Primary/unique constraints: `PLATFORM_ID` primary key; unique `PLATFORM_CODE`;

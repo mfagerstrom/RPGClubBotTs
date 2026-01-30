@@ -112,7 +112,8 @@ type GameDbHelpTopicId =
   | "search"
   | "view"
   | "audit"
-  | "link-versions";
+  | "link-versions"
+  | "synonym-list";
 
 type GameDbHelpTopic = {
   id: GameDbHelpTopicId;
@@ -888,6 +889,15 @@ const GAMEDB_HELP_TOPICS: GameDbHelpTopic[] = [
     notes:
       "Provide a comma-separated list of GameDB ids to link (e.g. 12, 34, 56). " +
       "Linked titles appear under Alternate Versions in /gamedb view.",
+  },
+  {
+    id: "synonym-list",
+    label: "/gamedb synonym-list",
+    summary: "List GameDB search synonyms (admin only).",
+    syntax: "Syntax: /gamedb synonym-list [query:<string>] [showinchat:<boolean>]",
+    notes:
+      "Returns grouped synonym terms with dropdowns to edit or delete a group, " +
+      "plus an Add New Group button.",
   },
 ];
 

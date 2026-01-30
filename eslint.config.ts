@@ -76,23 +76,13 @@ export default [
         message: "Please use gotoAndCheckUrl instead of page.waitForURL",
       }],
       "local/no-djs-button-in-v2-accessory": "error",
+      "local/no-deprecated-interaction-options": "error",
     },
   },
   {
     files: ["**/*.ts"],
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
-      "no-restricted-syntax": [
-        "error",
-        {
-          selector: "Property[key.name='ephemeral'][value.value=true]",
-          message: "Use 'flags: MessageFlags.Ephemeral' instead of 'ephemeral: true'.",
-        },
-        {
-          selector: "Property[key.name='fetchReply']",
-          message: "Use 'withResponse: true' or fetch after replying instead of 'fetchReply'.",
-        },
-      ],
     },
   },
 ];

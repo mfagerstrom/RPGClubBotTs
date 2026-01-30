@@ -2,6 +2,7 @@ import oracledb from "oracledb";
 import axios from "axios";
 import { getOraclePool } from "../db/oracleClient.js";
 import { IGDBGameDetails, igdbService } from "../services/IgdbService.js";
+import GameSearchSynonym from "./GameSearchSynonym.js";
 
 // Interfaces
 export interface IGame {
@@ -1463,11 +1464,78 @@ export default class Game {
   static async searchGames(query: string): Promise<IGameWithPlatforms[]> {
     const pool = getOraclePool();
     const connection = await pool.getConnection();
-    const rawQuery = query.toLowerCase();
-    const searchQuery = `%${rawQuery}%`;
-    const normalizedQuery = `%${rawQuery.replace(/[^a-z0-9]/g, "")}%`;
-
     try {
+      const baseQuery = query.trim();
+      if (!baseQuery) {
+        return [];
+      }
+
+      const queryVariants = new Set<string>();
+      queryVariants.add(baseQuery);
+      const spacedQuery = baseQuery
+        .replace(/([a-zA-Z])(\d)/g, "$1 $2")
+        .replace(/(\d)([a-zA-Z])/g, "$1 $2");
+      queryVariants.add(spacedQuery);
+
+      const tokens = spacedQuery.split(/\s+/).filter(Boolean);
+      const tokenOptions: string[][] = [];
+      for (const token of tokens) {
+        const options = new Set<string>();
+        options.add(token);
+        const tokenSynonyms = await GameSearchSynonym.getTermsForQuery(token, connection);
+        tokenSynonyms.forEach((synonym) => {
+          if (synonym.trim()) {
+            options.add(synonym.trim());
+          }
+        });
+        tokenOptions.push(Array.from(options));
+      }
+
+      if (tokenOptions.length) {
+        let variants: string[] = [""];
+        const MAX_VARIANTS = 50;
+        for (const options of tokenOptions) {
+          const nextVariants: string[] = [];
+          for (const prefix of variants) {
+            for (const option of options) {
+              const next = prefix ? `${prefix} ${option}` : option;
+              nextVariants.push(next);
+              if (nextVariants.length >= MAX_VARIANTS) break;
+            }
+            if (nextVariants.length >= MAX_VARIANTS) break;
+          }
+          variants = nextVariants;
+          if (variants.length >= MAX_VARIANTS) break;
+        }
+        variants.forEach((variant) => queryVariants.add(variant));
+      }
+
+      const termSet = new Map<string, string>();
+      Array.from(queryVariants).forEach((term) => {
+        const norm = term.toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (norm) {
+          termSet.set(norm, term);
+        }
+      });
+
+      if (!termSet.size) {
+        return [];
+      }
+
+      const termEntries = Array.from(termSet.entries());
+      const clauses: string[] = [];
+      const binds: Record<string, string> = {};
+      termEntries.forEach(([norm, term], index) => {
+        const rawKey = `searchQuery${index}`;
+        const normKey = `normalizedQuery${index}`;
+        binds[rawKey] = `%${term.toLowerCase()}%`;
+        binds[normKey] = `%${norm}%`;
+        clauses.push(
+          `(LOWER(TITLE) LIKE :${rawKey} OR REGEXP_REPLACE(LOWER(TITLE), '[^a-z0-9]', '') LIKE :${normKey})`,
+        );
+      });
+
+      const whereClause = clauses.length ? clauses.join(" OR ") : "1=0";
       const result = await connection.execute<{
         GAME_ID: number;
         TITLE: string;
@@ -1485,10 +1553,9 @@ export default class Game {
         `SELECT GAME_ID, TITLE, DESCRIPTION, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, FEATURED_VIDEO_URL,
                 INITIAL_RELEASE_DATE, CREATED_AT, UPDATED_AT
            FROM GAMEDB_GAMES
-          WHERE LOWER(TITLE) LIKE :searchQuery
-             OR REGEXP_REPLACE(LOWER(TITLE), '[^a-z0-9]', '') LIKE :normalizedQuery
+          WHERE ${whereClause}
           ORDER BY TITLE ASC`,
-        { searchQuery, normalizedQuery },
+        binds,
         {
           outFormat: oracledb.OUT_FORMAT_OBJECT,
           fetchInfo: { DESCRIPTION: { type: oracledb.STRING } },

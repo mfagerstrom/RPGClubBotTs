@@ -24,3 +24,5 @@ All channel ID constants belong in src/config/channels.ts.
 All user ID constants belong in src/config/users.ts.
 All tag ID constants belong in src/config/tags.ts.
 All message Flag ID constants belong in src/config/tags.ts.
+All interactions should use stable identifiers and include the ability to resume after a bot restart.
+You are forbidden from using deprecated commands/functions/etc.

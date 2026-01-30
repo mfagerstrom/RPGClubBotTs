@@ -7,6 +7,7 @@ import {
   ButtonStyle,
   CommandInteraction,
   EmbedBuilder,
+  InteractionReplyOptions,
   MessageFlags,
   ModalSubmitInteraction,
   ModalBuilder,
@@ -26,16 +27,24 @@ import {
 } from "discordx";
 import { safeDeferReply, safeReply, safeUpdate, sanitizeUserInput } from "../functions/InteractionUtils.js";
 import {
+  ContainerBuilder,
+  TextDisplayBuilder,
+} from "@discordjs/builders";
+import {
   performAutoAcceptImages,
   performAutoAcceptReleaseData,
   performAutoAcceptVideos,
 } from "../services/GamedbAuditService.js";
-import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import { isAdmin } from "./admin.command.js";
 import Game, { IGame } from "../classes/Game.js";
+import GameSearchSynonym from "../classes/GameSearchSynonym.js";
+import GameSearchSynonymDraft, {
+  type ISynonymDraftPair,
+} from "../classes/GameSearchSynonymDraft.js";
 import { setThreadGameLink } from "../classes/Thread.js";
 import axios from "axios";
 import { igdbService } from "../services/IgdbService.js";
+import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 
 const AUDIT_PAGE_SIZE = 20;
 const AUDIT_VIDEO_MODAL_ID = "audit-video-modal";
@@ -43,6 +52,91 @@ const AUDIT_VIDEO_INPUT_ID = "audit-video-url";
 const AUDIT_DESCRIPTION_MODAL_ID = "audit-description-modal";
 const AUDIT_DESCRIPTION_INPUT_ID = "audit-description";
 const AUDIT_AUTO_STOP_PREFIX = "audit-auto-stop";
+const SYNONYM_ADD_MODAL_PREFIX = "gamedb-syn-add";
+const SYNONYM_ADD_MORE_PREFIX = "gamedb-syn-more";
+const SYNONYM_ADD_DONE_PREFIX = "gamedb-syn-done";
+const SYNONYM_ADD_BULK_INPUT_ID = "gamedb-syn-bulk";
+const SYNONYM_LIST_PAGE_PREFIX = "gamedb-syn-page";
+const SYNONYM_EDIT_GROUP_SELECT_PREFIX = "gamedb-syn-edit-group";
+const SYNONYM_EDIT_GROUP_MODAL_PREFIX = "gamedb-syn-edit-group-modal";
+const SYNONYM_EDIT_GROUP_INPUT_ID = "gamedb-syn-edit-group-input";
+const SYNONYM_DELETE_GROUP_SELECT_PREFIX = "gamedb-syn-delete-group";
+const SYNONYM_ADD_FROM_LIST_PREFIX = "gamedb-syn-add-from-list";
+const COMPONENTS_V2_FLAG = 1 << 15;
+const SYNONYM_LIST_PAGE_SIZE = 20;
+const MAX_COMPONENT_CUSTOM_ID_LENGTH = 100;
+
+function buildComponentsV2Flags(isEphemeral: boolean): number {
+  return (isEphemeral ? MessageFlags.Ephemeral : 0) | COMPONENTS_V2_FLAG;
+}
+
+function encodeSynonymQuery(query: string, maxLength: number): string {
+  if (!query) return "";
+  let trimmed = query.trim();
+  let encoded = Buffer.from(trimmed, "utf8").toString("base64url");
+  if (encoded.length <= maxLength) return encoded;
+  for (let i = trimmed.length - 1; i >= 0; i -= 1) {
+    trimmed = trimmed.slice(0, i + 1);
+    encoded = Buffer.from(trimmed, "utf8").toString("base64url");
+    if (encoded.length <= maxLength) return encoded;
+  }
+  return "";
+}
+
+function decodeSynonymQuery(encoded: string): string {
+  if (!encoded) return "";
+  try {
+    return Buffer.from(encoded, "base64url").toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
+function clampSynonymOptionText(value: string, maxLength = 100): string {
+  if (value.length <= maxLength) return value;
+  return value.slice(0, Math.max(0, maxLength - 3)) + "...";
+}
+
+function buildSynonymGroupEditModal(ownerId: string, groupId: number, terms: string): ModalBuilder {
+  const input = new TextInputBuilder()
+    .setCustomId(SYNONYM_EDIT_GROUP_INPUT_ID)
+    .setLabel("Synonym terms, one per line")
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(true)
+    .setMaxLength(2000)
+    .setValue(terms);
+
+  return new ModalBuilder()
+    .setCustomId(`${SYNONYM_EDIT_GROUP_MODAL_PREFIX}:${ownerId}:${groupId}`)
+    .setTitle("Edit Search Synonym Group")
+    .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
+}
+
+function buildSynonymListCustomId(
+  ownerId: string,
+  page: number,
+  query: string,
+  direction?: "next" | "prev",
+): string {
+  const base = `${SYNONYM_LIST_PAGE_PREFIX}:${ownerId}:${page}:`;
+  const maxQueryLength = MAX_COMPONENT_CUSTOM_ID_LENGTH - base.length - (direction ? `:${direction}`.length : 0);
+  const encodedQuery = encodeSynonymQuery(query, Math.max(maxQueryLength, 0));
+  return direction
+    ? `${base}${encodedQuery}:${direction}`
+    : `${base}${encodedQuery}`;
+}
+
+function buildSynonymGroupSelectCustomId(
+  prefix: string,
+  ownerId: string,
+  page: number,
+  query: string,
+): string {
+  const base = `${prefix}:${ownerId}:${page}:`;
+  const maxQueryLength = MAX_COMPONENT_CUSTOM_ID_LENGTH - base.length;
+  const encodedQuery = encodeSynonymQuery(query, Math.max(maxQueryLength, 0));
+  return `${base}${encodedQuery}`;
+}
 const AUDIT_SESSIONS = new Map<
   string,
   {
@@ -52,6 +146,60 @@ const AUDIT_SESSIONS = new Map<
     filter: "all" | "image" | "thread" | "video" | "description" | "release" | "mixed" | "complete";
   }
 >();
+
+function parseSynonymPairs(
+  rawInput: string,
+  maxPairs: number,
+): ISynonymDraftPair[] {
+  const lines = rawInput
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const pairs: ISynonymDraftPair[] = [];
+  const separators = ["<-->", "<->", "=>", "->", "|", ","];
+  for (const line of lines) {
+    let separator: string | null = null;
+    for (const candidate of separators) {
+      if (line.includes(candidate)) {
+        separator = candidate;
+        break;
+      }
+    }
+    if (!separator) continue;
+    const [left, right] = line.split(separator).map((part) => part.trim());
+    if (!left || !right) continue;
+    pairs.push({ term: left, match: right });
+    if (pairs.length >= maxPairs) break;
+  }
+  return pairs;
+}
+
+function buildSynonymAddModal(draftId: number): ModalBuilder {
+  const input = new TextInputBuilder()
+    .setCustomId(SYNONYM_ADD_BULK_INPUT_ID)
+    .setLabel("Synonym pairs, one per line")
+    .setStyle(TextInputStyle.Paragraph)
+    .setPlaceholder("GTA <-> Grand Theft Auto\nKH <-> Kingdom Hearts\n1 <-> one")
+    .setRequired(true)
+    .setMaxLength(2000);
+
+  return new ModalBuilder()
+    .setCustomId(`${SYNONYM_ADD_MODAL_PREFIX}:${draftId}`)
+    .setTitle("Add GameDB Search Synonyms")
+    .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
+}
+
+function buildSynonymContinueComponents(draftId: number): Array<ActionRowBuilder<ButtonBuilder>> {
+  const addMore = new ButtonBuilder()
+    .setCustomId(`${SYNONYM_ADD_MORE_PREFIX}:${draftId}`)
+    .setLabel("Add More")
+    .setStyle(ButtonStyle.Primary);
+  const done = new ButtonBuilder()
+    .setCustomId(`${SYNONYM_ADD_DONE_PREFIX}:${draftId}`)
+    .setLabel("Done")
+    .setStyle(ButtonStyle.Secondary);
+  return [new ActionRowBuilder<ButtonBuilder>().addComponents(addMore, done)];
+}
 const AUTO_ACCEPT_RUNS = new Map<
   string,
   {
@@ -78,12 +226,144 @@ function parseAutoAcceptStopId(id: string): string | null {
   return parts[1] || null;
 }
 
+function buildAutoAcceptFollowUpPayload(
+  embeds: EmbedBuilder[],
+  components: ActionRowBuilder<ButtonBuilder>[],
+  isPublic: boolean,
+): InteractionReplyOptions {
+  return {
+    embeds,
+    components,
+    ...(isPublic ? {} : { flags: MessageFlags.Ephemeral }),
+  };
+}
+
 
 
 @Discord()
 @SlashGroup({ description: "Game Database Commands", name: "gamedb" })
 @SlashGroup("gamedb")
 export class GameDbAdmin {
+  private async buildSynonymListPayload(
+    ownerId: string,
+    query: string,
+    page: number,
+    isPublic: boolean,
+  ): Promise<{
+    components: Array<
+      ContainerBuilder | ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>
+    >;
+    flags: number;
+  }> {
+    const totalCount = await GameSearchSynonym.countSynonymGroups(query || undefined);
+    const totalPages = Math.max(1, Math.ceil(totalCount / SYNONYM_LIST_PAGE_SIZE));
+    const safePage = Math.min(Math.max(page, 0), totalPages - 1);
+    const offset = safePage * SYNONYM_LIST_PAGE_SIZE;
+
+    const terms = await GameSearchSynonym.listSynonymGroups({
+      query: query || undefined,
+      limit: SYNONYM_LIST_PAGE_SIZE,
+      offset,
+    });
+
+    const grouped = new Map<number, typeof terms>();
+    terms.forEach((term) => {
+      const list = grouped.get(term.groupId) ?? [];
+      list.push(term);
+      grouped.set(term.groupId, list);
+    });
+
+    const groupEntries = Array.from(grouped.entries());
+    const groupLines = groupEntries.map(([, groupTerms], index) => {
+      const termList = groupTerms.map((term) => `"${term.termText}"`);
+      const arrowLine = termList.length > 1
+        ? termList.join(" ➜ ")
+        : termList.join("");
+      return `${offset + index + 1}. ${arrowLine}`;
+    });
+
+    const titleLine = query
+      ? `## Search Synonym Groups (Page ${safePage + 1}/${totalPages})\nQuery: ${query}`
+      : `## Search Synonym Groups (Page ${safePage + 1}/${totalPages})`;
+    const content = groupLines.length
+      ? `${titleLine}\n\n${groupLines.join("\n")}`
+      : `${titleLine}\n\nNo search synonyms found.`;
+
+    const container = new ContainerBuilder().addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(content.slice(0, 4000)),
+    );
+
+    const prevDisabled = safePage === 0;
+    const nextDisabled = safePage >= totalPages - 1;
+    const prevButton = new ButtonBuilder()
+      .setCustomId(buildSynonymListCustomId(ownerId, safePage, query, "prev"))
+      .setLabel("Previous Page")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(prevDisabled);
+    const nextButton = new ButtonBuilder()
+      .setCustomId(buildSynonymListCustomId(ownerId, safePage, query, "next"))
+      .setLabel("Next Page")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(nextDisabled);
+    const addGroupButton = new ButtonBuilder()
+      .setCustomId(
+        buildSynonymGroupSelectCustomId(
+          SYNONYM_ADD_FROM_LIST_PREFIX,
+          ownerId,
+          safePage,
+          query,
+        ),
+      )
+      .setLabel("Add New Group")
+      .setStyle(ButtonStyle.Primary);
+    const buttonRowItems: ButtonBuilder[] = [addGroupButton];
+    if (shouldRenderPrevNextButtons(prevDisabled, nextDisabled)) {
+      buttonRowItems.push(prevButton, nextButton);
+    }
+    const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(buttonRowItems);
+
+    const components: Array<
+      ContainerBuilder | ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>
+    > = [container];
+
+    if (groupEntries.length) {
+      const select = new StringSelectMenuBuilder()
+        .setCustomId(buildSynonymGroupSelectCustomId(
+          SYNONYM_EDIT_GROUP_SELECT_PREFIX,
+          ownerId,
+          safePage,
+          query,
+        ))
+        .setPlaceholder("Select a group to edit");
+      const selectOptions = groupEntries.map(([groupId, groupTerms], index) => {
+        const termList = groupTerms.map((term) => `"${term.termText}"`).join(" ↔ ");
+        return {
+          label: `Group ${offset + index + 1}`,
+          value: String(groupId),
+          description: clampSynonymOptionText(termList, 100),
+        };
+      });
+      select.addOptions(selectOptions);
+      components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select));
+
+      const deleteSelect = new StringSelectMenuBuilder()
+        .setCustomId(buildSynonymGroupSelectCustomId(
+          SYNONYM_DELETE_GROUP_SELECT_PREFIX,
+          ownerId,
+          safePage,
+          query,
+        ))
+        .setPlaceholder("Select a group to delete");
+      deleteSelect.addOptions(selectOptions);
+      components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(deleteSelect));
+    }
+    components.push(buttonRow);
+
+    return {
+      components,
+      flags: buildComponentsV2Flags(!isPublic),
+    };
+  }
   @Slash({
     description: "Audit GameDB for missing images, threads, videos, descriptions, or release data (Admin only)",
     name: "audit",
@@ -1084,26 +1364,22 @@ export class GameDbAdmin {
       .setColor(0x0099ff);
     const stopRow = this.buildAutoAcceptStopRow(runId, false);
 
-    await safeReply(interaction, {
+    const followUpPayload = buildAutoAcceptFollowUpPayload([currentEmbed], [stopRow], isPublic);
+    const editPayload = {
       embeds: [currentEmbed],
       components: [stopRow],
-      __forceFollowUp: useFollowUp,
-      flags: isPublic ? undefined : MessageFlags.Ephemeral,
-    });
-
+    };
     let currentMessage: any = null;
     try {
-      currentMessage = await interaction.fetchReply();
+      currentMessage = useFollowUp
+        ? await interaction.followUp(followUpPayload)
+        : await interaction.editReply(editPayload);
     } catch {
       // ignore
     }
     if (!currentMessage) {
       try {
-        currentMessage = await interaction.followUp({
-          embeds: [currentEmbed],
-          components: [stopRow],
-          flags: isPublic ? undefined : MessageFlags.Ephemeral,
-        });
+        currentMessage = await interaction.followUp(followUpPayload);
       } catch {
         // ignore
       }
@@ -1123,11 +1399,13 @@ export class GameDbAdmin {
             .setColor(0x0099ff);
           logLines.length = 0;
           try {
-            currentMessage = await interaction.followUp({
-              embeds: [currentEmbed],
-              components: [this.buildAutoAcceptStopRow(runId, shouldStop())],
-              flags: isPublic ? undefined : MessageFlags.Ephemeral,
-            });
+            currentMessage = await interaction.followUp(
+              buildAutoAcceptFollowUpPayload(
+                [currentEmbed],
+                [this.buildAutoAcceptStopRow(runId, shouldStop())],
+                isPublic,
+              ),
+            );
           } catch {
             // ignore
           }
@@ -1205,26 +1483,22 @@ export class GameDbAdmin {
       .setColor(0x0099ff);
     const stopRow = this.buildAutoAcceptStopRow(runId, false);
 
-    await safeReply(interaction, {
+    const followUpPayload = buildAutoAcceptFollowUpPayload([currentEmbed], [stopRow], isPublic);
+    const editPayload = {
       embeds: [currentEmbed],
       components: [stopRow],
-      __forceFollowUp: useFollowUp,
-      flags: isPublic ? undefined : MessageFlags.Ephemeral,
-    });
-
+    };
     let currentMessage: any = null;
     try {
-      currentMessage = await interaction.fetchReply();
+      currentMessage = useFollowUp
+        ? await interaction.followUp(followUpPayload)
+        : await interaction.editReply(editPayload);
     } catch {
       // ignore
     }
     if (!currentMessage) {
       try {
-        currentMessage = await interaction.followUp({
-          embeds: [currentEmbed],
-          components: [stopRow],
-          flags: isPublic ? undefined : MessageFlags.Ephemeral,
-        });
+        currentMessage = await interaction.followUp(followUpPayload);
       } catch {
         // ignore
       }
@@ -1244,11 +1518,13 @@ export class GameDbAdmin {
             .setColor(0x0099ff);
           logLines.length = 0;
           try {
-            currentMessage = await interaction.followUp({
-              embeds: [currentEmbed],
-              components: [this.buildAutoAcceptStopRow(runId, shouldStop())],
-              flags: isPublic ? undefined : MessageFlags.Ephemeral,
-            });
+            currentMessage = await interaction.followUp(
+              buildAutoAcceptFollowUpPayload(
+                [currentEmbed],
+                [this.buildAutoAcceptStopRow(runId, shouldStop())],
+                isPublic,
+              ),
+            );
           } catch {
             // ignore
           }
@@ -1327,26 +1603,22 @@ export class GameDbAdmin {
       .setColor(0x0099ff);
     const stopRow = this.buildAutoAcceptStopRow(runId, false);
 
-    await safeReply(interaction, {
+    const followUpPayload = buildAutoAcceptFollowUpPayload([currentEmbed], [stopRow], isPublic);
+    const editPayload = {
       embeds: [currentEmbed],
       components: [stopRow],
-      __forceFollowUp: useFollowUp,
-      flags: isPublic ? undefined : MessageFlags.Ephemeral,
-    });
-
+    };
     let currentMessage: any = null;
     try {
-      currentMessage = await interaction.fetchReply();
+      currentMessage = useFollowUp
+        ? await interaction.followUp(followUpPayload)
+        : await interaction.editReply(editPayload);
     } catch {
       // ignore
     }
     if (!currentMessage) {
       try {
-        currentMessage = await interaction.followUp({
-          embeds: [currentEmbed],
-          components: [stopRow],
-          flags: isPublic ? undefined : MessageFlags.Ephemeral,
-        });
+        currentMessage = await interaction.followUp(followUpPayload);
       } catch {
         // ignore
       }
@@ -1366,11 +1638,13 @@ export class GameDbAdmin {
             .setColor(0x0099ff);
           logLines.length = 0;
           try {
-            currentMessage = await interaction.followUp({
-              embeds: [currentEmbed],
-              components: [this.buildAutoAcceptStopRow(runId, shouldStop())],
-              flags: isPublic ? undefined : MessageFlags.Ephemeral,
-            });
+            currentMessage = await interaction.followUp(
+              buildAutoAcceptFollowUpPayload(
+                [currentEmbed],
+                [this.buildAutoAcceptStopRow(runId, shouldStop())],
+                isPublic,
+              ),
+            );
           } catch {
             // ignore
           }
@@ -1429,5 +1703,378 @@ export class GameDbAdmin {
       await currentMessage.edit({ embeds: [currentEmbed], components: [finalStopRow] });
     }
     AUTO_ACCEPT_RUNS.delete(runId);
+  }
+
+  @Slash({
+    description: "List GameDB search synonyms (Admin only)",
+    name: "synonym-list",
+  })
+  async synonymList(
+    @SlashOption({
+      description: "Optional query to filter terms",
+      name: "query",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    query: string | undefined,
+    @SlashOption({
+      description: "Show in chat (public) instead of ephemeral",
+      name: "showinchat",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    showInChat: boolean | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    const isPublic = !!showInChat;
+    await safeDeferReply(interaction, { flags: isPublic ? undefined : MessageFlags.Ephemeral });
+    if (!(await isAdmin(interaction))) return;
+
+    const cleanedQuery = query ? sanitizeUserInput(query, { preserveNewlines: false }) : "";
+    const payload = await this.buildSynonymListPayload(
+      interaction.user.id,
+      cleanedQuery,
+      0,
+      isPublic,
+    );
+    await safeReply(interaction, payload);
+  }
+
+  @ModalComponent({ id: /^gamedb-syn-add:\d+$/ })
+  async synonymAddModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const parts = interaction.customId.split(":");
+    const draftId = Number(parts[1]);
+    if (!Number.isInteger(draftId) || draftId <= 0) {
+      await safeReply(interaction, {
+        content: "This synonym draft is no longer valid.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const draft = await GameSearchSynonymDraft.getDraft(draftId);
+    if (!draft || draft.userId !== interaction.user.id) {
+      await safeReply(interaction, {
+        content: "This synonym draft is no longer available.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const rawInput = interaction.fields.getTextInputValue(SYNONYM_ADD_BULK_INPUT_ID);
+    const cleanedInput = sanitizeUserInput(rawInput, { preserveNewlines: true });
+    const pairs = parseSynonymPairs(cleanedInput, 50);
+    if (!pairs.length) {
+      await safeReply(interaction, {
+        content:
+          "No valid pairs found. Use one pair per line with a separator like \"<->\" or \"->\".",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const addedLines: string[] = [];
+    const errors: string[] = [];
+    for (const pair of pairs) {
+      const termText = sanitizeUserInput(pair.term, { preserveNewlines: false });
+      const matchText = sanitizeUserInput(pair.match, { preserveNewlines: false });
+      if (!termText || !matchText) continue;
+      try {
+        const result = await GameSearchSynonym.addSynonymPair(
+          termText,
+          matchText,
+          interaction.user.id,
+        );
+        const list = result.terms.map((item) => `"${item.termText}"`).join(" | ");
+        addedLines.push(`Group ${result.groupId}: ${list}`);
+      } catch (err: any) {
+        errors.push(err?.message ?? `Failed to add ${termText}`);
+      }
+    }
+
+    await GameSearchSynonymDraft.appendPairs(draftId, pairs);
+
+    const summaryLines = [
+      `Added ${addedLines.length} synonym pair${addedLines.length === 1 ? "" : "s"}.`,
+      ...addedLines,
+      ...(errors.length ? ["", "Errors:", ...errors] : []),
+      "",
+      "Use Add More to continue, or Done to finish.",
+    ];
+    let content = summaryLines.join("\n");
+    if (content.length > 1900) {
+      content = `${content.slice(0, 1900)}...`;
+    }
+
+    await safeReply(interaction, {
+      content,
+      components: buildSynonymContinueComponents(draftId),
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  @ButtonComponent({ id: /^gamedb-syn-more:\d+$/ })
+  async synonymAddMore(interaction: ButtonInteraction): Promise<void> {
+    const parts = interaction.customId.split(":");
+    const draftId = Number(parts[1]);
+    if (!Number.isInteger(draftId) || draftId <= 0) {
+      await safeReply(interaction, {
+        content: "This synonym draft is no longer valid.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const draft = await GameSearchSynonymDraft.getDraft(draftId);
+    if (!draft || draft.userId !== interaction.user.id) {
+      await safeReply(interaction, {
+        content: "This synonym draft is no longer available.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await interaction.showModal(buildSynonymAddModal(draftId)).catch(() => {});
+  }
+
+  @ButtonComponent({ id: /^gamedb-syn-done:\d+$/ })
+  async synonymAddDone(interaction: ButtonInteraction): Promise<void> {
+    const parts = interaction.customId.split(":");
+    const draftId = Number(parts[1]);
+    if (!Number.isInteger(draftId) || draftId <= 0) {
+      await safeReply(interaction, {
+        content: "This synonym draft is no longer valid.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const draft = await GameSearchSynonymDraft.getDraft(draftId);
+    if (!draft || draft.userId !== interaction.user.id) {
+      await safeReply(interaction, {
+        content: "This synonym draft is no longer available.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await GameSearchSynonymDraft.deleteDraft(draftId);
+    await safeUpdate(interaction, {
+      content: "Synonym entry complete.",
+      components: [],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  @SelectMenuComponent({ id: /^gamedb-syn-edit-group:\d+:\d+:[A-Za-z0-9_-]*$/ })
+  async synonymGroupEditSelect(
+    interaction: StringSelectMenuInteraction,
+  ): Promise<void> {
+    const parts = interaction.customId.split(":");
+    const ownerId = parts[1];
+    if (interaction.user.id !== ownerId) {
+      await safeReply(interaction, {
+        content: "This list isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const groupId = Number(interaction.values[0]);
+    if (!Number.isInteger(groupId) || groupId <= 0) {
+      await safeReply(interaction, {
+        content: "Invalid synonym group selected.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const terms = await GameSearchSynonym.listGroupTerms(groupId);
+    if (!terms.length) {
+      await safeReply(interaction, {
+        content: "Synonym group not found.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    let termLines = terms.map((term) => term.termText).join("\n");
+    if (termLines.length > 2000) {
+      termLines = termLines.slice(0, 2000);
+    }
+
+    await interaction
+      .showModal(buildSynonymGroupEditModal(ownerId, groupId, termLines))
+      .catch(async () => {
+        await safeReply(interaction, {
+          content: "Unable to open the edit modal. Please try again.",
+          flags: MessageFlags.Ephemeral,
+        });
+      });
+  }
+
+  @SelectMenuComponent({ id: /^gamedb-syn-delete-group:\d+:\d+:[A-Za-z0-9_-]*$/ })
+  async synonymGroupDeleteSelect(
+    interaction: StringSelectMenuInteraction,
+  ): Promise<void> {
+    const parts = interaction.customId.split(":");
+    const ownerId = parts[1];
+    const page = Number(parts[2]);
+    const encodedQuery = parts[3] ?? "";
+    if (interaction.user.id !== ownerId) {
+      await safeReply(interaction, {
+        content: "This list isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const groupId = Number(interaction.values[0]);
+    if (!Number.isInteger(groupId) || groupId <= 0) {
+      await safeReply(interaction, {
+        content: "Invalid synonym group selected.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const deleted = await GameSearchSynonym.deleteGroup(groupId);
+    if (!deleted) {
+      await safeReply(interaction, {
+        content: "Synonym group not found.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const query = sanitizeUserInput(decodeSynonymQuery(encodedQuery), { preserveNewlines: false });
+    const isPublic = !(interaction.message?.flags?.has(MessageFlags.Ephemeral));
+    const payload = await this.buildSynonymListPayload(
+      ownerId,
+      query,
+      Number.isFinite(page) ? page : 0,
+      isPublic,
+    );
+    await safeUpdate(interaction, payload);
+  }
+
+  @ButtonComponent({ id: /^gamedb-syn-add-from-list:\d+:\d+:[A-Za-z0-9_-]*$/ })
+  async synonymAddFromList(interaction: ButtonInteraction): Promise<void> {
+    const parts = interaction.customId.split(":");
+    const ownerId = parts[1];
+    if (interaction.user.id !== ownerId) {
+      await safeReply(interaction, {
+        content: "This list isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const draft = await GameSearchSynonymDraft.createDraft(interaction.user.id);
+    await interaction
+      .showModal(buildSynonymAddModal(draft.draftId))
+      .catch(async () => {
+        await safeReply(interaction, {
+          content: "Unable to open the synonym modal. Please try again.",
+          flags: MessageFlags.Ephemeral,
+        });
+      });
+  }
+
+  @ModalComponent({ id: /^gamedb-syn-edit-group-modal:\d+:\d+$/ })
+  async synonymGroupEditModal(
+    interaction: ModalSubmitInteraction,
+  ): Promise<void> {
+    const parts = interaction.customId.split(":");
+    const ownerId = parts[1];
+    const groupId = Number(parts[2]);
+    if (interaction.user.id !== ownerId) {
+      await safeReply(interaction, {
+        content: "This edit request isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    if (!Number.isInteger(groupId) || groupId <= 0) {
+      await safeReply(interaction, {
+        content: "Invalid synonym group selected.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const rawInput = interaction.fields.getTextInputValue(SYNONYM_EDIT_GROUP_INPUT_ID);
+    const cleanedInput = sanitizeUserInput(rawInput, { preserveNewlines: true });
+    const terms: string[] = [];
+    const seen = new Set<string>();
+    for (const line of cleanedInput.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const norm = GameSearchSynonym.normalizeTerm(trimmed);
+      if (!norm || seen.has(norm)) continue;
+      seen.add(norm);
+      terms.push(trimmed);
+    }
+
+    if (terms.length < 2) {
+      await safeReply(interaction, {
+        content: "Synonym groups must include at least two terms.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    try {
+      const result = await GameSearchSynonym.updateGroupTerms(
+        groupId,
+        terms,
+        interaction.user.id,
+      );
+      const termList = result.terms.map((term) => `"${term.termText}"`).join(" | ");
+      let content = `Updated synonym group with ${result.terms.length} terms:\n${termList}`;
+      if (content.length > 1900) {
+        content = `${content.slice(0, 1900)}...`;
+      }
+      await safeReply(interaction, {
+        content,
+        flags: MessageFlags.Ephemeral,
+      });
+    } catch (err: any) {
+      await safeReply(interaction, {
+        content: err?.message ?? "Failed to update synonym group.",
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+  }
+
+  @ButtonComponent({ id: /^gamedb-syn-page:\d+:\d+:[A-Za-z0-9_-]*:(next|prev)$/ })
+  async synonymListPage(interaction: ButtonInteraction): Promise<void> {
+    const parts = interaction.customId.split(":");
+    const ownerId = parts[1];
+    const page = Number(parts[2]);
+    const encodedQuery = parts[3] ?? "";
+    const direction = parts[4];
+
+    if (interaction.user.id !== ownerId) {
+      await safeReply(interaction, {
+        content: "This list isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const query = sanitizeUserInput(decodeSynonymQuery(encodedQuery), { preserveNewlines: false });
+    const delta = direction === "next" ? 1 : -1;
+    const isPublic = !(interaction.message?.flags?.has(MessageFlags.Ephemeral));
+    const payload = await this.buildSynonymListPayload(
+      ownerId,
+      query,
+      Number.isFinite(page) ? page + delta : 0,
+      isPublic,
+    );
+
+    await safeUpdate(interaction, payload);
   }
 }
