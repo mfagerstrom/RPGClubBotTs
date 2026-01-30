@@ -339,16 +339,13 @@ function formatIssueSelectLabel(issue: IGithubIssue): string {
 function buildIssueCommentsText(comments: IGithubIssueComment[]): string {
   if (!comments.length) return "";
   const lines: string[] = ["**Comments:**"];
-  comments.slice(0, 3).forEach((comment) => {
+  comments.forEach((comment) => {
     const author = comment.author ?? "Unknown";
     const createdAt = formatDiscordTimestamp(comment.createdAt);
     const body = sanitizeUserInput(comment.body, { preserveNewlines: true }).slice(0, 500);
     lines.push(`- **${author}** ${createdAt}`);
     lines.push(`  ${body || "*No comment content.*"}`);
   });
-  if (comments.length > 3) {
-    lines.push(`- *(+${comments.length - 3} more)*`);
-  }
   return lines.join("\n");
 }
 
