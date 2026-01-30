@@ -50,7 +50,17 @@ import {
 } from "../services/GithubIssuesService.js";
 import { COMPONENTS_V2_FLAG } from "../config/flags.js";
 
-const TODO_LABELS = ["New Feature", "Improvement", "Bug", "Blocked"] as const;
+const TODO_LABELS = [
+  "New Feature",
+  "Improvement",
+  "Bug",
+  "Blocked",
+  "refactor",
+  "documentation",
+  "duplicate",
+  "invalid",
+  "wontfix",
+] as const;
 const LIST_STATES = ["open", "closed", "all"] as const;
 const LIST_SORTS = ["created", "updated"] as const;
 const LIST_DIRECTIONS = ["asc", "desc"] as const;
@@ -133,12 +143,22 @@ const TODO_LABEL_CODE_MAP: Record<TodoLabel, string> = {
   Improvement: "I",
   Bug: "B",
   Blocked: "K",
+  refactor: "R",
+  documentation: "D",
+  duplicate: "U",
+  invalid: "V",
+  wontfix: "W",
 };
 const TODO_LABEL_CODE_TO_LABEL: Record<string, TodoLabel> = {
   N: "New Feature",
   I: "Improvement",
   B: "Bug",
   K: "Blocked",
+  R: "refactor",
+  D: "documentation",
+  U: "duplicate",
+  V: "invalid",
+  W: "wontfix",
 };
 
 function buildComponentsV2Flags(isEphemeral: boolean): number {
