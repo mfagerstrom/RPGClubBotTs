@@ -24,4 +24,4 @@ RUN npm ci --omit=dev
 COPY --from=build-runner /app/build ./build
 
 # Start bot (expects env vars like BOT_TOKEN provided at runtime)
-CMD ["node", "build/RPGClubBotTS.js"]
+CMD ["node", "build/RPGClub_GameDB.js"]

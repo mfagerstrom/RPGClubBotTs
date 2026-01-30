@@ -23,7 +23,7 @@ import {
   safeUpdate,
   sanitizeUserInput,
 } from "../functions/InteractionUtils.js";
-import { bot } from "../RPGClubBotTS.js";
+import { bot } from "../RPGClub_GameDB.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
 import Gotm, {
   type IGotmEntry,

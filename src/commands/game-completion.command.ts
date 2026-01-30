@@ -3186,7 +3186,9 @@ export class GameCompletionCommands {
       title: query,
     });
     const platforms = await Game.getAllPlatforms();
-    const platformMap = new Map(platforms.map((platform) => [platform.id, platform.name]));
+    const platformMap = new Map(
+      platforms.map((platform) => [platform.id, platform.abbreviation ?? platform.name]),
+    );
 
     allCompletions.sort((a, b) => {
       const yearA = a.completedAt ? a.completedAt.getFullYear() : null;

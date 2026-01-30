@@ -33,6 +33,7 @@ export interface IPlatformDef {
   id: number;
   code: string;
   name: string;
+  abbreviation: string | null;
   igdbPlatformId: number | null;
 }
 
@@ -150,6 +151,7 @@ function mapPlatformDefRow(row: any): IPlatformDef {
     id: Number(row.PLATFORM_ID),
     code: String(row.PLATFORM_CODE),
     name: String(row.PLATFORM_NAME),
+    abbreviation: row.PLATFORM_ABBREVIATION ? String(row.PLATFORM_ABBREVIATION) : null,
     igdbPlatformId: row.IGDB_PLATFORM_ID ? Number(row.IGDB_PLATFORM_ID) : null,
   };
 }
@@ -1079,9 +1081,14 @@ export default class Game {
         PLATFORM_ID: number;
         PLATFORM_CODE: string;
         PLATFORM_NAME: string;
+        PLATFORM_ABBREVIATION: string | null;
         IGDB_PLATFORM_ID: number | null;
       }>(
-        `SELECT DISTINCT p.PLATFORM_ID, p.PLATFORM_CODE, p.PLATFORM_NAME, p.IGDB_PLATFORM_ID
+        `SELECT DISTINCT p.PLATFORM_ID,
+                p.PLATFORM_CODE,
+                p.PLATFORM_NAME,
+                p.PLATFORM_ABBREVIATION,
+                p.IGDB_PLATFORM_ID
            FROM GAMEDB_RELEASES r
            JOIN GAMEDB_PLATFORMS p ON p.PLATFORM_ID = r.PLATFORM_ID
           WHERE r.GAME_ID = :gameId
@@ -1105,9 +1112,14 @@ export default class Game {
         PLATFORM_ID: number;
         PLATFORM_CODE: string;
         PLATFORM_NAME: string;
+        PLATFORM_ABBREVIATION: string | null;
         IGDB_PLATFORM_ID: number | null;
       }>(
-        `SELECT PLATFORM_ID, PLATFORM_CODE, PLATFORM_NAME, IGDB_PLATFORM_ID
+        `SELECT PLATFORM_ID,
+                PLATFORM_CODE,
+                PLATFORM_NAME,
+                PLATFORM_ABBREVIATION,
+                IGDB_PLATFORM_ID
            FROM GAMEDB_PLATFORMS
           ORDER BY PLATFORM_NAME ASC`,
         [],
@@ -1145,9 +1157,14 @@ export default class Game {
         PLATFORM_ID: number;
         PLATFORM_CODE: string;
         PLATFORM_NAME: string;
+        PLATFORM_ABBREVIATION: string | null;
         IGDB_PLATFORM_ID: number | null;
       }>(
-        `SELECT PLATFORM_ID, PLATFORM_CODE, PLATFORM_NAME, IGDB_PLATFORM_ID
+        `SELECT PLATFORM_ID,
+                PLATFORM_CODE,
+                PLATFORM_NAME,
+                PLATFORM_ABBREVIATION,
+                IGDB_PLATFORM_ID
            FROM GAMEDB_PLATFORMS
           WHERE IGDB_PLATFORM_ID IN (${placeholders.join(", ")})`,
         binds,
@@ -1176,9 +1193,14 @@ export default class Game {
         PLATFORM_ID: number;
         PLATFORM_CODE: string;
         PLATFORM_NAME: string;
+        PLATFORM_ABBREVIATION: string | null;
         IGDB_PLATFORM_ID: number | null;
       }>(
-        `SELECT PLATFORM_ID, PLATFORM_CODE, PLATFORM_NAME, IGDB_PLATFORM_ID
+        `SELECT PLATFORM_ID,
+                PLATFORM_CODE,
+                PLATFORM_NAME,
+                PLATFORM_ABBREVIATION,
+                IGDB_PLATFORM_ID
            FROM GAMEDB_PLATFORMS
           WHERE PLATFORM_CODE = :code`,
         { code },
@@ -1201,9 +1223,14 @@ export default class Game {
         PLATFORM_ID: number;
         PLATFORM_CODE: string;
         PLATFORM_NAME: string;
+        PLATFORM_ABBREVIATION: string | null;
         IGDB_PLATFORM_ID: number | null;
       }>(
-        `SELECT PLATFORM_ID, PLATFORM_CODE, PLATFORM_NAME, IGDB_PLATFORM_ID
+        `SELECT PLATFORM_ID,
+                PLATFORM_CODE,
+                PLATFORM_NAME,
+                PLATFORM_ABBREVIATION,
+                IGDB_PLATFORM_ID
            FROM GAMEDB_PLATFORMS
           WHERE PLATFORM_ID = :id`,
         { id },
@@ -1243,12 +1270,14 @@ export default class Game {
         PLATFORM_ID: number;
         PLATFORM_CODE: string | null;
         PLATFORM_NAME: string | null;
+        PLATFORM_ABBREVIATION: string | null;
         IGDB_PLATFORM_ID: number | null;
       }>(
         `SELECT gp.GAME_ID,
                 gp.PLATFORM_ID,
                 p.PLATFORM_CODE,
                 p.PLATFORM_NAME,
+                p.PLATFORM_ABBREVIATION,
                 p.IGDB_PLATFORM_ID
            FROM GAMEDB_GAME_PLATFORMS gp
            LEFT JOIN GAMEDB_PLATFORMS p
@@ -1277,6 +1306,7 @@ export default class Game {
           id: platformId,
           code: String(row.PLATFORM_CODE),
           name: String(row.PLATFORM_NAME),
+          abbreviation: row.PLATFORM_ABBREVIATION ? String(row.PLATFORM_ABBREVIATION) : null,
           igdbPlatformId: row.IGDB_PLATFORM_ID ? Number(row.IGDB_PLATFORM_ID) : null,
         };
 
@@ -1310,9 +1340,14 @@ export default class Game {
         PLATFORM_ID: number;
         PLATFORM_CODE: string;
         PLATFORM_NAME: string;
+        PLATFORM_ABBREVIATION: string | null;
         IGDB_PLATFORM_ID: number | null;
       }>(
-        `SELECT PLATFORM_ID, PLATFORM_CODE, PLATFORM_NAME, IGDB_PLATFORM_ID
+        `SELECT PLATFORM_ID,
+                PLATFORM_CODE,
+                PLATFORM_NAME,
+                PLATFORM_ABBREVIATION,
+                IGDB_PLATFORM_ID
            FROM GAMEDB_PLATFORMS
           WHERE IGDB_PLATFORM_ID = :igdbId`,
         { igdbId },
