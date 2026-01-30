@@ -176,7 +176,7 @@ function parseTodoLabels(rawValue: string | undefined): {
 
 function normalizeQuery(rawValue: string | undefined): string | undefined {
   if (!rawValue) return undefined;
-  const sanitized = sanitizeUserInput(rawValue, { preserveNewlines: false });
+  const sanitized = sanitizeTodoText(rawValue, false);
   return sanitized.length ? sanitized : undefined;
 }
 
@@ -336,13 +336,17 @@ function formatIssueSelectLabel(issue: IGithubIssue): string {
   return `${text.slice(0, 97)}...`;
 }
 
+function sanitizeTodoText(value: string, preserveNewlines: boolean): string {
+  return sanitizeUserInput(value, { preserveNewlines, allowUnderscore: true });
+}
+
 function buildIssueCommentsText(comments: IGithubIssueComment[]): string {
   if (!comments.length) return "";
   const lines: string[] = ["**Comments:**"];
   comments.forEach((comment) => {
     const author = comment.author ?? "Unknown";
     const createdAt = formatDiscordTimestamp(comment.createdAt);
-    const body = sanitizeUserInput(comment.body, { preserveNewlines: true }).slice(0, 500);
+    const body = sanitizeTodoText(comment.body, true).slice(0, 500);
     lines.push(`- **${author}** ${createdAt}`);
     lines.push(`  ${body || "*No comment content.*"}`);
   });
@@ -1689,7 +1693,7 @@ export class TodoCommand {
 
     const rawTitle = interaction.fields.getTextInputValue(TODO_CREATE_TITLE_ID);
     const rawBody = interaction.fields.getTextInputValue(TODO_CREATE_BODY_ID);
-    const trimmedTitle = sanitizeUserInput(rawTitle, { preserveNewlines: false });
+    const trimmedTitle = sanitizeTodoText(rawTitle, false);
     if (!trimmedTitle) {
       await safeReply(interaction, {
         content: "Title cannot be empty.",
@@ -1699,7 +1703,7 @@ export class TodoCommand {
     }
 
     const trimmedBody = rawBody
-      ? sanitizeUserInput(rawBody, { preserveNewlines: true })
+      ? sanitizeTodoText(rawBody, true)
       : "";
     if (!trimmedBody) {
       await safeReply(interaction, {
@@ -1749,7 +1753,7 @@ export class TodoCommand {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const rawComment = interaction.fields.getTextInputValue(TODO_COMMENT_INPUT_ID);
-    const trimmedComment = sanitizeUserInput(rawComment, { preserveNewlines: true });
+    const trimmedComment = sanitizeTodoText(rawComment, true);
     if (!trimmedComment) {
       await safeReply(interaction, {
         content: "Comment cannot be empty.",
@@ -1858,7 +1862,7 @@ export class TodoCommand {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const rawTitle = interaction.fields.getTextInputValue(TODO_EDIT_TITLE_INPUT_ID);
-    const trimmedTitle = sanitizeUserInput(rawTitle, { preserveNewlines: false });
+    const trimmedTitle = sanitizeTodoText(rawTitle, false);
     if (!trimmedTitle) {
       await safeReply(interaction, {
         content: "Title cannot be empty.",
@@ -1957,7 +1961,7 @@ export class TodoCommand {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const rawBody = interaction.fields.getTextInputValue(TODO_EDIT_DESC_INPUT_ID);
-    const trimmedBody = sanitizeUserInput(rawBody, { preserveNewlines: true });
+    const trimmedBody = sanitizeTodoText(rawBody, true);
     if (!trimmedBody) {
       await safeReply(interaction, {
         content: "Description cannot be empty.",
@@ -2121,7 +2125,7 @@ export class TodoCommand {
       // ignore
     }
 
-    const trimmedTitle = sanitizeUserInput(session.title, { preserveNewlines: false });
+    const trimmedTitle = sanitizeTodoText(session.title, false);
     if (!trimmedTitle) {
       await safeUpdate(interaction, {
         content: "Title cannot be empty.",
@@ -2131,7 +2135,7 @@ export class TodoCommand {
     }
 
     const trimmedBody = session.body
-      ? sanitizeUserInput(session.body, { preserveNewlines: true })
+      ? sanitizeTodoText(session.body, true)
       : undefined;
     const baseBody = trimmedBody ?? "";
     const isOwner = interaction.guild?.ownerId === interaction.user.id;

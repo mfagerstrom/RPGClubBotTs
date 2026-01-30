@@ -13,6 +13,7 @@ type SanitizeOptions = {
   maxLength?: number;
   preserveNewlines?: boolean;
   allowPattern?: RegExp;
+  allowUnderscore?: boolean;
   blockSql?: boolean;
   blockSqlKeywords?: boolean;
 };
@@ -25,6 +26,7 @@ export function sanitizeUserInput(value: string, options?: SanitizeOptions): str
     maxLength: options?.maxLength,
     preserveNewlines: options?.preserveNewlines ?? true,
     allowPattern: options?.allowPattern,
+    allowUnderscore: options?.allowUnderscore ?? false,
     blockSql: options?.blockSql ?? true,
     blockSqlKeywords: options?.blockSqlKeywords ?? false,
   };
@@ -54,7 +56,7 @@ export function sanitizeUserInput(value: string, options?: SanitizeOptions): str
   sanitized = sanitized.replace(/(^|\n)\s{0,3}#+\s?/g, "$1");
   sanitized = sanitized.replace(/(^|\n)\s*>\s?/g, "$1");
   sanitized = sanitized.replace(/(^|\n)\s*[-*+]\s+/g, "$1");
-  sanitized = sanitized.replace(/[*_~]/g, "");
+  sanitized = sanitized.replace(opts.allowUnderscore ? /[*~]/g : /[*_~]/g, "");
   sanitized = sanitized.replace(/<@!?(\d+)>/g, "");
   sanitized = sanitized.replace(/<@&(\d+)>/g, "");
   sanitized = sanitized.replace(/<#(\d+)>/g, "");
