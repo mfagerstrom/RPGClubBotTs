@@ -24,6 +24,7 @@ import {
   sanitizeUserInput,
 } from "../functions/InteractionUtils.js";
 import { ADMIN_CHANNEL_ID, NOW_PLAYING_FORUM_ID } from "../config/channels.js";
+import { GOTM_FORUM_TAG_ID, NR_GOTM_FORUM_TAG_ID } from "../config/tags.js";
 import { bot } from "../RPGClub_GameDB.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
 import Gotm, {
@@ -1849,8 +1850,6 @@ function calculateNextVoteDate(): Date {
   return d;
 }
 
-const GOTM_FORUM_TAG_ID = "1059913568545415330";
-const NR_GOTM_FORUM_TAG_ID = "1148709881784832030";
 const VOTING_TITLE_MAX_LEN = 38;
 
 type WizardAction = {

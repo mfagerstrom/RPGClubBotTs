@@ -22,3 +22,4 @@ you are not allowed to use emdashes.
 Whenever I report an error, assess and report if a custom lint rule would be useful for catching that error in the future.
 All channel ID constants belong in src/config/channels.ts.
 All user ID constants belong in src/config/users.ts.
+All tag ID constants belong in src/config/tags.ts.

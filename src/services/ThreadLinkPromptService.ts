@@ -20,8 +20,8 @@ import {
   type IgdbSelectOption,
 } from "./IgdbSelectService.js";
 import { NOW_PLAYING_FORUM_ID } from "../config/channels.js";
+import { NOW_PLAYING_SIDEGAME_TAG_ID } from "../config/tags.js";
 
-const NOW_PLAYING_SIDEGAME_TAG_ID = "1059912719366635611";
 const PROMPT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24h
 const promptCache = new Map<string, number>();
 function hasIgdbConfig(): boolean {
