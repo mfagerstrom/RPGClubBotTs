@@ -93,6 +93,10 @@ import {
   type IGameDbCsvImport,
   type IGameDbCsvImportItem,
 } from "../classes/GameDbCsvImport.js";
+import {
+  getGameDbCsvTitleMapByNorm,
+  upsertGameDbCsvTitleMap,
+} from "../classes/GameDbCsvImportMapping.js";
 import { GAMEDB_CSV_PLATFORM_MAP } from "../config/gamedbCsvPlatformMap.js";
 
 const GAME_SEARCH_PAGE_SIZE = 10;
@@ -1110,6 +1114,50 @@ export class GameDb {
       return;
     }
 
+    const normalizedTitle = normalizeTitleKey(searchTitle);
+    if (normalizedTitle) {
+      const mapping = await getGameDbCsvTitleMapByNorm(normalizedTitle);
+      if (mapping?.status === "SKIPPED") {
+        await updateGameDbCsvImportItem(nextItem.itemId, { status: "SKIPPED" });
+        await safeReply(interaction, {
+          content: `Skipped "${nextItem.gameTitle}" due to saved mapping.`,
+          flags: MessageFlags.Ephemeral,
+          __forceFollowUp: true,
+        });
+        await this.processNextGameDbCsvImportItem(interaction, session);
+        return;
+      }
+      if (mapping?.status === "MAPPED" && mapping.gameDbGameId) {
+        const mappedGame = await Game.getGameById(mapping.gameDbGameId);
+        if (!mappedGame) {
+          await updateGameDbCsvImportItem(nextItem.itemId, {
+            status: "ERROR",
+            errorText: `Mapped GameDB id ${mapping.gameDbGameId} not found.`,
+          });
+          await safeReply(interaction, {
+            content: `Mapped GameDB #${mapping.gameDbGameId} not found. Skipping.`,
+            flags: MessageFlags.Ephemeral,
+            __forceFollowUp: true,
+          });
+          await this.processNextGameDbCsvImportItem(interaction, session);
+          return;
+        }
+
+        await updateGameDbCsvImportItem(nextItem.itemId, {
+          status: "IMPORTED",
+          gameDbGameId: mappedGame.id,
+          errorText: null,
+        });
+        await safeReply(interaction, {
+          content: `Imported ${mappedGame.title} as GameDB #${mappedGame.id}.`,
+          flags: MessageFlags.Ephemeral,
+          __forceFollowUp: true,
+        });
+        await this.processNextGameDbCsvImportItem(interaction, session);
+        return;
+      }
+    }
+
     let results: IGDBGame[] = [];
     try {
       const search = await igdbService.searchGames(searchTitle, 50);
@@ -1155,6 +1203,13 @@ export class GameDb {
           status: "IMPORTED",
           gameDbGameId: result.gameId,
           errorText: null,
+        });
+        await upsertGameDbCsvTitleMap({
+          titleRaw: nextItem.rawGameTitle ?? nextItem.gameTitle,
+          titleNorm: normalizeTitleKey(searchTitle),
+          gameDbGameId: result.gameId,
+          status: "MAPPED",
+          createdBy: interaction.user.id,
         });
         await safeReply(interaction, {
           content: `Imported ${result.title} as GameDB #${result.gameId}.`,
@@ -1279,18 +1334,25 @@ export class GameDb {
       return;
     }
 
-    try {
-      const result = await this.importGameFromCsv(igdbId);
-      await updateGameDbCsvImportItem(itemId, {
-        status: "IMPORTED",
-        gameDbGameId: result.gameId,
-        errorText: null,
-      });
-      await safeReply(interaction, {
-        content: `Imported ${result.title} as GameDB #${result.gameId}.`,
-        flags: MessageFlags.Ephemeral,
-        __forceFollowUp: true,
-      });
+      try {
+        const result = await this.importGameFromCsv(igdbId);
+        await updateGameDbCsvImportItem(itemId, {
+          status: "IMPORTED",
+          gameDbGameId: result.gameId,
+          errorText: null,
+        });
+        await upsertGameDbCsvTitleMap({
+          titleRaw: item.rawGameTitle ?? item.gameTitle,
+          titleNorm: normalizeTitleKey(item.gameTitle),
+          gameDbGameId: result.gameId,
+          status: "MAPPED",
+          createdBy: interaction.user.id,
+        });
+        await safeReply(interaction, {
+          content: `Imported ${result.title} as GameDB #${result.gameId}.`,
+          flags: MessageFlags.Ephemeral,
+          __forceFollowUp: true,
+        });
     } catch (err: any) {
       await updateGameDbCsvImportItem(itemId, {
         status: "ERROR",
@@ -1482,6 +1544,13 @@ export class GameDb {
       }
 
       await updateGameDbCsvImportItem(itemId, { status: "SKIPPED" });
+      await upsertGameDbCsvTitleMap({
+        titleRaw: item.rawGameTitle ?? item.gameTitle,
+        titleNorm: normalizeTitleKey(item.gameTitle),
+        gameDbGameId: null,
+        status: "SKIPPED",
+        createdBy: interaction.user.id,
+      });
       await safeUpdate(interaction, {
         content: `Skipped "${item.gameTitle}".`,
         components: [],
@@ -1559,18 +1628,25 @@ export class GameDb {
       return;
     }
 
-    try {
-      const result = await this.importGameFromCsv(igdbId);
-      await updateGameDbCsvImportItem(itemId, {
-        status: "IMPORTED",
-        gameDbGameId: result.gameId,
-        errorText: null,
-      });
-      await safeReply(interaction, {
-        content: `Imported ${result.title} as GameDB #${result.gameId}.`,
-        flags: MessageFlags.Ephemeral,
-        __forceFollowUp: true,
-      });
+      try {
+        const result = await this.importGameFromCsv(igdbId);
+        await updateGameDbCsvImportItem(itemId, {
+          status: "IMPORTED",
+          gameDbGameId: result.gameId,
+          errorText: null,
+        });
+        await upsertGameDbCsvTitleMap({
+          titleRaw: item.rawGameTitle ?? item.gameTitle,
+          titleNorm: normalizeTitleKey(item.gameTitle),
+          gameDbGameId: result.gameId,
+          status: "MAPPED",
+          createdBy: interaction.user.id,
+        });
+        await safeReply(interaction, {
+          content: `Imported ${result.title} as GameDB #${result.gameId}.`,
+          flags: MessageFlags.Ephemeral,
+          __forceFollowUp: true,
+        });
     } catch (err: any) {
       await updateGameDbCsvImportItem(itemId, {
         status: "ERROR",

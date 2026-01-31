@@ -42,3 +42,23 @@ Oracle tables storing GameDB CSV import sessions and rows.
 | STATUS | VARCHAR2(20) | No | — | PENDING / SKIPPED / IMPORTED / ERROR. |
 | GAMEDB_GAME_ID | NUMBER | Yes | — | Imported GameDB id. |
 | ERROR_TEXT | VARCHAR2(2000) | Yes | — | Error detail. |
+
+## RPG_CLUB_GAMEDB_IMPORT_TITLE_MAP
+
+- **Primary/unique constraints:** `MAP_ID` primary key; unique `TITLE_NORM`.
+- **Indexes:** `UX_GAMEDB_IMPORT_TITLE_NORM` on `TITLE_NORM`;
+  `IX_GAMEDB_IMPORT_TITLE_STATUS` on `STATUS`.
+- **Triggers:** `TRG_GAMEDB_IMPORT_TITLE_MAP_UPD` updates `UPDATED_AT`.
+
+### Columns
+
+| Column | Type | Nullable | Default | Notes |
+| --- | --- | --- | --- | --- |
+| MAP_ID | NUMBER | No | Identity | Primary key. |
+| TITLE_RAW | VARCHAR2(500) | No | — | Raw Completionator title. |
+| TITLE_NORM | VARCHAR2(500) | No | — | Normalized title for matching. |
+| GAMEDB_GAME_ID | NUMBER | Yes | — | Mapped GameDB id if status is MAPPED. |
+| STATUS | VARCHAR2(20) | No | — | MAPPED or SKIPPED. |
+| CREATED_BY | VARCHAR2(30) | Yes | — | Discord user id who set the mapping. |
+| CREATED_AT | TIMESTAMP WITH TIME ZONE | No | SYSTIMESTAMP | Creation timestamp. |
+| UPDATED_AT | TIMESTAMP WITH TIME ZONE | No | SYSTIMESTAMP | Updated on edits. |
