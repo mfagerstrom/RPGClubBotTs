@@ -1,7 +1,23 @@
+2026-01-30 - Commit ID: f1e9904 - issue-136: Added more labels to /todo
+2026-01-30 - Commit ID: 715d77a - issue-8: Implement a synonym system to improve searches
+2026-01-30 - Commit ID: 7884dcd - issue-126: consolidated all message flag IDs into one file
+2026-01-30 - Commit ID: 8bdb6d3 - issue-124: consolidated all tag ids into one file.
+2026-01-30 - Commit ID: 2ed554e - issue-123: consolidated all USER_ID constants into one file
+2026-01-30 - Commit ID: d14a994 - issue-122: added paging to /gamedb view multi-match messages
+2026-01-30 - Commit ID: a1be8b1 - issue-111: /gamedb view: padded label width is now dynamic
+2026-01-30 - Commit ID: dd097a5 - issue-113: /suggestion review - implemented messaging for acceptance / rejection
 2026-01-30 - Commit ID: 64f173f - issue-110: implemented stable identifiers for interactions in /todo
-2026-01-30 - Commit ID: 85144f3 - issue-106-and-100: fixed them.
+2026-01-30 - Commit ID: f1fd927 - issue-97: Updated Game Completion Wizard to no longer use a thread
+2026-01-30 - Commit ID: 58419a0 - issue-108: /gamedb-view UI/UX pass
 2026-01-29 - Commit ID: cf89236 - tweaks for UI on /gamedb view
 2026-01-29 - Commit ID: 271e7c7 - fixes
+2026-01-29 - Commit ID: 14d9bd1 - issue-101: Localized all CHANNELID constants into one place
+2026-01-29 - Commit ID: 85144f3 - issue-106-and-100: fixed them.
+2026-01-29 - Commit ID: 1ac0f6c - fix: tiny tweak
+2026-01-29 - Commit ID: fc6bb85 - issue-99: improve hltb ui on /gamedb view
+2026-01-29 - Commit ID: a0df681 - issue-102: don't strip out underscores from github issue input text
+2026-01-29 - Commit ID: fc4fffa - issue-103: don't limit the number of comments rendered for /todo view
+2026-01-29 - Commit ID: a62199a - issue-12: added platform support to game completions
 2026-01-29 - Commit ID: b5ba719 - issue-96: corrected thread linking bug
 2026-01-29 - Commit ID: d30618c - issue-95: added 'not blocked' filter to /todo and made it the default
 2026-01-29 - Commit ID: c920db3 - issue-93: todo menu tweak
@@ -375,4 +391,3 @@
 2024-09-24 - Commit ID: b4b89e0 - feat: re-implemented HLTB functionality
 2024-09-20 - Commit ID: 836aabc - very much a WIP
 2024-09-20 - Commit ID: ee96c57 - feat: initial commit
-7884dcd 2026-01-30 issue-126: consolidated all message flag IDs into one file
