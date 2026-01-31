@@ -1181,6 +1181,23 @@ export class GameCompletionCommands {
     const ephemeral = true;
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
     const userId = interaction.user.id;
+    const guild = interaction.guild;
+
+    if (!guild) {
+      await safeReply(interaction, {
+        content: "This command can only be used inside a server.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (guild.ownerId !== userId) {
+      await safeReply(interaction, {
+        content: "Access denied. Command requires server owner.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
 
     if (action === "start") {
       if (!file?.url) {

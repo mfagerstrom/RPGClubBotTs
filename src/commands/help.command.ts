@@ -788,11 +788,11 @@ const GAME_COMPLETION_HELP_TOPICS: GameCompletionHelpTopic[] = [
   {
     id: "completionator-import",
     label: "/game-completion completionator-import",
-    summary: "Import completions from a Completionator CSV export.",
+    summary: "Import completions from a Completionator CSV export. Server owner only.",
     syntax:
       "Syntax: /game-completion completionator-import action:<start|resume|status|pause|cancel> [file:<csv>]",
     notes:
-      "Use action:start with the CSV file to begin. During review, reply with a GameDB id, skip, or pause, and choose Update Existing when you want to sync the CSV data.",
+      "Server owner only. Use action:start with the CSV file to begin. During review, reply with a GameDB id, skip, or pause, and choose Update Existing when you want to sync the CSV data.",
   },
 ];
 
