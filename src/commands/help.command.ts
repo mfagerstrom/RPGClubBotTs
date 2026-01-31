@@ -113,7 +113,8 @@ type GameDbHelpTopicId =
   | "view"
   | "audit"
   | "link-versions"
-  | "synonym-list";
+  | "synonym-list"
+  | "csv-import";
 
 type GameDbHelpTopic = {
   id: GameDbHelpTopicId;
@@ -210,7 +211,9 @@ const HELP_TOPICS: HelpTopic[] = [
     label: "/gamedb",
     summary:
       "Search, import, and view games from GameDB with IGDB-powered lookups.",
-    syntax: "Use /gamedb help for subcommands: add, search, view, audit, help.",
+    syntax:
+      "Use /gamedb help for subcommands: add, search, view, audit, link-versions, " +
+      "synonym-list, csv-import, help.",
     notes:
       "Imports pull titles/covers from IGDB. View shows GOTM/NR-GOTM wins, " +
       "nominations, and related threads for the GameDB id. Audit is admin only.",
@@ -849,6 +852,16 @@ const GAMEDB_HELP_TOPICS: GameDbHelpTopic[] = [
       "Returns a dropdown of IGDB matches; if only one result, it imports automatically. " +
       "Use igdb_id to skip search or bulk_titles (comma-separated) to import up to 5 at once. " +
       "Duplicate titles already in GameDB show an 'already imported' message.",
+  },
+  {
+    id: "csv-import",
+    label: "/gamedb csv-import",
+    summary: "Import games from a Completionator CSV export (server owner only).",
+    syntax:
+      "Syntax: /gamedb csv-import action:<start|resume|status|pause|cancel> [file:<csv>]",
+    notes:
+      "Use action:start with the CSV file to begin. Each row prompts for an IGDB match, " +
+      "manual IGDB id, or skip. Resume after restarts with action:resume.",
   },
   {
     id: "search",

@@ -16,6 +16,7 @@ Game metadata ingested from IGDB and stored for bot lookups. Schema created by
 | TITLE | VARCHAR2(255) | No | Game title. |
 | DESCRIPTION | CLOB | Yes | Long-form summary from IGDB. |
 | IMAGE_DATA | BLOB | Yes | Cover art bytes, if downloaded. |
+| ART_DATA | BLOB | Yes | Artwork bytes, if downloaded. |
 | IGDB_ID | NUMBER | Yes | Unique IGDB game id. |
 | SLUG | VARCHAR2(255) | Yes | IGDB slug. |
 | TOTAL_RATING | NUMBER | Yes | IGDB aggregated rating. |

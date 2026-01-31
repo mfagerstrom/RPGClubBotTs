@@ -24,6 +24,7 @@ export interface IGDBGame {
 export interface IGDBGameDetails extends IGDBGame {
   slug: string;
   genres?: { id: number; name: string }[];
+  artworks?: { image_id: string }[];
   videos?: { video_id: string; name?: string }[];
   themes?: { id: number; name: string }[];
   game_modes?: { id: number; name: string }[];
@@ -214,6 +215,7 @@ class IgdbService {
       "summary",
       "first_release_date",
       "cover.image_id",
+      "artworks.image_id",
       "genres.name",
       "platforms.id",
       "platforms.name",
