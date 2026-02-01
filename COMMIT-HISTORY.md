@@ -1,4 +1,6 @@
-2026-01-31 - Commit ID: cf2a132 - temporarily locking down completionator imports
+2026-02-01 - Commit ID: dfba2bf - improved completionator seeding import to batch auto-accepted titles
+2026-02-01 - Commit ID: edc4d21 - fix: improved gamedb csv import to remember mappings and skips
+2026-02-01 - Commit ID: 04b215c - added csv gamedb game import from completionator
 2026-01-31 - Commit ID: cf2a132 - temporarily locking down completionator imports
 2026-01-30 - Commit ID: 0ddd1cc - sql table recreation scripts
 2026-01-30 - Commit ID: f1e9904 - issue-136: Added more labels to /todo

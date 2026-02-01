@@ -11,6 +11,8 @@ export interface IGame {
   description: string | null;
   imageData: Buffer | null; // BLOB
   artData: Buffer | null;
+  thumbnailBad: boolean;
+  thumbnailApproved: boolean;
   igdbId: number | null;
   slug: string | null;
   totalRating: number | null;
@@ -122,6 +124,8 @@ function mapGameRow(row: any): IGame {
     description: row.DESCRIPTION ? String(row.DESCRIPTION) : null,
     imageData: row.IMAGE_DATA instanceof Buffer ? row.IMAGE_DATA : null,
     artData: row.ART_DATA instanceof Buffer ? row.ART_DATA : null,
+    thumbnailBad: Number(row.THUMBNAIL_BAD ?? 0) === 1,
+    thumbnailApproved: Number(row.THUMBNAIL_APPROVED ?? 0) === 1,
     igdbId: row.IGDB_ID ? Number(row.IGDB_ID) : null,
     slug: row.SLUG ? String(row.SLUG) : null,
     totalRating: row.TOTAL_RATING ? Number(row.TOTAL_RATING) : null,
@@ -249,6 +253,8 @@ export default class Game {
         DESCRIPTION: string | null;
         IMAGE_DATA: Buffer | null;
         ART_DATA: Buffer | null;
+        THUMBNAIL_BAD: number | null;
+        THUMBNAIL_APPROVED: number | null;
         IGDB_ID: number | null;
         SLUG: string | null;
         TOTAL_RATING: number | null;
@@ -258,7 +264,7 @@ export default class Game {
         CREATED_AT: Date;
         UPDATED_AT: Date;
       }>(
-        `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, ART_DATA, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, FEATURED_VIDEO_URL,
+        `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, ART_DATA, THUMBNAIL_BAD, THUMBNAIL_APPROVED, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, FEATURED_VIDEO_URL,
                 INITIAL_RELEASE_DATE, CREATED_AT, UPDATED_AT
            FROM GAMEDB_GAMES
           WHERE GAME_ID = :id`,
@@ -303,6 +309,8 @@ export default class Game {
         DESCRIPTION: string | null;
         IMAGE_DATA: Buffer | null;
         ART_DATA: Buffer | null;
+        THUMBNAIL_BAD: number | null;
+        THUMBNAIL_APPROVED: number | null;
         IGDB_ID: number | null;
         SLUG: string | null;
         TOTAL_RATING: number | null;
@@ -312,7 +320,7 @@ export default class Game {
         CREATED_AT: Date;
         UPDATED_AT: Date;
       }>(
-        `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, ART_DATA, IGDB_ID, SLUG, TOTAL_RATING,
+        `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, ART_DATA, THUMBNAIL_BAD, THUMBNAIL_APPROVED, IGDB_ID, SLUG, TOTAL_RATING,
                 IGDB_URL, FEATURED_VIDEO_URL, INITIAL_RELEASE_DATE, CREATED_AT, UPDATED_AT
            FROM GAMEDB_GAMES
           WHERE GAME_ID IN (${placeholders.join(", ")})`,
@@ -343,6 +351,8 @@ export default class Game {
         DESCRIPTION: string | null;
         IMAGE_DATA: Buffer | null;
         ART_DATA: Buffer | null;
+        THUMBNAIL_BAD: number | null;
+        THUMBNAIL_APPROVED: number | null;
         IGDB_ID: number | null;
         SLUG: string | null;
         TOTAL_RATING: number | null;
@@ -352,7 +362,7 @@ export default class Game {
         CREATED_AT: Date;
         UPDATED_AT: Date;
       }>(
-        `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, ART_DATA, IGDB_ID, SLUG, TOTAL_RATING,
+        `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, ART_DATA, THUMBNAIL_BAD, THUMBNAIL_APPROVED, IGDB_ID, SLUG, TOTAL_RATING,
                 IGDB_URL, FEATURED_VIDEO_URL, INITIAL_RELEASE_DATE, CREATED_AT, UPDATED_AT
            FROM GAMEDB_GAMES
           WHERE GAME_ID IN (
@@ -437,6 +447,8 @@ export default class Game {
         DESCRIPTION: string | null;
         IMAGE_DATA: Buffer | null;
         ART_DATA: Buffer | null;
+        THUMBNAIL_BAD: number | null;
+        THUMBNAIL_APPROVED: number | null;
         IGDB_ID: number | null;
         SLUG: string | null;
         TOTAL_RATING: number | null;
@@ -446,7 +458,7 @@ export default class Game {
         CREATED_AT: Date;
         UPDATED_AT: Date;
       }>(
-        `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, ART_DATA, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, FEATURED_VIDEO_URL,
+        `SELECT GAME_ID, TITLE, DESCRIPTION, IMAGE_DATA, ART_DATA, THUMBNAIL_BAD, THUMBNAIL_APPROVED, IGDB_ID, SLUG, TOTAL_RATING, IGDB_URL, FEATURED_VIDEO_URL,
                 INITIAL_RELEASE_DATE, CREATED_AT, UPDATED_AT
            FROM GAMEDB_GAMES
           WHERE IGDB_ID = :igdbId`,
@@ -1626,6 +1638,8 @@ export default class Game {
         description: row.DESCRIPTION ? String(row.DESCRIPTION) : null,
         imageData: null, // Exclude image data for search results
         artData: null,
+        thumbnailBad: false,
+        thumbnailApproved: false,
         igdbId: row.IGDB_ID ? Number(row.IGDB_ID) : null,
         slug: row.SLUG ? String(row.SLUG) : null,
         totalRating: row.TOTAL_RATING ? Number(row.TOTAL_RATING) : null,
@@ -1839,6 +1853,42 @@ export default class Game {
       await connection.execute(
         `UPDATE GAMEDB_GAMES SET ART_DATA = :artData, UPDATED_AT = SYSTIMESTAMP WHERE GAME_ID = :gameId`,
         { artData, gameId },
+        { autoCommit: true },
+      );
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async updateGameThumbnailBad(gameId: number, isBad: boolean): Promise<void> {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.execute(
+        `UPDATE GAMEDB_GAMES
+            SET THUMBNAIL_BAD = :thumbnailBad,
+                UPDATED_AT = SYSTIMESTAMP
+          WHERE GAME_ID = :gameId`,
+        { thumbnailBad: isBad ? 1 : 0, gameId },
+        { autoCommit: true },
+      );
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async updateGameThumbnailApproved(gameId: number, isApproved: boolean): Promise<void> {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.execute(
+        `UPDATE GAMEDB_GAMES
+            SET THUMBNAIL_APPROVED = :thumbnailApproved,
+                UPDATED_AT = SYSTIMESTAMP
+          WHERE GAME_ID = :gameId`,
+        { thumbnailApproved: isApproved ? 1 : 0, gameId },
         { autoCommit: true },
       );
     } finally {

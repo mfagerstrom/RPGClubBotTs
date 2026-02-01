@@ -25,6 +25,7 @@ import {
   type MessageActionRowComponent,
   AttachmentBuilder,
   MessageFlags,
+  PermissionsBitField,
   WebhookClient,
 } from "discord.js";
 import {
@@ -45,12 +46,21 @@ import {
   ButtonBuilder as V2ButtonBuilder,
 } from "@discordjs/builders";
 import {
+  AnyRepliable,
   safeDeferReply,
   safeReply,
   safeUpdate,
   sanitizeUserInput,
   stripModalInput,
 } from "../functions/InteractionUtils.js";
+import {
+  normalizeCsvHeader,
+  normalizePlatformKey,
+  normalizeTitleKey,
+  parseCsvDate,
+  parseCsvLine,
+  stripTitleDateSuffix,
+} from "../functions/CsvUtils.js";
 import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import Game, { type IGame } from "../classes/Game.js";
 import { getHltbCacheByGameId, upsertHltbCache } from "../classes/HltbCache.js";
@@ -144,74 +154,54 @@ function encodeSearchQuery(query: string, maxLength: number): string {
   return "";
 }
 
-function parseCsvLine(line: string): string[] {
-  const fields: string[] = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
-    const next = line[i + 1];
-
-    if (char === "\"" && inQuotes && next === "\"") {
-      current += "\"";
-      i += 1;
-      continue;
-    }
-
-    if (char === "\"") {
-      inQuotes = !inQuotes;
-      continue;
-    }
-
-    if (char === "," && !inQuotes) {
-      fields.push(current);
-      current = "";
-      continue;
-    }
-
-    current += char;
-  }
-  fields.push(current);
-  return fields;
-}
-
-function parseCsvDate(value: string | undefined): Date | null {
-  if (!value) return null;
-  const parts = value.trim().split("/");
-  if (parts.length !== 3) return null;
-  const month = Number(parts[0]);
-  const day = Number(parts[1]);
-  const year = Number(parts[2]);
-  if (!month || !day || !year) return null;
-  return new Date(year, month - 1, day);
-}
-
-function normalizeCsvHeader(value: string): string {
-  return value.trim().toLowerCase();
-}
-
-function normalizePlatformKey(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function normalizeTitleKey(value: string): string {
-  const stripped = stripTitleDateSuffix(value);
-  return stripped
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 function buildIgdbSearchLink(title: string): string {
   const encoded = encodeURIComponent(title);
   return `https://www.igdb.com/search?utf8=%E2%9C%93&type=1&q=${encoded}`;
+}
+
+function getModeratorPermissionFlags(interaction: AnyRepliable): {
+  isOwner: boolean;
+  isAdmin: boolean;
+  isModerator: boolean;
+} | null {
+  const guild = interaction.guild;
+  if (!guild) return null;
+
+  const member: any = interaction.member;
+  const canCheck = member && typeof member.permissionsIn === "function" && interaction.channel;
+  const isOwner = guild.ownerId === interaction.user.id;
+  const isAdmin = canCheck
+    ? member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.Administrator)
+    : false;
+  const isModerator = canCheck
+    ? member.permissionsIn(interaction.channel).has(PermissionsBitField.Flags.ManageMessages)
+    : false;
+
+  return { isOwner, isAdmin, isModerator };
+}
+
+async function requireModeratorOrAdminOrOwner(
+  interaction: AnyRepliable,
+): Promise<boolean> {
+  const permissions = getModeratorPermissionFlags(interaction);
+  if (!permissions) {
+    await safeReply(interaction, {
+      content: "This action can only be used inside a server.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return false;
+  }
+
+  if (permissions.isOwner || permissions.isAdmin || permissions.isModerator) {
+    return true;
+  }
+
+  await safeReply(interaction, {
+    content: "Access denied. Action requires Moderator, Administrator, or server owner.",
+    flags: MessageFlags.Ephemeral,
+  });
+  return false;
 }
 
 function pushAutoAcceptedTitle(importId: number, title: string): void {
@@ -228,12 +218,6 @@ function consumeAutoAcceptedSummary(importId: number): string | null {
   return `Auto-accepted since last prompt:\n${lines.join("\n")}`;
 }
 
-function stripTitleDateSuffix(value: string): string {
-  const trimmed = value.trim();
-  const match = trimmed.match(/\s*\((\d{4})(?:[/-]\d{1,2}){0,2}\)\s*$/);
-  if (!match) return trimmed;
-  return trimmed.slice(0, Math.max(0, match.index ?? trimmed.length)).trim();
-}
 
 function buildSearchCustomId(
   type: "select" | "page",
@@ -1970,10 +1954,13 @@ export class GameDb {
     const components = [...profile.components];
     if (includeActions) {
       components.push(
-        this.buildGameProfileActionRow(
+        ...this.buildGameProfileActionRow(
           gameId,
           profile.hasThread,
           profile.featuredVideoUrl,
+          profile.canMarkThumbnailBad,
+          profile.isThumbnailBad,
+          profile.isThumbnailApproved,
         ),
       );
     }
@@ -2000,10 +1987,13 @@ export class GameDb {
     }
     const components = [
       ...profile.components,
-      this.buildGameProfileActionRow(
+      ...this.buildGameProfileActionRow(
         gameId,
         profile.hasThread,
         profile.featuredVideoUrl,
+        profile.canMarkThumbnailBad,
+        profile.isThumbnailBad,
+        profile.isThumbnailApproved,
       ),
     ];
     await safeReply(interaction, {
@@ -2022,6 +2012,9 @@ export class GameDb {
     files: AttachmentBuilder[];
     hasThread: boolean;
     featuredVideoUrl: string | null;
+    canMarkThumbnailBad: boolean;
+    isThumbnailBad: boolean;
+    isThumbnailApproved: boolean;
   } | null> {
     try {
       const game = await Game.getGameById(gameId);
@@ -2045,7 +2038,9 @@ export class GameDb {
       const container = new ContainerBuilder();
 
       const files: AttachmentBuilder[] = [];
-      const primaryArt = game.artData ?? game.imageData;
+      const isThumbnailBad = Boolean(game.thumbnailBad);
+      const isThumbnailApproved = Boolean(game.thumbnailApproved);
+      const primaryArt = isThumbnailBad ? game.imageData : (game.artData ?? game.imageData);
       if (primaryArt) {
         files.push(new AttachmentBuilder(primaryArt, { name: "game_image.png" }));
       }
@@ -2295,7 +2290,7 @@ export class GameDb {
         }))
         .filter((block) => block.content.length > 0);
 
-      if (game.imageData) {
+      if (primaryArt) {
         if (headerBlock.length > 0) {
           container.addTextDisplayComponents(new TextDisplayBuilder().setContent(headerBlock));
         }
@@ -2339,6 +2334,9 @@ export class GameDb {
         files,
         hasThread: Boolean(threadId),
         featuredVideoUrl: game.featuredVideoUrl ?? null,
+        canMarkThumbnailBad: Boolean(game.artData) && !isThumbnailApproved,
+        isThumbnailBad,
+        isThumbnailApproved,
       };
     } catch (error: any) {
       console.error("Failed to build game profile:", error);
@@ -2396,8 +2394,11 @@ export class GameDb {
     gameId: number,
     hasThread: boolean,
     featuredVideoUrl: string | null,
+    canMarkThumbnailBad: boolean,
+    isThumbnailBad: boolean,
+    isThumbnailApproved: boolean,
     disableVideo = false,
-  ): ActionRowBuilder<ButtonBuilder> {
+  ): ActionRowBuilder<ButtonBuilder>[] {
     const addNowPlaying = new ButtonBuilder()
       .setCustomId(`gamedb-action:nowplaying:${gameId}`)
       .setLabel("Add to Now Playing List")
@@ -2411,22 +2412,38 @@ export class GameDb {
       .setLabel("View Featured Video")
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(disableVideo);
-
-    const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+    const primaryRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       addNowPlaying,
       addCompletion,
     );
     if (featuredVideoUrl) {
-      actionRow.addComponents(viewFeaturedVideo);
+      primaryRow.addComponents(viewFeaturedVideo);
     }
     if (!hasThread) {
       const addThread = new ButtonBuilder()
         .setCustomId(`gamedb-action:thread:${gameId}`)
         .setLabel("Add Now Playing Thread")
         .setStyle(ButtonStyle.Secondary);
-      actionRow.addComponents(addThread);
+      primaryRow.addComponents(addThread);
     }
-    return actionRow;
+    rows.push(primaryRow);
+    if (canMarkThumbnailBad && !isThumbnailBad && !isThumbnailApproved) {
+      const badThumbnail = new ButtonBuilder()
+        .setCustomId(`gamedb-action:bad-thumb:${gameId}`)
+        .setLabel("Bad Thumbnail")
+        .setStyle(ButtonStyle.Danger);
+      const goodThumbnail = new ButtonBuilder()
+        .setCustomId(`gamedb-action:good-thumb:${gameId}`)
+        .setLabel("Good Thumbnail")
+        .setStyle(ButtonStyle.Secondary);
+      const thumbRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        badThumbnail,
+        goodThumbnail,
+      );
+      rows.push(thumbRow);
+    }
+    return rows;
   }
 
   private async refreshGameProfileMessage(
@@ -2435,22 +2452,25 @@ export class GameDb {
   ): Promise<void> {
     const profile = await this.buildGameProfile(gameId, interaction);
     if (!profile) return;
-    const actionRow = this.buildGameProfileActionRow(
+    const actionRows = this.buildGameProfileActionRow(
       gameId,
       profile.hasThread,
       profile.featuredVideoUrl,
+      profile.canMarkThumbnailBad,
+      profile.isThumbnailBad,
+      profile.isThumbnailApproved,
     );
     const existingComponents = interaction.message?.components ?? [];
     const searchRows = getSearchRowsFromComponents(existingComponents);
     await interaction.editReply({
       embeds: [],
       files: profile.files,
-      components: [...profile.components, actionRow, ...searchRows],
+      components: [...profile.components, ...actionRows, ...searchRows],
       flags: buildComponentsV2Flags(false),
     }).catch(() => {});
   }
 
-  @ButtonComponent({ id: /^gamedb-action:(nowplaying|completion|thread|video|hltb-import):\d+$/ })
+  @ButtonComponent({ id: /^gamedb-action:(nowplaying|completion|thread|video|hltb-import|bad-thumb|good-thumb):\d+$/ })
   async handleGameDbAction(interaction: ButtonInteraction): Promise<void> {
     const [, action, gameIdRaw] = interaction.customId.split(":");
     const gameId = Number(gameIdRaw);
@@ -2483,10 +2503,13 @@ export class GameDb {
       let updatedMessage = false;
       const profile = await this.buildGameProfile(gameId, interaction);
       if (profile) {
-        const actionRow = this.buildGameProfileActionRow(
+        const actionRows = this.buildGameProfileActionRow(
           gameId,
           profile.hasThread,
           profile.featuredVideoUrl,
+          profile.canMarkThumbnailBad,
+          profile.isThumbnailBad,
+          profile.isThumbnailApproved,
           true,
         );
         const existingComponents = interaction.message?.components ?? [];
@@ -2495,7 +2518,7 @@ export class GameDb {
           await interaction.update({
             embeds: [],
             files: profile.files,
-            components: [...profile.components, actionRow, ...searchRows],
+            components: [...profile.components, ...actionRows, ...searchRows],
             flags: buildComponentsV2Flags(false),
           });
           updatedMessage = true;
@@ -2508,6 +2531,65 @@ export class GameDb {
       }
       await interaction.followUp({
         content: `Warning: videos may contain spoilers. ${videoUrl}`,
+      });
+      return;
+    }
+
+    if (action === "bad-thumb" || action === "good-thumb") {
+      const hasAccess = await requireModeratorOrAdminOrOwner(interaction);
+      if (!hasAccess) {
+        return;
+      }
+    }
+
+    if (action === "bad-thumb") {
+      if (!game.artData) {
+        await safeReply(interaction, {
+          content: "No artwork thumbnail is available for this game.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      if (game.thumbnailBad) {
+        await safeReply(interaction, {
+          content: "This thumbnail is already marked as bad.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      await interaction.deferUpdate().catch(() => {});
+      await Game.updateGameThumbnailBad(gameId, true);
+      await Game.updateGameThumbnailApproved(gameId, false);
+      await this.refreshGameProfileMessage(interaction, gameId);
+      await interaction.followUp({
+        content: "Thumbnail flagged. GameDB view will use cover art from now on.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (action === "good-thumb") {
+      if (!game.artData) {
+        await safeReply(interaction, {
+          content: "No artwork thumbnail is available for this game.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      if (game.thumbnailApproved) {
+        await safeReply(interaction, {
+          content: "This thumbnail is already marked as approved.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      await interaction.deferUpdate().catch(() => {});
+      await Game.updateGameThumbnailBad(gameId, false);
+      await Game.updateGameThumbnailApproved(gameId, true);
+      await this.refreshGameProfileMessage(interaction, gameId);
+      await interaction.followUp({
+        content: "Thumbnail marked as good. GameDB view will keep using artwork.",
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -3016,16 +3098,19 @@ export class GameDb {
     if (!message) return;
     const profile = await this.buildGameProfile(gameId, interaction);
     if (!profile) return;
-    const actionRow = this.buildGameProfileActionRow(
+    const actionRows = this.buildGameProfileActionRow(
       gameId,
       profile.hasThread,
       profile.featuredVideoUrl,
+      profile.canMarkThumbnailBad,
+      profile.isThumbnailBad,
+      profile.isThumbnailApproved,
     );
     const searchRows = getSearchRowsFromComponents(message.components ?? []);
     await message.edit({
       embeds: [],
       files: profile.files,
-      components: [...profile.components, actionRow, ...searchRows],
+      components: [...profile.components, ...actionRows, ...searchRows],
     }).catch(() => {});
   }
 
@@ -3169,10 +3254,13 @@ export class GameDb {
 
       const profile = await this.buildGameProfile(gameId, interaction);
       if (profile) {
-        const actionRow = this.buildGameProfileActionRow(
+        const actionRows = this.buildGameProfileActionRow(
           gameId,
           profile.hasThread,
           profile.featuredVideoUrl,
+          profile.canMarkThumbnailBad,
+          profile.isThumbnailBad,
+          profile.isThumbnailApproved,
         );
         const existingComponents = interaction.message?.components ?? [];
         const updatedComponents = existingComponents.length
@@ -3182,9 +3270,12 @@ export class GameDb {
               const hasGameDbAction = actionRowComponents.some((component) =>
                 component.customId?.startsWith("gamedb-action:"),
               );
-              return hasGameDbAction ? actionRow : row;
+              return hasGameDbAction ? actionRows[0] : row;
             })
-          : [actionRow];
+          : [actionRows[0]];
+        if (actionRows.length > 1) {
+          updatedComponents.push(...actionRows.slice(1));
+        }
         await interaction.editReply({
           embeds: [],
           files: profile.files,
@@ -3698,17 +3789,20 @@ export class GameDb {
     }
 
     const response = this.buildSearchResponse(searchTerm, results, ownerId, page, false);
-    const actionRow = this.buildGameProfileActionRow(
+    const actionRows = this.buildGameProfileActionRow(
       gameId,
       profile.hasThread,
       profile.featuredVideoUrl,
+      profile.canMarkThumbnailBad,
+      profile.isThumbnailBad,
+      profile.isThumbnailApproved,
     );
 
     try {
       await interaction.editReply({
         embeds: [],
         files: profile.files,
-        components: [...profile.components, actionRow, ...response.components],
+        components: [...profile.components, ...actionRows, ...response.components],
         flags: response.flags,
       });
     } catch {

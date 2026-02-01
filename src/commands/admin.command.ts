@@ -1,20 +1,34 @@
 import {
   ActionRowBuilder,
   ApplicationCommandOptionType,
+  Attachment,
   ButtonBuilder,
   ButtonStyle,
   ComponentType,
   EmbedBuilder,
   MessageFlags,
+  ModalBuilder,
+  ModalSubmitInteraction,
   PermissionsBitField,
   StringSelectMenuBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   type ButtonInteraction,
   type StringSelectMenuInteraction,
   type ForumChannel,
   type Message,
 } from "discord.js";
 import type { CommandInteraction, User } from "discord.js";
-import { ButtonComponent, Discord, SelectMenuComponent, Slash, SlashGroup, SlashOption } from "discordx";
+import {
+  ButtonComponent,
+  Discord,
+  ModalComponent,
+  SelectMenuComponent,
+  Slash,
+  SlashChoice,
+  SlashGroup,
+  SlashOption,
+} from "discordx";
 import { DateTime } from "luxon";
 import {
   AnyRepliable,
@@ -22,11 +36,20 @@ import {
   safeReply,
   safeUpdate,
   sanitizeUserInput,
+  stripModalInput,
 } from "../functions/InteractionUtils.js";
+import { ContainerBuilder, TextDisplayBuilder } from "@discordjs/builders";
 import { ADMIN_CHANNEL_ID, NOW_PLAYING_FORUM_ID } from "../config/channels.js";
 import { GOTM_FORUM_TAG_ID, NR_GOTM_FORUM_TAG_ID } from "../config/tags.js";
 import { bot } from "../RPGClub_GameDB.js";
 import { buildGotmEntryEmbed, buildNrGotmEntryEmbed } from "../functions/GotmEntryEmbeds.js";
+import { buildComponentsV2Flags } from "../functions/NominationListComponents.js";
+import {
+  normalizeCsvHeader,
+  normalizeTitleKey,
+  parseCsvLine,
+  stripTitleDateSuffix,
+} from "../functions/CsvUtils.js";
 import Gotm, {
   type IGotmEntry,
   type IGotmGame,
@@ -41,7 +64,7 @@ import NrGotm, {
   type NrGotmEditableField,
   insertNrGotmRoundInDatabase,
 } from "../classes/NrGotm.js";
-import Game from "../classes/Game.js";
+import Game, { type IGameWithPlatforms } from "../classes/Game.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
 import {
   buildNominationDeleteView,
@@ -56,12 +79,30 @@ import {
   listNominationsForRound,
 } from "../classes/Nomination.js";
 import { getThreadsByGameId, setThreadGameLink } from "../classes/Thread.js";
+import {
+  createGotmAuditImportSession,
+  countGotmAuditItems,
+  getActiveGotmAuditImportForUser,
+  getGotmAuditImportById,
+  getGotmAuditItemById,
+  getGotmAuditItemsForRound,
+  getNextGotmAuditItem,
+  insertGotmAuditImportItems,
+  setGotmAuditImportStatus,
+  updateGotmAuditImportIndex,
+  updateGotmAuditItem,
+  type GotmAuditKind,
+  type IGotmAuditImport,
+  type IGotmAuditItem,
+} from "../classes/GotmAuditImport.js";
+import axios from "axios";
 
 type AdminHelpTopicId =
   | "add-gotm"
   | "edit-gotm"
   | "add-nr-gotm"
   | "edit-nr-gotm"
+  | "gotm-audit"
   | "delete-gotm-nomination"
   | "delete-nr-gotm-nomination"
   | "delete-gotm-noms"
@@ -78,6 +119,29 @@ type AdminHelpTopic = {
   syntax: string;
   parameters?: string;
   notes?: string;
+};
+
+const GOTM_AUDIT_ACTIONS = ["start", "resume", "pause", "cancel", "status"] as const;
+type GotmAuditAction = (typeof GOTM_AUDIT_ACTIONS)[number];
+
+const GOTM_AUDIT_SELECT_PREFIX = "gotm-audit-select";
+const GOTM_AUDIT_ACTION_PREFIX = "gotm-audit-action";
+const GOTM_AUDIT_MANUAL_PREFIX = "gotm-audit-manual";
+const GOTM_AUDIT_MANUAL_INPUT_ID = "gotm-audit-manual-gamedb-id";
+const GOTM_AUDIT_QUERY_PREFIX = "gotm-audit-query";
+const GOTM_AUDIT_QUERY_INPUT_ID = "gotm-audit-query-text";
+const GOTM_AUDIT_RESULT_LIMIT = 25;
+
+type GotmAuditParsedRow = {
+  rowIndex: number;
+  kind: GotmAuditKind;
+  roundNumber: number;
+  monthYear: string;
+  gameIndex: number;
+  gameTitle: string;
+  threadId: string | null;
+  redditUrl: string | null;
+  gameDbGameId: number | null;
 };
 
 export const ADMIN_HELP_TOPICS: AdminHelpTopic[] = [
@@ -118,6 +182,18 @@ export const ADMIN_HELP_TOPICS: AdminHelpTopic[] = [
     syntax: "Syntax: /admin add-nr-gotm",
     notes:
       "Round number is auto-assigned to the next open NR-GOTM round.",
+  },
+  {
+    id: "gotm-audit",
+    label: "/admin gotm-audit",
+    summary: "Audit and import past GOTM and NR-GOTM entries from a CSV file.",
+    syntax:
+      "Syntax: /admin gotm-audit action:<start|resume|pause|cancel|status> " +
+      "[file:<attachment>]",
+    notes:
+      "CSV headers: kind, round, monthYear, title. Optional: gameIndex (1-based), threadId, " +
+      "redditUrl, gameDbId. Use action:start with a CSV file to begin; resume continues " +
+      "the latest active session.",
   },
   {
     id: "edit-nr-gotm",
@@ -1212,6 +1288,1117 @@ export class Admin {
         content: `Failed to create NR-GOTM round ${nextRound}: ${msg}`,
       });
     }
+  }
+
+  @Slash({ description: "Audit and import past GOTM and NR-GOTM entries", name: "gotm-audit" })
+  async gotmAudit(
+    @SlashChoice(
+      ...GOTM_AUDIT_ACTIONS.map((value) => ({
+        name: value,
+        value,
+      })),
+    )
+    @SlashOption({
+      description: "Action to perform",
+      name: "action",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+    })
+    action: GotmAuditAction,
+    @SlashOption({
+      description: "CSV file of past GOTM/NR-GOTM entries (required for start)",
+      name: "file",
+      required: false,
+      type: ApplicationCommandOptionType.Attachment,
+    })
+    file: Attachment | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+
+    const okToUseCommand: boolean = await isAdmin(interaction);
+    if (!okToUseCommand) {
+      return;
+    }
+
+    const userId = interaction.user.id;
+
+    if (action === "start") {
+      if (!file?.url) {
+        await safeReply(interaction, {
+          content: "Please attach the GOTM audit CSV file.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      const csvText = await this.fetchGotmAuditCsvText(file.url);
+      if (!csvText) {
+        await safeReply(interaction, {
+          content: "Failed to download the CSV file.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      const parsed = this.parseGotmAuditCsv(csvText);
+      if (!parsed.length) {
+        await safeReply(interaction, {
+          content: "No valid rows found in the CSV file.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      const session = await createGotmAuditImportSession({
+        userId,
+        totalCount: parsed.length,
+        sourceFilename: file.name ?? null,
+      });
+      await insertGotmAuditImportItems(session.importId, parsed);
+
+      await safeReply(interaction, {
+        content:
+          `GOTM audit #${session.importId} created with ${parsed.length} rows.` +
+          " Starting review now.",
+        flags: MessageFlags.Ephemeral,
+      });
+
+      await this.processNextGotmAuditItem(interaction, session);
+      return;
+    }
+
+    if (action === "status") {
+      const session = await getActiveGotmAuditImportForUser(userId);
+      if (!session) {
+        await safeReply(interaction, {
+          content: "No active GOTM audit session found.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      const stats = await countGotmAuditItems(session.importId);
+      const embed = new EmbedBuilder()
+        .setTitle(`GOTM Audit #${session.importId}`)
+        .setDescription(`Status: ${session.status}`)
+        .addFields(
+          { name: "Pending", value: String(stats.pending), inline: true },
+          { name: "Imported", value: String(stats.imported), inline: true },
+          { name: "Skipped", value: String(stats.skipped), inline: true },
+          { name: "Errors", value: String(stats.error), inline: true },
+        );
+
+      await safeReply(interaction, {
+        embeds: [embed],
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const session = await getActiveGotmAuditImportForUser(userId);
+    if (!session) {
+      await safeReply(interaction, {
+        content: "No active GOTM audit session found.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (action === "pause") {
+      await setGotmAuditImportStatus(session.importId, "PAUSED");
+      await safeReply(interaction, {
+        content: `GOTM audit #${session.importId} paused.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (action === "cancel") {
+      await setGotmAuditImportStatus(session.importId, "CANCELED");
+      await safeReply(interaction, {
+        content: `GOTM audit #${session.importId} canceled.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await setGotmAuditImportStatus(session.importId, "ACTIVE");
+    await safeReply(interaction, {
+      content: `Resuming GOTM audit #${session.importId}.`,
+      flags: MessageFlags.Ephemeral,
+    });
+    await this.processNextGotmAuditItem(interaction, session);
+  }
+
+  private async fetchGotmAuditCsvText(url: string): Promise<string | null> {
+    try {
+      const response = await axios.get(url, { responseType: "arraybuffer" });
+      return Buffer.from(response.data).toString("utf-8");
+    } catch {
+      return null;
+    }
+  }
+
+  private parseGotmAuditCsv(csvText: string): GotmAuditParsedRow[] {
+    const rows = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
+    if (!rows.length) return [];
+
+    const header = parseCsvLine(rows[0]).map(normalizeCsvHeader);
+    const findIndex = (labels: string[]) => header.findIndex((h) => labels.includes(h));
+
+    const kindIndex = findIndex(["kind", "type"]);
+    const roundIndex = findIndex(["round", "round number"]);
+    const monthYearIndex = findIndex(["monthyear", "month year", "month/year"]);
+    const monthIndex = findIndex(["month"]);
+    const yearIndex = findIndex(["year"]);
+    const titleIndex = findIndex(["title", "game title", "name"]);
+    const gameIndexIndex = findIndex(["game index", "gameindex", "index"]);
+    const threadIndex = findIndex(["thread id", "threadid", "thread"]);
+    const redditIndex = findIndex(["reddit url", "redditurl", "reddit"]);
+    const gameDbIndex = findIndex([
+      "gamedb id",
+      "gamedb_id",
+      "gamedb game id",
+      "gamedb game_id",
+      "gamedbgameid",
+    ]);
+
+    if (kindIndex < 0 || roundIndex < 0 || titleIndex < 0) {
+      return [];
+    }
+    if (monthYearIndex < 0 && (monthIndex < 0 || yearIndex < 0)) {
+      return [];
+    }
+
+    const items: GotmAuditParsedRow[] = [];
+    const roundCounters = new Map<string, number>();
+
+    rows.slice(1).forEach((line, idx) => {
+      const fields = parseCsvLine(line);
+      const kindRaw = fields[kindIndex]?.trim() ?? "";
+      const kind = this.normalizeGotmAuditKind(kindRaw);
+      if (!kind) return;
+
+      const roundRaw = fields[roundIndex]?.trim() ?? "";
+      const roundNumber = Number(roundRaw);
+      if (!Number.isInteger(roundNumber) || roundNumber <= 0) return;
+
+      const titleRaw = fields[titleIndex]?.trim() ?? "";
+      const gameTitle = titleRaw.trim();
+      if (!gameTitle) return;
+
+      const monthYear = this.resolveGotmAuditMonthYear(
+        fields,
+        monthYearIndex,
+        monthIndex,
+        yearIndex,
+      );
+      if (!monthYear) return;
+
+      const key = `${kind}:${roundNumber}`;
+      const autoIndex = roundCounters.get(key) ?? 0;
+      const gameIndexRaw = gameIndexIndex >= 0 ? fields[gameIndexIndex]?.trim() ?? "" : "";
+      const parsedIndex = Number(gameIndexRaw);
+      const normalizedIndex = Number.isInteger(parsedIndex) && parsedIndex >= 0
+        ? parsedIndex > 0
+          ? parsedIndex - 1
+          : 0
+        : null;
+      const gameIndex = normalizedIndex ?? autoIndex;
+      const nextIndex = Math.max(autoIndex, gameIndex) + 1;
+      roundCounters.set(key, nextIndex);
+
+      const threadId = threadIndex >= 0 ? fields[threadIndex]?.trim() ?? "" : "";
+      const redditUrl = redditIndex >= 0 ? fields[redditIndex]?.trim() ?? "" : "";
+      const gameDbRaw = gameDbIndex >= 0 ? fields[gameDbIndex]?.trim() ?? "" : "";
+      const gameDbParsed = Number(gameDbRaw);
+      const gameDbGameId =
+        Number.isInteger(gameDbParsed) && gameDbParsed > 0 ? gameDbParsed : null;
+
+      items.push({
+        rowIndex: idx + 1,
+        kind,
+        roundNumber,
+        monthYear,
+        gameIndex,
+        gameTitle,
+        threadId: threadId || null,
+        redditUrl: redditUrl || null,
+        gameDbGameId,
+      });
+    });
+
+    return items;
+  }
+
+  private normalizeGotmAuditKind(value: string): GotmAuditKind | null {
+    const cleaned = value.trim().toLowerCase().replace(/[^a-z]/g, "");
+    if (!cleaned) return null;
+    if (cleaned.startsWith("nr")) return "nr-gotm";
+    if (cleaned === "gotm") return "gotm";
+    return null;
+  }
+
+  private resolveGotmAuditMonthYear(
+    fields: string[],
+    monthYearIndex: number,
+    monthIndex: number,
+    yearIndex: number,
+  ): string | null {
+    if (monthYearIndex >= 0) {
+      const raw = fields[monthYearIndex]?.trim() ?? "";
+      return raw || null;
+    }
+
+    const monthRaw = fields[monthIndex]?.trim() ?? "";
+    const yearRaw = fields[yearIndex]?.trim() ?? "";
+    if (!monthRaw || !yearRaw) return null;
+
+    const month = this.normalizeMonthLabel(monthRaw);
+    if (!month) return null;
+    return `${month} ${yearRaw}`;
+  }
+
+  private normalizeMonthLabel(value: string): string | null {
+    const cleaned = value.trim().toLowerCase().replace(/\./g, "");
+    if (!cleaned) return null;
+    if (/^\d{1,2}$/.test(cleaned)) {
+      const monthNumber = Number(cleaned);
+      const names = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+      ];
+      return names[monthNumber - 1] ?? null;
+    }
+
+    const shortMap: Record<string, string> = {
+      jan: "January",
+      feb: "February",
+      mar: "March",
+      apr: "April",
+      may: "May",
+      jun: "June",
+      jul: "July",
+      aug: "August",
+      sep: "September",
+      sept: "September",
+      oct: "October",
+      nov: "November",
+      dec: "December",
+    };
+
+    if (shortMap[cleaned]) {
+      return shortMap[cleaned];
+    }
+
+    return value.trim();
+  }
+
+  private async processNextGotmAuditItem(
+    interaction:
+      | CommandInteraction
+      | ButtonInteraction
+      | StringSelectMenuInteraction
+      | ModalSubmitInteraction,
+    session: IGotmAuditImport,
+  ): Promise<void> {
+    const current = await getGotmAuditImportById(session.importId);
+    if (!current || current.status !== "ACTIVE") {
+      return;
+    }
+
+    const nextItem = await getNextGotmAuditItem(session.importId);
+    if (!nextItem) {
+      await setGotmAuditImportStatus(session.importId, "COMPLETED");
+      await safeReply(interaction, {
+        content: `GOTM audit #${session.importId} completed.`,
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      return;
+    }
+
+    await updateGotmAuditImportIndex(session.importId, nextItem.rowIndex);
+
+    if (nextItem.gameDbGameId) {
+      const game = await Game.getGameById(nextItem.gameDbGameId);
+      if (!game) {
+        await updateGotmAuditItem(nextItem.itemId, {
+          status: "ERROR",
+          errorText: `GameDB id ${nextItem.gameDbGameId} not found.`,
+        });
+      } else {
+        await updateGotmAuditItem(nextItem.itemId, {
+          status: "IMPORTED",
+          gameDbGameId: nextItem.gameDbGameId,
+          errorText: null,
+        });
+        await this.tryInsertGotmAuditRound(interaction, session, nextItem);
+      }
+
+      await this.processNextGotmAuditItem(interaction, session);
+      return;
+    }
+
+    let results: IGameWithPlatforms[] = [];
+    try {
+      results = await Game.searchGames(nextItem.gameTitle);
+    } catch (err: any) {
+      await updateGotmAuditItem(nextItem.itemId, {
+        status: "ERROR",
+        errorText: err?.message ?? "GameDB search failed.",
+      });
+      await safeReply(interaction, {
+        content: `GameDB search failed for "${nextItem.gameTitle}". Skipping.`,
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      await this.processNextGotmAuditItem(interaction, session);
+      return;
+    }
+
+    const exactMatch = this.findExactGameDbMatch(nextItem, results);
+    if (exactMatch) {
+      await updateGotmAuditItem(nextItem.itemId, {
+        status: "IMPORTED",
+        gameDbGameId: exactMatch.id,
+        errorText: null,
+      });
+      await this.tryInsertGotmAuditRound(interaction, session, nextItem);
+      await this.processNextGotmAuditItem(interaction, session);
+      return;
+    }
+
+    const options = results.slice(0, GOTM_AUDIT_RESULT_LIMIT).map((game) => {
+      const year = game.initialReleaseDate instanceof Date
+        ? game.initialReleaseDate.getFullYear()
+        : game.initialReleaseDate
+          ? new Date(game.initialReleaseDate).getFullYear()
+          : null;
+      const label = year ? `${game.title} (${year})` : game.title;
+      return {
+        id: game.id,
+        label,
+        description: `GameDB #${game.id}`,
+      };
+    });
+
+    const content = this.buildGotmAuditPromptContent(session, nextItem, options.length > 0);
+    const container = this.buildGotmAuditPromptContainer(content);
+    const components = this.buildGotmAuditPromptComponents(
+      interaction.user.id,
+      session.importId,
+      nextItem.itemId,
+      options,
+    );
+
+    await safeReply(interaction, {
+      components: [container, ...components],
+      flags: buildComponentsV2Flags(true),
+      __forceFollowUp: true,
+    });
+  }
+
+  private findExactGameDbMatch(
+    item: IGotmAuditItem,
+    results: IGameWithPlatforms[],
+  ): IGameWithPlatforms | null {
+    const rawTitle = stripTitleDateSuffix(item.gameTitle).trim();
+    if (!rawTitle) return null;
+    const normalized = normalizeTitleKey(rawTitle);
+    if (!normalized) return null;
+    const exact = results.filter((game) => normalizeTitleKey(game.title) === normalized);
+    if (exact.length !== 1) return null;
+    return exact[0] ?? null;
+  }
+
+  private buildGotmAuditPromptContent(
+    session: IGotmAuditImport,
+    item: IGotmAuditItem,
+    hasResults: boolean,
+  ): string {
+    const kindLabel = item.kind === "nr-gotm" ? "NR-GOTM" : "GOTM";
+    const threadText = item.threadId ? `<#${item.threadId}>` : "None";
+    const redditText = item.redditUrl ?? "None";
+    const base =
+      `## ${kindLabel} Audit #${session.importId} - Item ${item.rowIndex}/${session.totalCount}\n` +
+      `**Round:** ${item.roundNumber}\n` +
+      `**Month/Year:** ${item.monthYear}\n` +
+      `**Game Index:** ${item.gameIndex + 1}\n` +
+      `**Title:** ${item.gameTitle}\n` +
+      `**Thread:** ${threadText}\n` +
+      `**Reddit:** ${redditText}`;
+
+    if (hasResults) {
+      return `${base}\n\nSelect a GameDB match or choose Manual GameDB ID.`;
+    }
+
+    return `${base}\n\nNo GameDB matches found. Use Manual GameDB Search or Skip.`;
+  }
+
+  private buildGotmAuditPromptContainer(content: string): ContainerBuilder {
+    const container = new ContainerBuilder();
+    const safeContent = content.length > 4000 ? `${content.slice(0, 3997)}...` : content;
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(safeContent),
+    );
+    return container;
+  }
+
+  private buildGotmAuditPromptComponents(
+    ownerId: string,
+    importId: number,
+    itemId: number,
+    options: Array<{ id: number; label: string; description?: string }>,
+  ): ActionRowBuilder<any>[] {
+    const rows: ActionRowBuilder<any>[] = [];
+
+    if (options.length) {
+      const select = new StringSelectMenuBuilder()
+        .setCustomId(`${GOTM_AUDIT_SELECT_PREFIX}:${ownerId}:${importId}:${itemId}`)
+        .setPlaceholder("Select a GameDB match")
+        .addOptions(
+          options.slice(0, GOTM_AUDIT_RESULT_LIMIT).map((opt, idx) => ({
+            label: opt.label.slice(0, 100),
+            value: String(opt.id),
+            description: opt.description?.slice(0, 100),
+            default: idx === 0,
+          })),
+        );
+      rows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select));
+    }
+
+    const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${GOTM_AUDIT_ACTION_PREFIX}:${ownerId}:${importId}:${itemId}:manual`)
+        .setLabel("Manual GameDB ID")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`${GOTM_AUDIT_ACTION_PREFIX}:${ownerId}:${importId}:${itemId}:query`)
+        .setLabel("Manual GameDB Search")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`${GOTM_AUDIT_ACTION_PREFIX}:${ownerId}:${importId}:${itemId}:accept`)
+        .setLabel("Accept First Option")
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(!options.length),
+    );
+    const controlRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${GOTM_AUDIT_ACTION_PREFIX}:${ownerId}:${importId}:${itemId}:skip`)
+        .setLabel("Skip")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${GOTM_AUDIT_ACTION_PREFIX}:${ownerId}:${importId}:${itemId}:pause`)
+        .setLabel("Pause")
+        .setStyle(ButtonStyle.Secondary),
+    );
+
+    rows.push(actionRow, controlRow);
+    return rows;
+  }
+
+  private async tryInsertGotmAuditRound(
+    interaction:
+      | CommandInteraction
+      | ButtonInteraction
+      | StringSelectMenuInteraction
+      | ModalSubmitInteraction,
+    session: IGotmAuditImport,
+    item: IGotmAuditItem,
+  ): Promise<void> {
+    const roundItems = await getGotmAuditItemsForRound(
+      session.importId,
+      item.kind,
+      item.roundNumber,
+    );
+    if (!roundItems.length) return;
+    if (roundItems.some((entry) => entry.status !== "IMPORTED")) {
+      return;
+    }
+
+    const monthYear = roundItems[0].monthYear.trim();
+    if (!monthYear) {
+      await this.markGotmAuditRoundError(
+        session.importId,
+        item.kind,
+        item.roundNumber,
+        "Missing month/year for this round.",
+      );
+      return;
+    }
+
+    if (roundItems.some((entry) => entry.monthYear.trim() !== monthYear)) {
+      await this.markGotmAuditRoundError(
+        session.importId,
+        item.kind,
+        item.roundNumber,
+        "Mismatched month/year values for this round.",
+      );
+      return;
+    }
+
+    const hasExisting =
+      item.kind === "gotm"
+        ? Gotm.getByRound(item.roundNumber).length > 0
+        : NrGotm.getByRound(item.roundNumber).length > 0;
+    if (hasExisting) {
+      return;
+    }
+
+    const games = roundItems
+      .slice()
+      .sort((a, b) => a.gameIndex - b.gameIndex)
+      .map((entry) => ({
+        title: entry.gameTitle,
+        threadId: entry.threadId,
+        redditUrl: entry.redditUrl,
+        gamedbGameId: entry.gameDbGameId ?? 0,
+      }));
+
+    if (games.some((game) => !Number.isInteger(game.gamedbGameId) || game.gamedbGameId <= 0)) {
+      await this.markGotmAuditRoundError(
+        session.importId,
+        item.kind,
+        item.roundNumber,
+        "Missing GameDB id for one or more items in the round.",
+      );
+      return;
+    }
+
+    try {
+      if (item.kind === "gotm") {
+        await insertGotmRoundInDatabase(item.roundNumber, monthYear, games);
+        Gotm.addRound(item.roundNumber, monthYear, games);
+      } else {
+        const insertedIds = await insertNrGotmRoundInDatabase(item.roundNumber, monthYear, games);
+        const gamesWithIds = games.map((g, idx) => ({ ...g, id: insertedIds[idx] ?? null }));
+        NrGotm.addRound(item.roundNumber, monthYear, gamesWithIds);
+      }
+
+      await safeReply(interaction, {
+        content:
+          `${item.kind === "gotm" ? "GOTM" : "NR-GOTM"} round ${item.roundNumber} ` +
+          `inserted with ${games.length} game${games.length === 1 ? "" : "s"}.`,
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+    } catch (err: any) {
+      await this.markGotmAuditRoundError(
+        session.importId,
+        item.kind,
+        item.roundNumber,
+        err?.message ?? "Failed to insert round.",
+      );
+    }
+  }
+
+  private async markGotmAuditRoundError(
+    importId: number,
+    kind: GotmAuditKind,
+    roundNumber: number,
+    errorText: string,
+  ): Promise<void> {
+    const roundItems = await getGotmAuditItemsForRound(importId, kind, roundNumber);
+    if (!roundItems.length) return;
+    await Promise.all(
+      roundItems.map((entry) =>
+        updateGotmAuditItem(entry.itemId, {
+          status: "ERROR",
+          errorText,
+        }),
+      ),
+    );
+  }
+
+  @SelectMenuComponent({ id: /^gotm-audit-select:\d+:\d+:\d+$/ })
+  async handleGotmAuditSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const [, ownerId, importIdRaw, itemIdRaw] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await interaction
+        .reply({
+          content: "This audit prompt is not for you.",
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    const importId = Number(importIdRaw);
+    const itemId = Number(itemIdRaw);
+    if (!Number.isInteger(importId) || !Number.isInteger(itemId)) {
+      await interaction
+        .reply({
+          content: "Invalid audit selection.",
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    const selectedRaw = interaction.values?.[0];
+    const gameDbId = Number(selectedRaw);
+    if (!Number.isInteger(gameDbId) || gameDbId <= 0) {
+      await interaction
+        .reply({
+          content: "Invalid GameDB selection.",
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    await interaction.deferUpdate().catch(() => {});
+
+    const session = await getGotmAuditImportById(importId);
+    if (!session || session.userId !== ownerId) {
+      await safeReply(interaction, {
+        content: "This audit session no longer exists.",
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      return;
+    }
+
+    if (session.status !== "ACTIVE") {
+      await safeReply(interaction, {
+        content: "This audit session is not active.",
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      return;
+    }
+
+    const item = await getGotmAuditItemById(itemId);
+    if (!item || item.importId !== session.importId || item.status !== "PENDING") {
+      await safeReply(interaction, {
+        content: "This audit item is no longer pending.",
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      return;
+    }
+
+    const game = await Game.getGameById(gameDbId);
+    if (!game) {
+      await safeReply(interaction, {
+        content: `GameDB #${gameDbId} not found.`,
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      return;
+    }
+
+    await updateGotmAuditItem(itemId, {
+      status: "IMPORTED",
+      gameDbGameId: gameDbId,
+      errorText: null,
+    });
+
+    await safeReply(interaction, {
+      content: `Selected ${game.title} (GameDB #${gameDbId}).`,
+      flags: MessageFlags.Ephemeral,
+      __forceFollowUp: true,
+    });
+
+    await this.tryInsertGotmAuditRound(interaction, session, item);
+    await this.processNextGotmAuditItem(interaction, session);
+  }
+
+  @ButtonComponent({ id: /^gotm-audit-action:\d+:\d+:\d+:(manual|query|accept|skip|pause)$/ })
+  async handleGotmAuditAction(interaction: ButtonInteraction): Promise<void> {
+    const [, ownerId, importIdRaw, itemIdRaw, action] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await interaction
+        .reply({
+          content: "This audit prompt is not for you.",
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    const importId = Number(importIdRaw);
+    const itemId = Number(itemIdRaw);
+    if (!Number.isInteger(importId) || !Number.isInteger(itemId)) {
+      await interaction
+        .reply({
+          content: "Invalid audit action.",
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    if (action === "manual") {
+      const modal = new ModalBuilder()
+        .setCustomId(`${GOTM_AUDIT_MANUAL_PREFIX}:${ownerId}:${importId}:${itemId}`)
+        .setTitle("Manual GameDB Entry");
+      const input = new TextInputBuilder()
+        .setCustomId(GOTM_AUDIT_MANUAL_INPUT_ID)
+        .setLabel("GameDB ID")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+      const row = new ActionRowBuilder<TextInputBuilder>().addComponents(input);
+      modal.addComponents(row);
+      await interaction.showModal(modal);
+      return;
+    }
+
+    if (action === "query") {
+      const modal = new ModalBuilder()
+        .setCustomId(`${GOTM_AUDIT_QUERY_PREFIX}:${ownerId}:${importId}:${itemId}`)
+        .setTitle("Manual GameDB Search");
+      const input = new TextInputBuilder()
+        .setCustomId(GOTM_AUDIT_QUERY_INPUT_ID)
+        .setLabel("Search query")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+      const row = new ActionRowBuilder<TextInputBuilder>().addComponents(input);
+      modal.addComponents(row);
+      await interaction.showModal(modal);
+      return;
+    }
+
+    if (action === "accept") {
+      const session = await getGotmAuditImportById(importId);
+      if (!session || session.userId !== ownerId) {
+        await safeReply(interaction, {
+          content: "This audit session no longer exists.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      if (session.status !== "ACTIVE") {
+        await safeReply(interaction, {
+          content: "This audit session is not active.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      const item = await getGotmAuditItemById(itemId);
+      if (!item || item.importId !== session.importId || item.status !== "PENDING") {
+        await safeReply(interaction, {
+          content: "This audit item is no longer pending.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      let results: IGameWithPlatforms[] = [];
+      try {
+        results = await Game.searchGames(item.gameTitle);
+      } catch (err: any) {
+        await safeReply(interaction, {
+          content: `GameDB search failed: ${err?.message ?? "Unknown error"}`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      const first = results[0];
+      if (!first) {
+        await safeReply(interaction, {
+          content: "No GameDB matches found for this title.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      await interaction.deferUpdate().catch(() => {});
+
+      await updateGotmAuditItem(itemId, {
+        status: "IMPORTED",
+        gameDbGameId: first.id,
+        errorText: null,
+      });
+
+      await safeReply(interaction, {
+        content: `Selected ${first.title} (GameDB #${first.id}).`,
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+
+      await this.tryInsertGotmAuditRound(interaction, session, item);
+      await this.processNextGotmAuditItem(interaction, session);
+      return;
+    }
+
+    if (action === "skip") {
+      const session = await getGotmAuditImportById(importId);
+      if (!session || session.userId !== ownerId) {
+        await safeReply(interaction, {
+          content: "This audit session no longer exists.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      if (session.status !== "ACTIVE") {
+        await safeReply(interaction, {
+          content: "This audit session is not active.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      const item = await getGotmAuditItemById(itemId);
+      if (!item || item.importId !== session.importId || item.status !== "PENDING") {
+        await safeReply(interaction, {
+          content: "This audit item is no longer pending.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      await updateGotmAuditItem(itemId, { status: "SKIPPED" });
+      await safeUpdate(interaction, {
+        content: `Skipped "${item.gameTitle}".`,
+        components: [],
+      });
+      await this.processNextGotmAuditItem(interaction, session);
+      return;
+    }
+
+    if (action === "pause") {
+      const session = await getGotmAuditImportById(importId);
+      if (!session || session.userId !== ownerId) {
+        await safeReply(interaction, {
+          content: "This audit session no longer exists.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      await setGotmAuditImportStatus(session.importId, "PAUSED");
+      await safeUpdate(interaction, {
+        content: `Paused GOTM audit #${session.importId}.`,
+        components: [],
+      });
+    }
+  }
+
+  @ModalComponent({ id: /^gotm-audit-manual:\d+:\d+:\d+$/ })
+  async handleGotmAuditManualModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const [, ownerId, importIdRaw, itemIdRaw] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await interaction
+        .reply({
+          content: "This audit prompt is not for you.",
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    const importId = Number(importIdRaw);
+    const itemId = Number(itemIdRaw);
+    if (!Number.isInteger(importId) || !Number.isInteger(itemId)) {
+      await interaction
+        .reply({
+          content: "Invalid audit request.",
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    const raw = interaction.fields.getTextInputValue(GOTM_AUDIT_MANUAL_INPUT_ID);
+    const cleaned = stripModalInput(raw);
+    const gameDbId = Number(cleaned);
+    if (!Number.isInteger(gameDbId) || gameDbId <= 0) {
+      await interaction
+        .reply({
+          content: "Please provide a valid GameDB id.",
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    await interaction.deferUpdate().catch(() => {});
+
+    const session = await getGotmAuditImportById(importId);
+    if (!session || session.userId !== ownerId) {
+      await safeReply(interaction, {
+        content: "This audit session no longer exists.",
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      return;
+    }
+
+    if (session.status !== "ACTIVE") {
+      await safeReply(interaction, {
+        content: "This audit session is not active.",
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      return;
+    }
+
+    const item = await getGotmAuditItemById(itemId);
+    if (!item || item.importId !== session.importId || item.status !== "PENDING") {
+      await safeReply(interaction, {
+        content: "This audit item is no longer pending.",
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      return;
+    }
+
+    const game = await Game.getGameById(gameDbId);
+    if (!game) {
+      await safeReply(interaction, {
+        content: `GameDB #${gameDbId} not found.`,
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      return;
+    }
+
+    await updateGotmAuditItem(itemId, {
+      status: "IMPORTED",
+      gameDbGameId: gameDbId,
+      errorText: null,
+    });
+
+    await safeReply(interaction, {
+      content: `Selected ${game.title} (GameDB #${gameDbId}).`,
+      flags: MessageFlags.Ephemeral,
+      __forceFollowUp: true,
+    });
+
+    await this.tryInsertGotmAuditRound(interaction, session, item);
+    await this.processNextGotmAuditItem(interaction, session);
+  }
+
+  @ModalComponent({ id: /^gotm-audit-query:\d+:\d+:\d+$/ })
+  async handleGotmAuditQueryModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const [, ownerId, importIdRaw, itemIdRaw] = interaction.customId.split(":");
+    if (interaction.user.id !== ownerId) {
+      await interaction
+        .reply({
+          content: "This audit prompt is not for you.",
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    const importId = Number(importIdRaw);
+    const itemId = Number(itemIdRaw);
+    if (!Number.isInteger(importId) || !Number.isInteger(itemId)) {
+      await interaction
+        .reply({
+          content: "Invalid audit request.",
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    const raw = interaction.fields.getTextInputValue(GOTM_AUDIT_QUERY_INPUT_ID);
+    const query = stripModalInput(raw).trim();
+    if (!query) {
+      await interaction
+        .reply({
+          content: "Please provide a search query.",
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    await interaction.deferUpdate().catch(() => {});
+
+    const session = await getGotmAuditImportById(importId);
+    if (!session || session.userId !== ownerId) {
+      await safeReply(interaction, {
+        content: "This audit session no longer exists.",
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      return;
+    }
+
+    if (session.status !== "ACTIVE") {
+      await safeReply(interaction, {
+        content: "This audit session is not active.",
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      return;
+    }
+
+    const item = await getGotmAuditItemById(itemId);
+    if (!item || item.importId !== session.importId || item.status !== "PENDING") {
+      await safeReply(interaction, {
+        content: "This audit item is no longer pending.",
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      return;
+    }
+
+    let results: IGameWithPlatforms[] = [];
+    try {
+      results = await Game.searchGames(query);
+    } catch (err: any) {
+      await safeReply(interaction, {
+        content: `GameDB search failed: ${err?.message ?? "Unknown error"}`,
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      return;
+    }
+
+    const options = results.slice(0, GOTM_AUDIT_RESULT_LIMIT).map((game) => {
+      const year = game.initialReleaseDate instanceof Date
+        ? game.initialReleaseDate.getFullYear()
+        : game.initialReleaseDate
+          ? new Date(game.initialReleaseDate).getFullYear()
+          : null;
+      const label = year ? `${game.title} (${year})` : game.title;
+      return {
+        id: game.id,
+        label,
+        description: `GameDB #${game.id}`,
+      };
+    });
+
+    const baseContent = this.buildGotmAuditPromptContent(
+      session,
+      item,
+      options.length > 0,
+    );
+    const content = `${baseContent}\n\nManual search: ${query}`;
+    const container = this.buildGotmAuditPromptContainer(content);
+    const components = this.buildGotmAuditPromptComponents(
+      interaction.user.id,
+      session.importId,
+      item.itemId,
+      options,
+    );
+
+    await safeReply(interaction, {
+      components: [container, ...components],
+      flags: buildComponentsV2Flags(true),
+      __forceFollowUp: true,
+    });
   }
 
   @Slash({ description: "Edit GOTM data by round", name: "edit-gotm" })

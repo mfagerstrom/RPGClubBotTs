@@ -1,0 +1,178 @@
+kind,round,monthYear,gameIndex,title,threadId,redditUrl,gameDbId
+gotm,1,November 2014,1,Final Fantasy X / X-2 HD,,,1287
+gotm,2,January 2015,1,The Legend of Heroes: Trails in the Sky,,,594
+gotm,2,January 2015,2,Rogue Galaxy,,,1485
+gotm,3,February 2015,1,Valkyria Chronicles,,,1597
+gotm,3,February 2015,2,Suikoden 2,,,4382
+gotm,4,March 2015,1,Jeanne D'Arc,,,4378
+gotm,5,April 2015,1,Star Ocean 2,,,4208
+gotm,5,April 2015,2,Pillars of Eternity,,,745
+gotm,6,May 2015,1,The Witcher,,,1093
+gotm,6,May 2015,2,The Witcher 2: Assassins of Kings,,,2190
+gotm,6,May 2015,3,Xenoblade Chronicles,,,2200
+gotm,7,June 2015,1,Knights of the Old Republic,,,947
+gotm,7,June 2015,2,Ys: The Oath in Felghana,,,1121
+gotm,8,July 2015,1,The Legend of Dragoon,,,4409
+gotm,8,July 2015,2,Final Fantasy VI,,,4402
+gotm,9,August 2015,1,Chrono Trigger,,,1203
+gotm,9,August 2015,2,Star Ocean: Till the End of Time,,,2131
+gotm,10,September 2015,1,Breath of Fire IV,,,4464
+gotm,10,September 2015,2,Lost Odyssey,,,4429
+gotm,11,October 2015,1,Chrono Cross,,,4344
+gotm,12,November 2015,1,Tales of Zestiria,,,1560
+gotm,12,November 2015,2,Vagrant Story,,,4203
+gotm,13,December 2015,1,Fallout 4,,,4520
+gotm,14,January 2016,1,The Legend of Heroes: Trails in the Sky SC,,,595
+gotm,14,January 2016,2,Dark Cloud,,,1734
+gotm,15,February 2016,1,Final Fantasy VIII,,,384
+gotm,15,February 2016,2,Persona 4 Golden,,,1457
+gotm,16,March 2016,1,Dragon's Dogma,,,1785
+gotm,16,March 2016,2,Odin Sphere: Leifthrasir,,,1444
+gotm,17,April 2016,1,Final Fantasy V,,,4370
+gotm,17,April 2016,2,The Legend of Heroes: Trails of Cold Steel,,,1368
+gotm,18,May 2016,1,Dragon Quest V: Hand of the Heavenly Bride,,,1780
+gotm,19,June 2016,1,Final Fantasy XII,,,4513
+gotm,19,June 2016,2,Star Ocean 4: The Last Hope,,,4687
+gotm,20,July 2016,1,Parasite Eve,,,5321
+gotm,21,August 2016,1,I Am Setsuna,,,1334
+gotm,22,September 2016,1,Earthbound,,,1788
+gotm,22,September 2016,2,The Last Story,,,4154
+gotm,23,October 2016,1,Dragon Quest VII: Fragments of the Forgotten Past,,,1781
+gotm,24,November 2016,1,Dragon Age: Origins,,,1243
+gotm,25,December 2016,1,Final Fantasy XV,,,1289
+gotm,26,January 2017,1,Xenogears,,,2207
+gotm,27,February 2017,1,Dragon Quest VIII: Journey of the Cursed King,,,1782
+gotm,28,March 2017,1,The World Ends With You,,,4135
+gotm,29,April 2017,1,Persona 5,,,2030
+gotm,30,May 2017,1,The Technomancer,,,4085
+gotm,31,June 2017,1,Fire Emblem Echoes: Shadows of Valentia,,,1810
+gotm,32,July 2017,1,Digimon Story: Cyber Sleuth,,,1754
+gotm,33,August 2017,1,Suikoden,,,2139
+gotm,34,September 2017,1,Final Fantasy IX,,,1279
+gotm,35,October 2017,1,Bloodborne,,,1175
+gotm,36,November 2017,1,.hack//G.U. Episode 1,,,4
+gotm,37,December 2017,1,Live A Live,,,5322
+gotm,38,January 2018,1,Tokyo Xanadu eX+,,,1584
+gotm,39,February 2018,1,Golden Sun,,,1822
+gotm,40,March 2018,1,Secret of Mana,,,1503
+gotm,41,April 2018,1,Ni No Kuni II,,,1436
+gotm,42,May 2018,1,Wild Arms 3,,,2189
+gotm,43,June 2018,1,The Witcher III: Wild Hunt,,,2191
+gotm,44,July 2018,1,Lost Odyssey,,,4429
+gotm,45,August 2018,1,Octopath Traveler,,,1443
+gotm,46,September 2018,1,Dragon Quest XI: Echoes of an Elusive Age,,,301
+gotm,47,October 2018,1,Xenoblade Chronicles 2: Torna ~ The Golden Country,,,2202
+gotm,48,November 2018,1,World of Final Fantasy,,,2199
+gotm,49,December 2018,1,Final Fantasy Tactics,,,4414
+gotm,50,January 2019,1,Tales of Vesperia,,,1559
+gotm,51,February 2019,1,Final Fantasy XIII,,,385
+gotm,52,March 2019,1,Skies of Arcadia,,,4359
+gotm,53,April 2019,1,Dark Souls,,,4502
+gotm,54,May 2019,1,Final Fantasy VII,,,383
+gotm,55,June 2019,1,Battle Chasers: Nightwar,,,1682
+gotm,56,July 2019,1,The Last Remnant,,,1367
+gotm,57,August 2019,1,Fire Emblem: Three Houses,,,1296
+gotm,58,September 2019,1,Grandia,,,1312
+gotm,59,October 2019,1,Mother 3,,,4189
+gotm,60,November 2019,1,The Outer Worlds,,,2012
+gotm,61,December 2019,1,Nier: Automata,,,1438
+gotm,62,January 2020,1,Shin Megami Tensei IV,,,2091
+gotm,63,February 2020,1,Septerra Core: Legacy of the Creator,,,855
+gotm,64,March 2020,1,Shadow Hearts,,,5324
+gotm,65,April 2020,1,Final Fantasy Tactics Advance,,,4430
+gotm,66,May 2020,1,Ys VIII: Lacrimosa of Dana,,,1628
+gotm,67,June 2020,1,Xenoblade Chronicles Definitive Edition,,,1615
+gotm,68,July 2020,1,Xenosaga: Episode 1,,,5312
+gotm,69,August 2020,1,Dragon Quest IX,,,1777
+gotm,70,September 2020,1,Atelier Ryza,,,1156
+gotm,71,October 2020,1,Hades,,,1317
+gotm,72,November 2020,1,The Last Story,,,4154
+gotm,73,December 2020,1,Yakuza: Like a Dragon,,,1620
+gotm,74,January 2021,1,Crosscode,,,1216
+gotm,75,February 2021,1,Yakuza 0,,,2208
+gotm,76,March 2021,1,Bravely Default 2,,,1704
+gotm,77,April 2021,1,Disco Elysium,,,282
+gotm,78,May 2021,1,NieR Replicant ver.1.22474487139...,,,2001
+gotm,79,June 2021,1,Mega Man X Command Mission,,,4345
+gotm,80,July 2021,1,Legend of Mana,,,1372
+gotm,81,August 2021,1,Final Fantasy XIV,,,387
+gotm,82,September 2021,1,Tales of Arise,,,996
+gotm,83,October 2021,1,Dark Cloud 2 / Dark Chronicle,,,1225
+gotm,84,November 2021,1,Paper Mario: The Thousand-Year Door,,,2021
+gotm,85,December 2021,1,Dragon Age: Inquisition,,,1772
+gotm,86,January 2022,1,Star Ocean: First Departure,,,1530
+gotm,87,February 2022,1,Pokemon Legends Arceus,,,2048
+gotm,88,March 2022,1,Elden Ring,,,1789
+gotm,89,April 2022,1,Triangle Strategy,,,1590
+gotm,90,May 2022,1,Chrono Cross,,,4820
+gotm,91,June 2022,1,Ni No Kuni,,,1437
+gotm,92,July 2022,1,Ys IX: Monstrum Nox,,,1626
+gotm,93,August 2022,1,Xenoblade Chronicles 3,,,2203
+gotm,94,September 2022,1,Divinity: Original Sin 2,,,1765
+gotm,95,October 2022,1,Final Fantasy IV,,,4908
+gotm,96,November 2022,1,Tactics Ogre: Reborn,,,1556
+gotm,97,December 2022,1,Ys Seven,,,1627
+gotm,98,January 2023,1,Chained Echoes,,,1708
+gotm,99,February 2023,1,Fire Emblem: Engage,,,1281
+gotm,100,March 2023,1,Octopath Traveler II,,,2005
+gotm,101,April 2023,1,Legend of Dragoon,,,4409
+gotm,102,May 2023,1,Pathfinder: Kingmaker,,,5326
+gotm,103,June 2023,1,Soul Hackers 2,,,2124
+gotm,104,July 2023,1,Final Fantasy XVI,,,1808
+gotm,105,August 2023,1,Dragon Quest VI: Realms of Revelation,,,4421
+gotm,106,September 2023,1,Sea of Stars,,,5327
+nr-gotm,106,September 2023,1,We <3 Katamari,,,5328
+gotm,107,October 2023,1,The Legend of Nayuta: Boundless Trails,,,4163
+nr-gotm,107,October 2023,1,Onimusha,,,5329
+gotm,108,November 2023,1,Star Ocean: The Second Story R,,,2130
+nr-gotm,108,November 2023,1,Super Mario Wonder,,,2144
+gotm,109,December 2023,1,Persona 5 Tactica,,,2032
+nr-gotm,109,December 2023,1,Ghost Trick Phantom Detective,,,5331
+gotm,110,January 2024,1,Pokemon Black,,,5332
+gotm,110,January 2024,2,Pokemon White,,,2058
+nr-gotm,110,January 2024,1,13 Sentinels: Aegis Rim,,,1136
+gotm,111,February 2024,1,Granblue Fantasy: Relink,,,4929
+nr-gotm,111,February 2024,1,Palworld,,,5100
+gotm,112,March 2024,1,Final Fantasy VII Rebirth,,,1807
+nr-gotm,112,March 2024,1,Pocket Card Jockey,,,5334
+gotm,113,April 2024,1,Unicorn Overlord,,,2182
+nr-gotm,113,April 2024,1,Death Stranding,,,4469
+gotm,114,May 2024,1,Eiyuden Chronicle Hundred Heroes,,,4483
+nr-gotm,114,May 2024,1,Stellar Blade,,,5335
+gotm,115,June 2024,1,Paper Mario: The Thousand-Year Door,,,2021
+nr-gotm,115,June 2024,1,Astral Ascent,,,1155
+gotm,116,July 2024,1,Shin Megami Tensei V: Vengeance,,,2093
+nr-gotm,116,July 2024,1,Metroid Zero Mission,,,5059
+gotm,117,August 2024,1,Golden Sun,,,1822
+nr-gotm,117,August 2024,1,The Great Ace Attorney,,,1828
+gotm,118,September 2024,1,Visions Of Mana,,,5336
+nr-gotm,118,September 2024,1,Emio: The Smiling Man: Famicom Detective Club,,,5337
+gotm,119,October 2024,1,Metaphor Re:Fantazio,,,1975
+nr-gotm,119,October 2024,1,Legend Of Zelda: Echoes of Wisdom,,,1892
+gotm,120,November 2024,1,Dragon Age: The Veilguard,,,5338
+nr-gotm,120,November 2024,1,Crow Country,,,5339
+gotm,121,December 2024,1,Dragon Quest 3 HD-2D Remake,,,1775
+gotm,121,December 2024,2,Fantasian,,,1273
+nr-gotm,121,December 2024,1,Mega Man Legends,,,3674
+gotm,122,January 2025,1,Sekiro Shadows Die Twice,,,2087
+nr-gotm,122,January 2025,1,Okami,,,1445
+gotm,123,February 2025,1,Tales of Graces f Remastered,,,5341
+nr-gotm,123,February 2025,1,Sakuna: Of Rice and Ruin,,,1491
+gotm,124,March 2025,1,Wasteland 2,,,1082
+nr-gotm,124,March 2025,1,The Messenger,,,1405
+gotm,125,April 2025,1,Xenoblade Chronicles X: Definitive Edition,,,2206
+gotm,126,May 2025,1,Clair Obscur: Expedition 33,,,1715
+nr-gotm,126,May 2025,1,Bioshock Infinite,,,116
+gotm,127,June 2025,1,Fantasy Life i: The Girl Who Steals Time,,,4531
+gotm,128,July 2025,1,Raidou Remastered: The Mystery of the Soulless Army,,,5343
+nr-gotm,128,July 2025,1,Psychonauts,,,770
+gotm,129,August 2025,1,Pokémon Mystery Dungeon: Rescue Team DX,,,2051
+nr-gotm,129,August 2025,1,Legacy of Kain: Soul Reaver,,,591
+gotm,130,September 2025,1,Blue Dragon,,,4413
+nr-gotm,130,September 2025,1,Mafia 1: Definitive Edition,,,1923
+gotm,131,October 2025,1,Digimon Story: Time Stranger,,,1755
+nr-gotm,131,October 2025,1,GUNVALKYRIE,,,5344
+gotm,132,November 2025,1,Pokemon Legends Z-A,,,5346
+nr-gotm,132,November 2025,1,Ghost of Yotei,,,5345
+gotm,133,December 2025,1,Octopath Traveler 0,,,5347
+nr-gotm,133,December 2025,1,Metroid Prime 4,,,1978
