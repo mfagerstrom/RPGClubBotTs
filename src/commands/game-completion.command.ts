@@ -32,6 +32,7 @@ import Member from "../classes/Member.js";
 import { safeDeferReply, safeReply, sanitizeUserInput } from "../functions/InteractionUtils.js";
 import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
 import Game from "../classes/Game.js";
+import { STANDARD_PLATFORM_IDS } from "../config/standardPlatforms.js";
 import { igdbService } from "../services/IgdbService.js";
 import {
   createImportSession,
@@ -826,7 +827,7 @@ export class GameCompletionCommands {
         item.completedAt ?? null,
         true,
       );
-      const platformId = await this.resolveDefaultCompletionPlatformId();
+      const platformId = await this.resolveDefaultCompletionPlatformId(item.gameDbGameId);
       if (!platformId) {
         await interaction.reply({
           content: "No platform release data found for this game.",
@@ -910,7 +911,7 @@ export class GameCompletionCommands {
         item.completedAt ?? null,
         true,
       );
-      const platformId = await this.resolveDefaultCompletionPlatformId();
+      const platformId = await this.resolveDefaultCompletionPlatformId(item.gameDbGameId);
       if (!platformId) {
         await interaction.reply({
           content: "No platform release data found for this game.",
@@ -1945,12 +1946,24 @@ export class GameCompletionCommands {
     interaction: CommandInteraction | StringSelectMenuInteraction | ButtonInteraction,
     ctx: Omit<CompletionPlatformContext, "platforms">,
   ): Promise<void> {
-    const platforms = await Game.getAllPlatforms();
+    const platforms = await Game.getPlatformsForGameWithStandard(
+      ctx.gameId,
+      STANDARD_PLATFORM_IDS,
+    );
+    if (!platforms.length) {
+      await safeReply(interaction, {
+        content: "No platform release data is available for this game.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
 
-    const platformOptions = platforms.map((platform) => ({
-      id: platform.id,
-      name: platform.name,
-    }));
+    const platformOptions = [...platforms]
+      .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }))
+      .map((platform) => ({
+        id: platform.id,
+        name: platform.name,
+      }));
     const sessionId = this.createCompletionPlatformSession({
       ...ctx,
       platforms: platformOptions,
@@ -1979,8 +1992,11 @@ export class GameCompletionCommands {
     });
   }
 
-  private async resolveDefaultCompletionPlatformId(): Promise<number | null> {
-    const platforms = await Game.getAllPlatforms();
+  private async resolveDefaultCompletionPlatformId(gameId: number): Promise<number | null> {
+    const platforms = await Game.getPlatformsForGameWithStandard(
+      gameId,
+      STANDARD_PLATFORM_IDS,
+    );
     return platforms[0]?.id ?? null;
   }
 

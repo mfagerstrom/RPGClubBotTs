@@ -27,6 +27,7 @@ import {
 import Member, { type IMemberRecord } from "../classes/Member.js";
 import { getOraclePool } from "../db/oracleClient.js";
 import Game, { type IGame } from "../classes/Game.js";
+import { STANDARD_PLATFORM_IDS } from "../config/standardPlatforms.js";
 import { igdbService } from "../services/IgdbService.js";
 import {
   createIgdbSession,
@@ -416,12 +417,24 @@ export class SuperAdmin {
     ctx: CompletionAddContext,
     game: IGame,
   ): Promise<void> {
-    const platforms = await Game.getAllPlatforms();
+    const platforms = await Game.getPlatformsForGameWithStandard(
+      game.id,
+      STANDARD_PLATFORM_IDS,
+    );
+    if (!platforms.length) {
+      await safeReply(interaction, {
+        content: "No platform release data found for this game.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
 
-    const platformOptions = platforms.map((platform) => ({
-      id: platform.id,
-      name: platform.name,
-    }));
+    const platformOptions = [...platforms]
+      .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }))
+      .map((platform) => ({
+        id: platform.id,
+        name: platform.name,
+      }));
     const sessionId = this.createCompletionPlatformSession({
       ...ctx,
       userId: interaction.user.id,

@@ -1253,6 +1253,35 @@ export default class Game {
     }
   }
 
+  static async getPlatformsForGameWithStandard(
+    gameId: number,
+    standardPlatformIds: number[],
+  ): Promise<IPlatformDef[]> {
+    const gamePlatforms = await Game.getPlatformsForGame(gameId);
+    const allPlatforms = await Game.getAllPlatforms();
+    const byId = new Map(allPlatforms.map((platform) => [platform.id, platform]));
+    const seen = new Set<number>();
+    const merged: IPlatformDef[] = [];
+
+    for (const platform of gamePlatforms) {
+      const full = byId.get(platform.id) ?? platform;
+      if (!seen.has(platform.id)) {
+        merged.push(full);
+        seen.add(platform.id);
+      }
+    }
+
+    const extra = standardPlatformIds
+      .filter((id) => !seen.has(id))
+      .map((id) => byId.get(id))
+      .filter((platform): platform is IPlatformDef => Boolean(platform));
+
+    extra.sort((a, b) => a.name.localeCompare(b.name));
+    merged.push(...extra);
+
+    return merged;
+  }
+
   static async getPlatformByCode(code: string): Promise<IPlatformDef | null> {
     const pool = getOraclePool();
     const connection = await pool.getConnection();

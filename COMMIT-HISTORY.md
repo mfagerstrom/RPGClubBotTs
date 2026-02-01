@@ -1,3 +1,6 @@
+2026-02-01 - Commit ID: bb36bfe - issue-141: let usesrs choose any platform for game completions
+2026-02-01 - Commit ID: b7d74dc - issue-140: add good/bad thumbnail buttons to gamedb view
+2026-02-01 - Commit ID: a05e94f - added collection csv files, improved completionator to gamedb platform mappings
 2026-02-01 - Commit ID: dfba2bf - improved completionator seeding import to batch auto-accepted titles
 2026-02-01 - Commit ID: edc4d21 - fix: improved gamedb csv import to remember mappings and skips
 2026-02-01 - Commit ID: 04b215c - added csv gamedb game import from completionator

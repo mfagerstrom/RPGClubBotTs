@@ -88,6 +88,7 @@ import { formatPlatformDisplayName } from "../functions/PlatformDisplay.js";
 import { NOW_PLAYING_FORUM_ID } from "../config/channels.js";
 import { NOW_PLAYING_SIDEGAME_TAG_ID } from "../config/tags.js";
 import { COMPONENTS_V2_FLAG } from "../config/flags.js";
+import { STANDARD_PLATFORM_IDS } from "../config/standardPlatforms.js";
 import { padCommandName } from "./help.command.js";
 import {
   countGameDbCsvImportItems,
@@ -2710,7 +2711,10 @@ export class GameDb {
   private buildCompletionPlatformOptions(
     platforms: Array<{ id: number; name: string }>,
   ): Array<{ label: string; value: string }> {
-    const baseOptions = platforms.map((platform) => ({
+    const sortedPlatforms = [...platforms].sort((a, b) =>
+      a.name.localeCompare(b.name, "en", { sensitivity: "base" }),
+    );
+    const baseOptions = sortedPlatforms.map((platform) => ({
       label: platform.name.slice(0, 100),
       value: String(platform.id),
     }));
@@ -2816,7 +2820,17 @@ export class GameDb {
     gameId: number,
     gameTitle: string,
   ): Promise<void> {
-    const platforms = await Game.getAllPlatforms();
+    const platforms = await Game.getPlatformsForGameWithStandard(
+      gameId,
+      STANDARD_PLATFORM_IDS,
+    );
+    if (!platforms.length) {
+      await interaction.followUp({
+        content: "No platform release data is available for this game.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
 
     const message = interaction.message;
     if (!message) {
@@ -2897,7 +2911,10 @@ export class GameDb {
       session.removeChoice = value as CompletionWizardSession["removeChoice"];
     }
 
-    const platforms = await Game.getAllPlatforms();
+    const platforms = await Game.getPlatformsForGameWithStandard(
+      session.gameId,
+      STANDARD_PLATFORM_IDS,
+    );
     const platformOptions = this.buildCompletionPlatformOptions(platforms);
     const container = this.buildCompletionWizardContainer(session, platformOptions);
     const components = [container, ...this.buildCompletionWizardComponents(session, platformOptions)];
@@ -2925,7 +2942,10 @@ export class GameDb {
     }
 
     const missing = this.getCompletionWizardMissingSelections(session);
-    const platforms = await Game.getAllPlatforms();
+    const platforms = await Game.getPlatformsForGameWithStandard(
+      session.gameId,
+      STANDARD_PLATFORM_IDS,
+    );
     const platformOptions = this.buildCompletionPlatformOptions(platforms);
     if (missing.length) {
       const container = this.buildCompletionWizardContainer(session, platformOptions, missing);
@@ -3522,8 +3542,14 @@ export class GameDb {
       }
     }
 
-    const platforms = await Game.getAllPlatforms();
-    const baseOptions = platforms.map((platform) => ({
+    const platforms = await Game.getPlatformsForGameWithStandard(
+      gameId,
+      STANDARD_PLATFORM_IDS,
+    );
+    const sortedPlatforms = [...platforms].sort((a, b) =>
+      a.name.localeCompare(b.name, "en", { sensitivity: "base" }),
+    );
+    const baseOptions = sortedPlatforms.map((platform) => ({
       label: platform.name.slice(0, 100),
       value: String(platform.id),
     }));
