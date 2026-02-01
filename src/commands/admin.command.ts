@@ -1462,6 +1462,7 @@ export class Admin {
       "gamedb game id",
       "gamedb game_id",
       "gamedbgameid",
+      "gamedbid",
     ]);
 
     if (kindIndex < 0 || roundIndex < 0 || titleIndex < 0) {

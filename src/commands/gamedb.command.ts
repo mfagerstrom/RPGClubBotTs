@@ -2816,14 +2816,7 @@ export class GameDb {
     gameId: number,
     gameTitle: string,
   ): Promise<void> {
-    const platforms = await Game.getPlatformsForGame(gameId);
-    if (!platforms.length) {
-      await interaction.followUp({
-        content: "No platform release data is available for this game.",
-        flags: MessageFlags.Ephemeral,
-      }).catch(() => {});
-      return;
-    }
+    const platforms = await Game.getAllPlatforms();
 
     const message = interaction.message;
     if (!message) {
@@ -2904,7 +2897,7 @@ export class GameDb {
       session.removeChoice = value as CompletionWizardSession["removeChoice"];
     }
 
-    const platforms = await Game.getPlatformsForGame(session.gameId);
+    const platforms = await Game.getAllPlatforms();
     const platformOptions = this.buildCompletionPlatformOptions(platforms);
     const container = this.buildCompletionWizardContainer(session, platformOptions);
     const components = [container, ...this.buildCompletionWizardComponents(session, platformOptions)];
@@ -2932,7 +2925,7 @@ export class GameDb {
     }
 
     const missing = this.getCompletionWizardMissingSelections(session);
-    const platforms = await Game.getPlatformsForGame(session.gameId);
+    const platforms = await Game.getAllPlatforms();
     const platformOptions = this.buildCompletionPlatformOptions(platforms);
     if (missing.length) {
       const container = this.buildCompletionWizardContainer(session, platformOptions, missing);
@@ -3529,11 +3522,7 @@ export class GameDb {
       }
     }
 
-    const platforms = await Game.getPlatformsForGame(gameId);
-    if (!platforms.length) {
-      await updateEmbed("❌ No platform release data is available for this game.");
-      return;
-    }
+    const platforms = await Game.getAllPlatforms();
     const baseOptions = platforms.map((platform) => ({
       label: platform.name.slice(0, 100),
       value: String(platform.id),

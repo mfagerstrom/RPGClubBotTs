@@ -416,14 +416,7 @@ export class SuperAdmin {
     ctx: CompletionAddContext,
     game: IGame,
   ): Promise<void> {
-    const platforms = await Game.getPlatformsForGame(game.id);
-    if (!platforms.length) {
-      await safeReply(interaction, {
-        content: "No platform release data found for this game.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
+    const platforms = await Game.getAllPlatforms();
 
     const platformOptions = platforms.map((platform) => ({
       id: platform.id,

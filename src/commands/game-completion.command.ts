@@ -826,7 +826,7 @@ export class GameCompletionCommands {
         item.completedAt ?? null,
         true,
       );
-      const platformId = await this.resolveDefaultCompletionPlatformId(item.gameDbGameId);
+      const platformId = await this.resolveDefaultCompletionPlatformId();
       if (!platformId) {
         await interaction.reply({
           content: "No platform release data found for this game.",
@@ -910,7 +910,7 @@ export class GameCompletionCommands {
         item.completedAt ?? null,
         true,
       );
-      const platformId = await this.resolveDefaultCompletionPlatformId(item.gameDbGameId);
+      const platformId = await this.resolveDefaultCompletionPlatformId();
       if (!platformId) {
         await interaction.reply({
           content: "No platform release data found for this game.",
@@ -1945,14 +1945,7 @@ export class GameCompletionCommands {
     interaction: CommandInteraction | StringSelectMenuInteraction | ButtonInteraction,
     ctx: Omit<CompletionPlatformContext, "platforms">,
   ): Promise<void> {
-    const platforms = await Game.getPlatformsForGame(ctx.gameId);
-    if (!platforms.length) {
-      await safeReply(interaction, {
-        content: "No platform release data is available for this game.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
+    const platforms = await Game.getAllPlatforms();
 
     const platformOptions = platforms.map((platform) => ({
       id: platform.id,
@@ -1986,8 +1979,8 @@ export class GameCompletionCommands {
     });
   }
 
-  private async resolveDefaultCompletionPlatformId(gameId: number): Promise<number | null> {
-    const platforms = await Game.getPlatformsForGame(gameId);
+  private async resolveDefaultCompletionPlatformId(): Promise<number | null> {
+    const platforms = await Game.getAllPlatforms();
     return platforms[0]?.id ?? null;
   }
 
