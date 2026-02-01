@@ -110,6 +110,7 @@ const GAMEDB_CSV_MANUAL_PREFIX = "gamedb-csv-manual";
 const GAMEDB_CSV_MANUAL_INPUT_ID = "gamedb-csv-manual-igdb-id";
 const GAMEDB_CSV_QUERY_PREFIX = "gamedb-csv-query";
 const GAMEDB_CSV_QUERY_INPUT_ID = "gamedb-csv-query-text";
+const GAMEDB_CSV_AUTO_ACCEPTED = new Map<number, string[]>();
 
 type GameDbCsvAction = (typeof GAMEDB_CSV_ACTIONS)[number];
 
@@ -211,6 +212,20 @@ function normalizeTitleKey(value: string): string {
 function buildIgdbSearchLink(title: string): string {
   const encoded = encodeURIComponent(title);
   return `https://www.igdb.com/search?utf8=%E2%9C%93&type=1&q=${encoded}`;
+}
+
+function pushAutoAcceptedTitle(importId: number, title: string): void {
+  const list = GAMEDB_CSV_AUTO_ACCEPTED.get(importId) ?? [];
+  list.push(title);
+  GAMEDB_CSV_AUTO_ACCEPTED.set(importId, list);
+}
+
+function consumeAutoAcceptedSummary(importId: number): string | null {
+  const list = GAMEDB_CSV_AUTO_ACCEPTED.get(importId);
+  if (!list || list.length === 0) return null;
+  GAMEDB_CSV_AUTO_ACCEPTED.set(importId, []);
+  const lines = list.map((title) => `- ${title}`);
+  return `Auto-accepted since last prompt:\n${lines.join("\n")}`;
 }
 
 function stripTitleDateSuffix(value: string): string {
@@ -1119,11 +1134,6 @@ export class GameDb {
       const mapping = await getGameDbCsvTitleMapByNorm(normalizedTitle);
       if (mapping?.status === "SKIPPED") {
         await updateGameDbCsvImportItem(nextItem.itemId, { status: "SKIPPED" });
-        await safeReply(interaction, {
-          content: `Skipped "${nextItem.gameTitle}" due to saved mapping.`,
-          flags: MessageFlags.Ephemeral,
-          __forceFollowUp: true,
-        });
         await this.processNextGameDbCsvImportItem(interaction, session);
         return;
       }
@@ -1148,11 +1158,7 @@ export class GameDb {
           gameDbGameId: mappedGame.id,
           errorText: null,
         });
-        await safeReply(interaction, {
-          content: `Imported ${mappedGame.title} as GameDB #${mappedGame.id}.`,
-          flags: MessageFlags.Ephemeral,
-          __forceFollowUp: true,
-        });
+        pushAutoAcceptedTitle(session.importId, mappedGame.title);
         await this.processNextGameDbCsvImportItem(interaction, session);
         return;
       }
@@ -1211,26 +1217,19 @@ export class GameDb {
           status: "MAPPED",
           createdBy: interaction.user.id,
         });
-        await safeReply(interaction, {
-          content: `Imported ${result.title} as GameDB #${result.gameId}.`,
-          flags: MessageFlags.Ephemeral,
-          __forceFollowUp: true,
-        });
+        pushAutoAcceptedTitle(session.importId, result.title);
       } catch (err: any) {
         await updateGameDbCsvImportItem(nextItem.itemId, {
           status: "ERROR",
           errorText: err?.message ?? "Import failed.",
         });
-        await safeReply(interaction, {
-          content: `Failed to import "${nextItem.gameTitle}". Skipping.`,
-          flags: MessageFlags.Ephemeral,
-          __forceFollowUp: true,
-        });
       }
       await this.processNextGameDbCsvImportItem(interaction, session);
       return;
     }
-    const content = this.buildCsvPromptContent(session, nextItem, options.length > 0);
+    const summary = consumeAutoAcceptedSummary(session.importId);
+    const contentBase = this.buildCsvPromptContent(session, nextItem, options.length > 0);
+    const content = summary ? `${summary}\n\n${contentBase}` : contentBase;
     const container = this.buildCsvPromptContainer(content);
     const components = this.buildCsvPromptComponents(
       interaction.user.id,
