@@ -35,6 +35,15 @@ import {
   listSuggestions,
   countSuggestions,
 } from "../classes/Suggestion.js";
+import {
+  createSuggestionReviewSessionRecord,
+  deleteExpiredSuggestionReviewSessions,
+  deleteSuggestionReviewSession,
+  deleteSuggestionReviewSessionsForReviewer,
+  getSuggestionReviewSession,
+  updateSuggestionReviewSession,
+  type ISuggestionReviewSession,
+} from "../classes/SuggestionReviewSession.js";
 import { createIssue } from "../services/GithubIssuesService.js";
 import { BOT_DEV_CHANNEL_ID, GAMEDB_UPDATES_CHANNEL_ID } from "../config/channels.js";
 import { BOT_DEV_PING_USER_ID } from "../config/users.js";
@@ -59,53 +68,105 @@ const SUGGESTION_REVIEW_PREFIX = "suggestion-review";
 const SUGGESTION_REJECT_MODAL_PREFIX = "suggestion-reject";
 const SUGGESTION_REJECT_REASON_ID = "suggestion-reject-reason";
 const SUGGESTION_REVIEW_TTL_MS = 15 * 60 * 1000;
-type SuggestionReviewSession = {
-  userId: string;
-  suggestionIds: number[];
-  index: number;
-  createdAt: number;
-  totalCount: number;
-};
-const suggestionReviewSessions = new Map<string, SuggestionReviewSession>();
+type SuggestionReviewSession = ISuggestionReviewSession;
+
+function buildSuggestionReviewSessionId(): string {
+  return `suggestion-review-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+}
+
+function isSuggestionReviewSessionExpired(session: SuggestionReviewSession): boolean {
+  const lastActivity = session.updatedAt ?? session.createdAt;
+  return Date.now() - lastActivity.getTime() > SUGGESTION_REVIEW_TTL_MS;
+}
+
+async function startSuggestionReviewSession(
+  reviewerId: string,
+  suggestionIds: number[],
+  totalCount: number,
+): Promise<SuggestionReviewSession | null> {
+  await deleteExpiredSuggestionReviewSessions(
+    new Date(Date.now() - SUGGESTION_REVIEW_TTL_MS),
+  );
+  await deleteSuggestionReviewSessionsForReviewer(reviewerId);
+  try {
+    return await createSuggestionReviewSessionRecord({
+      sessionId: buildSuggestionReviewSessionId(),
+      reviewerId,
+      suggestionIds,
+      index: 0,
+      totalCount,
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function loadSuggestionReviewSession(
+  sessionId: string,
+  reviewerId: string,
+): Promise<SuggestionReviewSession | null> {
+  const session = await getSuggestionReviewSession(sessionId);
+  if (!session) return null;
+  if (session.reviewerId !== reviewerId) return null;
+  if (isSuggestionReviewSessionExpired(session)) {
+    await deleteSuggestionReviewSession(sessionId);
+    return null;
+  }
+  return session;
+}
 
 function buildComponentsV2Flags(isEphemeral: boolean): number {
   return (isEphemeral ? MessageFlags.Ephemeral : 0) | COMPONENTS_V2_FLAG;
 }
 
-function buildSuggestionReviewActionId(action: string, sessionId: string): string {
-  return `${SUGGESTION_REVIEW_PREFIX}:${action}:${sessionId}`;
+function buildSuggestionReviewActionId(
+  action: string,
+  sessionId: string,
+  reviewerId: string,
+): string {
+  return `${SUGGESTION_REVIEW_PREFIX}:${action}:${sessionId}:${reviewerId}`;
 }
 
 function parseSuggestionReviewActionId(
   customId: string,
-): { action: string; sessionId: string } | null {
+): { action: string; sessionId: string; reviewerId: string } | null {
   const parts = customId.split(":");
-  if (parts.length !== 3 || parts[0] !== SUGGESTION_REVIEW_PREFIX) {
+  if (parts.length !== 4 || parts[0] !== SUGGESTION_REVIEW_PREFIX) {
     return null;
   }
-  const [, action, sessionId] = parts;
-  return action && sessionId ? { action, sessionId } : null;
+  const [, action, sessionId, reviewerId] = parts;
+  return action && sessionId && reviewerId ? { action, sessionId, reviewerId } : null;
 }
 
-function buildSuggestionRejectModalId(sessionId: string, suggestionId: number): string {
-  return `${SUGGESTION_REJECT_MODAL_PREFIX}:${sessionId}:${suggestionId}`;
+function buildSuggestionRejectModalId(
+  sessionId: string,
+  reviewerId: string,
+  suggestionId: number,
+): string {
+  return `${SUGGESTION_REJECT_MODAL_PREFIX}:${sessionId}:${reviewerId}:${suggestionId}`;
 }
 
 function parseSuggestionRejectModalId(
   customId: string,
-): { sessionId: string; suggestionId: number } | null {
+): { sessionId: string; reviewerId: string; suggestionId: number } | null {
   const parts = customId.split(":");
-  if (parts.length !== 3 || parts[0] !== SUGGESTION_REJECT_MODAL_PREFIX) {
+  if (parts.length !== 4 || parts[0] !== SUGGESTION_REJECT_MODAL_PREFIX) {
     return null;
   }
-  const suggestionId = Number(parts[2]);
+  const suggestionId = Number(parts[3]);
   if (!Number.isInteger(suggestionId) || suggestionId <= 0) {
     return null;
   }
-  return { sessionId: parts[1], suggestionId };
+  const sessionId = parts[1];
+  const reviewerId = parts[2];
+  return sessionId && reviewerId ? { sessionId, reviewerId, suggestionId } : null;
 }
 
-function buildSuggestionRejectModal(sessionId: string, suggestionId: number): ModalBuilder {
+function buildSuggestionRejectModal(
+  sessionId: string,
+  reviewerId: string,
+  suggestionId: number,
+): ModalBuilder {
   const reasonInput = new TextInputBuilder()
     .setCustomId(SUGGESTION_REJECT_REASON_ID)
     .setLabel("Reason for rejection")
@@ -114,36 +175,12 @@ function buildSuggestionRejectModal(sessionId: string, suggestionId: number): Mo
     .setMaxLength(1000);
 
   return new ModalBuilder()
-    .setCustomId(buildSuggestionRejectModalId(sessionId, suggestionId))
+    .setCustomId(buildSuggestionRejectModalId(sessionId, reviewerId, suggestionId))
     .setTitle("Reject Suggestion")
     .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(reasonInput));
 }
 
-function createSuggestionReviewSession(
-  userId: string,
-  suggestionIds: number[],
-  totalCount: number,
-): string {
-  const sessionId = `suggestion-review-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-  suggestionReviewSessions.set(sessionId, {
-    userId,
-    suggestionIds,
-    index: 0,
-    createdAt: Date.now(),
-    totalCount,
-  });
-  return sessionId;
-}
 
-function getSuggestionReviewSession(sessionId: string): SuggestionReviewSession | null {
-  const session = suggestionReviewSessions.get(sessionId);
-  if (!session) return null;
-  if (Date.now() - session.createdAt > SUGGESTION_REVIEW_TTL_MS) {
-    suggestionReviewSessions.delete(sessionId);
-    return null;
-  }
-  return session;
-}
 
 function formatSuggestionTimestamp(date: Date | null | undefined): string {
   if (!date) return "Unknown";
@@ -206,28 +243,29 @@ function buildSuggestionReviewContainer(
 
 function buildSuggestionReviewButtons(
   sessionId: string,
+  reviewerId: string,
   hasSuggestion: boolean,
   hasNext: boolean,
 ): ActionRowBuilder<ButtonBuilder>[] {
   if (!hasSuggestion) return [];
 
   const approveButton = new ButtonBuilder()
-    .setCustomId(buildSuggestionReviewActionId("approve", sessionId))
+    .setCustomId(buildSuggestionReviewActionId("approve", sessionId, reviewerId))
     .setLabel("Approve")
     .setStyle(ButtonStyle.Success);
 
   const rejectButton = new ButtonBuilder()
-    .setCustomId(buildSuggestionReviewActionId("reject", sessionId))
+    .setCustomId(buildSuggestionReviewActionId("reject", sessionId, reviewerId))
     .setLabel("Reject")
     .setStyle(ButtonStyle.Danger);
 
   const nextButton = new ButtonBuilder()
-    .setCustomId(buildSuggestionReviewActionId("next", sessionId))
+    .setCustomId(buildSuggestionReviewActionId("next", sessionId, reviewerId))
     .setLabel(hasNext ? "Next" : "Finish")
     .setStyle(ButtonStyle.Secondary);
 
   const cancelButton = new ButtonBuilder()
-    .setCustomId(buildSuggestionReviewActionId("cancel", sessionId))
+    .setCustomId(buildSuggestionReviewActionId("cancel", sessionId, reviewerId))
     .setLabel("Close")
     .setStyle(ButtonStyle.Danger);
 
@@ -261,7 +299,6 @@ async function getCurrentSuggestionForReview(
 }
 
 async function buildSuggestionReviewPayload(
-  sessionId: string,
   session: SuggestionReviewSession,
 ): Promise<{ components: Array<ContainerBuilder | ActionRowBuilder<ButtonBuilder>> }> {
   const current = await getCurrentSuggestionForReview(session);
@@ -273,7 +310,12 @@ async function buildSuggestionReviewPayload(
     Math.max(current.total, 1),
     session.totalCount,
   );
-  const buttons = buildSuggestionReviewButtons(sessionId, hasSuggestion, hasNext);
+  const buttons = buildSuggestionReviewButtons(
+    session.sessionId,
+    session.reviewerId,
+    hasSuggestion,
+    hasNext,
+  );
   return { components: [container, ...buttons] };
 }
 
@@ -479,12 +521,11 @@ export class SuggestionCommand {
     }
 
     const suggestionIds = suggestions.map((suggestion) => suggestion.suggestionId).reverse();
-    const sessionId = createSuggestionReviewSession(
+    const session = await startSuggestionReviewSession(
       interaction.user.id,
       suggestionIds,
       totalCount,
     );
-    const session = getSuggestionReviewSession(sessionId);
     if (!session) {
       const container = buildSuggestionReviewContainer(null, 0, 0, totalCount);
       await safeReply(interaction, {
@@ -494,7 +535,7 @@ export class SuggestionCommand {
       return;
     }
 
-    const payload = await buildSuggestionReviewPayload(sessionId, session);
+    const payload = await buildSuggestionReviewPayload(session);
     await safeReply(interaction, {
       ...payload,
       flags: buildComponentsV2Flags(true),
@@ -578,7 +619,15 @@ export class SuggestionCommand {
       return;
     }
 
-    const session = getSuggestionReviewSession(parsed.sessionId);
+    if (parsed.reviewerId !== interaction.user.id) {
+      await safeReply(interaction, {
+        content: "This review prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const session = await loadSuggestionReviewSession(parsed.sessionId, parsed.reviewerId);
     if (!session) {
       const container = new ContainerBuilder().addTextDisplayComponents(
         new TextDisplayBuilder().setContent(
@@ -592,16 +641,8 @@ export class SuggestionCommand {
       return;
     }
 
-    if (session.userId !== interaction.user.id) {
-      await safeReply(interaction, {
-        content: "This review prompt isn't for you.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
     if (parsed.action === "cancel") {
-      suggestionReviewSessions.delete(parsed.sessionId);
+      await deleteSuggestionReviewSession(parsed.sessionId);
       const container = new ContainerBuilder().addTextDisplayComponents(
         new TextDisplayBuilder().setContent("Suggestion review closed."),
       );
@@ -614,9 +655,8 @@ export class SuggestionCommand {
 
     if (parsed.action === "next") {
       session.index = Math.min(session.index + 1, session.suggestionIds.length);
-      session.createdAt = Date.now();
-      suggestionReviewSessions.set(parsed.sessionId, session);
-      const payload = await buildSuggestionReviewPayload(parsed.sessionId, session);
+      await updateSuggestionReviewSession(session);
+      const payload = await buildSuggestionReviewPayload(session);
       await safeUpdate(interaction, {
         ...payload,
         flags: buildComponentsV2Flags(true),
@@ -666,10 +706,9 @@ export class SuggestionCommand {
 
       session.suggestionIds.splice(session.index, 1);
       session.totalCount = Math.max(0, session.totalCount - 1);
-      session.createdAt = Date.now();
-      suggestionReviewSessions.set(parsed.sessionId, session);
+      await updateSuggestionReviewSession(session);
 
-      const payload = await buildSuggestionReviewPayload(parsed.sessionId, session);
+      const payload = await buildSuggestionReviewPayload(session);
       await safeUpdate(interaction, {
         ...payload,
         flags: buildComponentsV2Flags(true),
@@ -688,12 +727,18 @@ export class SuggestionCommand {
         return;
       }
       await interaction
-        .showModal(buildSuggestionRejectModal(parsed.sessionId, current.suggestion.suggestionId))
+        .showModal(
+          buildSuggestionRejectModal(
+            parsed.sessionId,
+            parsed.reviewerId,
+            current.suggestion.suggestionId,
+          ),
+        )
         .catch(() => {});
     }
   }
 
-  @ModalComponent({ id: /^suggestion-reject:.+:\d+$/ })
+  @ModalComponent({ id: /^suggestion-reject:.+:.+:\d+$/ })
   async submitSuggestionReject(interaction: ModalSubmitInteraction): Promise<void> {
     const parsed = parseSuggestionRejectModalId(interaction.customId);
     if (!parsed) {
@@ -704,18 +749,18 @@ export class SuggestionCommand {
       return;
     }
 
-    const session = getSuggestionReviewSession(parsed.sessionId);
-    if (!session) {
+    if (parsed.reviewerId !== interaction.user.id) {
       await safeReply(interaction, {
-        content: "This suggestion review has expired. Run /suggestion-review again.",
+        content: "This review prompt isn't for you.",
         flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
-    if (session.userId !== interaction.user.id) {
+    const session = await loadSuggestionReviewSession(parsed.sessionId, parsed.reviewerId);
+    if (!session) {
       await safeReply(interaction, {
-        content: "This review prompt isn't for you.",
+        content: "This suggestion review has expired. Run /suggestion-review again.",
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -763,10 +808,9 @@ export class SuggestionCommand {
       }
       session.totalCount = Math.max(0, session.totalCount - 1);
     }
-    session.createdAt = Date.now();
-    suggestionReviewSessions.set(parsed.sessionId, session);
+    await updateSuggestionReviewSession(session);
 
-    const payload = await buildSuggestionReviewPayload(parsed.sessionId, session);
+    const payload = await buildSuggestionReviewPayload(session);
     if (interaction.message) {
       await interaction.message.edit({ components: payload.components }).catch(() => {});
     }
