@@ -1,6 +1,5 @@
 import type {
   CommandInteraction,
-  Client,
   TextBasedChannel,
   StringSelectMenuInteraction,
 } from "discord.js";
@@ -14,7 +13,7 @@ import {
   SlashOption,
 } from "discordx";
 // Use relative import with .js for ts-node ESM compatibility
-import Gotm, { IGotmEntry, IGotmGame } from "../classes/Gotm.js";
+import Gotm, { IGotmEntry } from "../classes/Gotm.js";
 import { safeDeferReply, safeReply, sanitizeUserInput } from "../functions/InteractionUtils.js";
 import {
   areNominationsClosed,
@@ -28,23 +27,23 @@ import {
 } from "../classes/Nomination.js";
 import { GOTM_NOMINATION_CHANNEL_ID } from "../config/nominationChannels.js";
 import { buildGotmHelpResponse } from "./help.command.js";
-import { buildGotmEntryEmbed, type IEmbedWithAttachments } from "../functions/GotmEntryEmbeds.js";
 import { igdbService } from "../services/IgdbService.js";
 import {
   createIgdbSession,
   deleteIgdbSession,
   type IgdbSelectOption,
 } from "../services/IgdbSelectService.js";
-import { AUDIT_NO_VALUE_SENTINEL } from "./superadmin.command.js";
 import axios from "axios";
 import Game, { type IGame } from "../classes/Game.js";
 import {
   buildComponentsV2Flags,
   buildNominationListPayload,
 } from "../functions/NominationListComponents.js";
+import {
+  buildGotmCardsFromEntries,
+  buildGotmSearchMessages,
+} from "../functions/GotmSearchComponents.js";
 import { GameDb } from "./gamedb.command.js";
-
-const ANNOUNCEMENTS_CHANNEL_ID: string | undefined = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 
 // Precompute dropdown choices
 const MONTH_CHOICES = [
@@ -136,8 +135,7 @@ export class GotmSearch {
     month = month ? sanitizeUserInput(month, { preserveNewlines: false }) : undefined;
     title = title ? sanitizeUserInput(title, { preserveNewlines: false }) : undefined;
     const ephemeral = !showInChat;
-    // Acknowledge early to avoid interaction timeouts while fetching images
-    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
+    await safeDeferReply(interaction, { flags: buildComponentsV2Flags(ephemeral) });
 
     // Determine search mode
     let results: IGotmEntry[] = [];
@@ -177,53 +175,27 @@ export class GotmSearch {
         return;
       }
 
-      const embedAssets = await buildGotmEmbeds(
-        results,
-        criteriaLabel,
-        interaction.guildId ?? undefined,
+      const cards = buildGotmCardsFromEntries(results, "GOTM");
+      const payloads = await buildGotmSearchMessages(
         interaction.client,
+        cards,
+        {
+          title: "GOTM Search Results",
+          continuationTitle: "GOTM Search Results (continued)",
+          emptyMessage: "No GOTM games found for this query.",
+          queryLabel: criteriaLabel,
+          guildId: interaction.guildId ?? undefined,
+          maxGamesPerContainer: 10,
+        },
       );
-      const content = criteriaLabel ? `Query: "${criteriaLabel}"` : undefined;
-
-      if (embedAssets.length === 1) {
-        const asset = embedAssets[0];
-        const embedJson = asset.embed.toJSON();
-        const thumbFromEmbed: string | undefined = embedJson.thumbnail?.url;
-        const imageUrl =
-          (asset.files && asset.files.length > 0
-            ? `attachment://${asset.files[0].name}`
-            : thumbFromEmbed) ?? undefined;
-
-        asset.embed.setThumbnail(null as any);
-        if (imageUrl) {
-          asset.embed.setImage(imageUrl);
-        }
-      }
-
-      const sendGroup = async (group: IEmbedWithAttachments[], first: boolean) => {
-        const embeds = group.map((g) => g.embed);
-        const files = group.flatMap((g) => g.files ?? []);
-        const payload: any = {
-          content: first ? content : undefined,
-          embeds,
-          files: files.length ? files : undefined,
-          flags: ephemeral ? MessageFlags.Ephemeral : undefined,
-        };
-        if (first) {
-          await safeReply(interaction, payload);
-        } else {
-          await safeReply(interaction, { ...payload, __forceFollowUp: true });
-        }
-      };
-
-      if (embedAssets.length <= 10) {
-        await sendGroup(embedAssets, true);
-      } else {
-        const chunks = chunkAssets(embedAssets, 10);
-        await sendGroup(chunks[0], true);
-        for (let i = 1; i < chunks.length; i++) {
-          await sendGroup(chunks[i], false);
-        }
+      for (let i = 0; i < payloads.length; i += 1) {
+        const payload = payloads[i];
+        await safeReply(interaction, {
+          components: payload.components,
+          files: payload.files.length ? payload.files : undefined,
+          flags: buildComponentsV2Flags(ephemeral),
+          ...(i > 0 ? { __forceFollowUp: true } : {}),
+        });
       }
     } catch (err: any) {
       const msg = err?.message ?? String(err);
@@ -714,119 +686,4 @@ function parseMonthValue(input: string): number | string {
   const num = Number(trimmed);
   if (Number.isInteger(num) && num >= 1 && num <= 12) return num;
   return trimmed;
-}
-
-async function buildGotmEmbeds(
-  results: IGotmEntry[],
-  criteriaLabel: string | undefined,
-  guildId: string | undefined,
-  client: Client,
-): Promise<IEmbedWithAttachments[]> {
-  // If many results, fall back to compact, field-based embeds (no thumbnails)
-  if (results.length > 12) {
-    return buildCompactEmbeds(results, criteriaLabel, guildId).map((embed) => ({
-      embed,
-      files: [],
-    }));
-  }
-
-  const assets: IEmbedWithAttachments[] = [];
-  for (const entry of results) {
-    const embedAssets = await buildGotmEntryEmbed(entry, guildId, client);
-    assets.push(embedAssets);
-  }
-
-  return assets;
-}
-
-function buildCompactEmbeds(
-  results: IGotmEntry[],
-  criteriaLabel: string | undefined,
-  guildId?: string,
-): EmbedBuilder[] {
-  const embeds: EmbedBuilder[] = [];
-  const MAX_FIELDS = 25;
-
-  const baseEmbed = new EmbedBuilder().setColor(0x0099ff).setTitle("GOTM Search Results");
-
-  let current = baseEmbed;
-  let fieldCount = 0;
-  for (const entry of results) {
-    const name = `Round ${entry.round} - ${entry.monthYear}`;
-    const value = formatGamesWithJump(entry, guildId);
-    if (fieldCount >= MAX_FIELDS) {
-      embeds.push(current);
-      current = new EmbedBuilder().setColor(0x0099ff).setTitle("GOTM Search Results (cont.)");
-      fieldCount = 0;
-    }
-    current.addFields({ name, value, inline: false });
-    fieldCount++;
-  }
-  embeds.push(current);
-  return embeds;
-}
-
-function chunkAssets(list: IEmbedWithAttachments[], size: number): IEmbedWithAttachments[][] {
-  const out: IEmbedWithAttachments[][] = [];
-  for (let i = 0; i < list.length; i += size) {
-    out.push(list.slice(i, i + size));
-  }
-  return out;
-}
-
-function displayAuditValue(value: string | null | undefined): string | null {
-  if (value === AUDIT_NO_VALUE_SENTINEL) return null;
-  return value ?? null;
-}
-
-function formatGames(games: IGotmGame[], _guildId?: string): string {
-  void _guildId;
-  if (!games || games.length === 0) return "(no games listed)";
-  const lines: string[] = [];
-  for (const g of games) {
-    const parts: string[] = [];
-    const threadId = displayAuditValue(g.threadId);
-    const redditUrl = displayAuditValue(g.redditUrl);
-    const titleWithThread = threadId ? `${g.title} - <#${threadId}>` : g.title;
-    parts.push(titleWithThread);
-    if (redditUrl) {
-      parts.push(`[Reddit](${redditUrl})`);
-    }
-    const firstLine = `- ${parts.join(' | ')}`;
-    lines.push(firstLine);
-  }
-  return lines.join('\n');
-}
-
-function truncateField(value: string): string {
-  const MAX = 1024; // Discord embed field value limit
-  if (value.length <= MAX) return value;
-  return value.slice(0, MAX - 3) + '...';
-}
-
-function buildResultsJumpLink(entry: IGotmEntry, guildId?: string): string | undefined {
-  if (!guildId || !ANNOUNCEMENTS_CHANNEL_ID) return undefined;
-  const rawMsgId = (entry as any).votingResultsMessageId as string | undefined | null;
-  const msgId = displayAuditValue(rawMsgId);
-  if (!msgId) return undefined;
-  return `https://discord.com/channels/${guildId}/${ANNOUNCEMENTS_CHANNEL_ID}/${msgId}`;
-}
-
-function formatGamesWithJump(entry: IGotmEntry, guildId?: string): string {
-  const body = formatGames(entry.gameOfTheMonth, guildId);
-  const link = buildResultsJumpLink(entry, guildId);
-  if (!link) return truncateField(body);
-  const tail = `[Voting Results](${link})`;
-  return appendWithTailTruncate(body, tail);
-}
-
-function appendWithTailTruncate(body: string, tail: string): string {
-  const MAX = 1024; // Align with existing truncateField limit
-  const sep = body ? '\n\n' : '';
-  const total = body.length + sep.length + tail.length;
-  if (total <= MAX) return body + sep + tail;
-  const availForBody = MAX - tail.length - sep.length;
-  if (availForBody <= 0) return tail.slice(0, MAX);
-  const trimmedBody = body.slice(0, Math.max(0, availForBody - 3)) + '...';
-  return trimmedBody + sep + tail;
 }

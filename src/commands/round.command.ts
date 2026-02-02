@@ -1,13 +1,14 @@
-import { type CommandInteraction, EmbedBuilder, ApplicationCommandOptionType, MessageFlags } from "discord.js";
+import { type CommandInteraction, ApplicationCommandOptionType, MessageFlags } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import { safeDeferReply, safeReply } from "../functions/InteractionUtils.js";
 import BotVotingInfo from "../classes/BotVotingInfo.js";
 import Gotm from "../classes/Gotm.js";
 import NrGotm from "../classes/NrGotm.js";
 import {
-  buildGotmEntryEmbed,
-  buildNrGotmEntryEmbed,
-} from "../functions/GotmEntryEmbeds.js";
+  buildGotmCardsFromEntries,
+  buildGotmSearchMessages,
+} from "../functions/GotmSearchComponents.js";
+import { buildComponentsV2Flags } from "../functions/NominationListComponents.js";
 
 @Discord()
 export class CurrentRoundCommand {
@@ -26,7 +27,7 @@ export class CurrentRoundCommand {
     interaction: CommandInteraction,
   ): Promise<void> {
     const ephemeral = !showInChat;
-    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
+    await safeDeferReply(interaction, { flags: buildComponentsV2Flags(ephemeral) });
 
     try {
       const current = await BotVotingInfo.getCurrentRound();
@@ -46,8 +47,11 @@ export class CurrentRoundCommand {
       const gotmMonthYear = gotmEntries[0]?.monthYear;
       const nrGotmMonthYear = nrGotmEntries[0]?.monthYear;
 
-      const hasGotm = gotmEntries.length > 0;
-      const hasNrGotm = nrGotmEntries.length > 0;
+      const gotmCards = buildGotmCardsFromEntries(gotmEntries, "GOTM");
+      const nrCards = buildGotmCardsFromEntries(nrGotmEntries, "NR-GOTM").filter(
+        (card) => card.title.trim().toLowerCase() !== "n/a",
+      );
+      const cards = [...gotmCards, ...nrCards];
 
       const currentDescLines: string[] = [];
       let mainLine = `Round ${roundNumber}`;
@@ -69,84 +73,29 @@ export class CurrentRoundCommand {
         }
       }
 
-      if (!hasGotm && !hasNrGotm) {
+      if (!cards.length) {
         currentDescLines.push("");
         currentDescLines.push("(No GOTM or NR-GOTM entries found for this round.)");
       }
 
-      const currentEmbed = new EmbedBuilder()
-        .setColor(0x0099ff)
-        .setTitle("Current Round:")
-        .setDescription(currentDescLines.join("\n"));
-
-      const embeds: EmbedBuilder[] = [currentEmbed];
-      const files: any[] = [];
-
-      if (hasGotm) {
-        const gotmEntry = gotmEntries[0];
-        const gotmAssets = await buildGotmEntryEmbed(
-          gotmEntry,
-          interaction.guildId ?? undefined,
-          interaction.client as any,
-        );
-        const gotmEmbed = gotmAssets.embed;
-        gotmEmbed.setTitle("Game of the Month");
-        // Ensure the title is not a clickable link
-        gotmEmbed.setURL(null as any);
-        embeds.push(gotmEmbed);
-
-        if (gotmAssets.files?.length) {
-          files.push(...gotmAssets.files);
-        }
-
-        if (gotmAssets.files?.length === 1 || gotmEmbed.toJSON().thumbnail?.url) {
-          const thumbFromEmbed: string | undefined = gotmEmbed.toJSON().thumbnail?.url;
-          const imageUrl =
-            (gotmAssets.files && gotmAssets.files.length > 0
-              ? `attachment://${gotmAssets.files[0].name}`
-              : thumbFromEmbed) ?? undefined;
-          gotmEmbed.setThumbnail(null as any);
-          if (imageUrl) {
-            gotmEmbed.setImage(imageUrl);
-          }
-        }
-      }
-
-      if (hasNrGotm) {
-        const nrIGotmEntry = nrGotmEntries[0];
-        const nrAssets = await buildNrGotmEntryEmbed(
-          nrIGotmEntry,
-          interaction.guildId ?? undefined,
-          interaction.client as any,
-        );
-        const nrEmbed = nrAssets.embed;
-        nrEmbed.setTitle("Non-RPG Game of the Month");
-        // Ensure the title is not a clickable link
-        nrEmbed.setURL(null as any);
-        embeds.push(nrEmbed);
-
-        if (nrAssets.files?.length) {
-          files.push(...nrAssets.files);
-        }
-
-        if (nrAssets.files?.length === 1 || nrEmbed.toJSON().thumbnail?.url) {
-          const thumbFromEmbed: string | undefined = nrEmbed.toJSON().thumbnail?.url;
-          const imageUrl =
-            (nrAssets.files && nrAssets.files.length > 0
-              ? `attachment://${nrAssets.files[0].name}`
-              : thumbFromEmbed) ?? undefined;
-          nrEmbed.setThumbnail(null as any);
-          if (imageUrl) {
-            nrEmbed.setImage(imageUrl);
-          }
-        }
-      }
-
-      await safeReply(interaction, {
-        embeds,
-        files: files.length ? files : undefined,
-        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+      const payloads = await buildGotmSearchMessages(interaction.client, cards, {
+        title: "Current Round",
+        continuationTitle: "Current Round (continued)",
+        emptyMessage: "No GOTM or NR-GOTM entries found for this round.",
+        introText: currentDescLines.slice(1).join("\n"),
+        guildId: interaction.guildId ?? undefined,
+        maxGamesPerContainer: 10,
       });
+
+      for (let i = 0; i < payloads.length; i += 1) {
+        const payload = payloads[i];
+        await safeReply(interaction, {
+          components: payload.components,
+          files: payload.files.length ? payload.files : undefined,
+          flags: buildComponentsV2Flags(ephemeral),
+          ...(i > 0 ? { __forceFollowUp: true } : {}),
+        });
+      }
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {

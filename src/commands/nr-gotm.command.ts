@@ -1,6 +1,5 @@
 import type {
   CommandInteraction,
-  Client,
   TextBasedChannel,
   StringSelectMenuInteraction,
 } from "discord.js";
@@ -13,7 +12,6 @@ import {
   SlashGroup,
   SlashOption,
 } from "discordx";
-import { AUDIT_NO_VALUE_SENTINEL } from "./superadmin.command.js";
 // Use relative import with .js for ts-node ESM compatibility
 import NrGotm, { INrGotmEntry } from "../classes/NrGotm.js";
 import { safeDeferReply, safeReply, sanitizeUserInput } from "../functions/InteractionUtils.js";
@@ -29,7 +27,6 @@ import {
 } from "../classes/Nomination.js";
 import { NR_GOTM_NOMINATION_CHANNEL_ID } from "../config/nominationChannels.js";
 import { buildNrGotmHelpResponse } from "./help.command.js";
-import { buildNrGotmEntryEmbed, type IEmbedWithAttachments } from "../functions/GotmEntryEmbeds.js";
 import Game, { type IGame } from "../classes/Game.js";
 import { igdbService } from "../services/IgdbService.js";
 import axios from "axios";
@@ -37,14 +34,17 @@ import {
   buildComponentsV2Flags,
   buildNominationListPayload,
 } from "../functions/NominationListComponents.js";
+import {
+  buildGotmCardsFromEntries,
+  buildGotmSearchMessages,
+  type GotmDisplayCard,
+} from "../functions/GotmSearchComponents.js";
 import { GameDb } from "./gamedb.command.js";
 import {
   createIgdbSession,
   deleteIgdbSession,
   type IgdbSelectOption,
 } from "../services/IgdbSelectService.js";
-
-const ANNOUNCEMENTS_CHANNEL_ID: string | undefined = process.env.ANNOUNCEMENTS_CHANNEL_ID;
 
 function isNoNrGotm(entry: INrGotmEntry): boolean {
   return entry.gameOfTheMonth.some((g) => (g.title ?? "").trim().toLowerCase() === "n/a");
@@ -145,7 +145,7 @@ export class NrGotmSearch {
     month = month ? sanitizeUserInput(month, { preserveNewlines: false }) : undefined;
     title = title ? sanitizeUserInput(title, { preserveNewlines: false }) : undefined;
     const ephemeral = !showInChat;
-    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
+    await safeDeferReply(interaction, { flags: buildComponentsV2Flags(ephemeral) });
 
     let results: INrGotmEntry[] = [];
     let criteriaLabel: string | undefined;
@@ -193,7 +193,8 @@ export class NrGotmSearch {
       const latestRound = allEntries.length ? Math.max(...allEntries.map((e) => e.round)) : null;
       const latestEntry = latestRound ? allEntries.find((e) => e.round === latestRound) : null;
 
-      let embedsResults = results.slice();
+      let searchResults = results.slice();
+      let introText: string | undefined;
       if (
         results.length === 1 &&
         latestEntry &&
@@ -204,58 +205,36 @@ export class NrGotmSearch {
           .filter((e) => e.round !== latestEntry.round && !isNoNrGotm(e))
           .sort((a, b) => b.round - a.round)[0];
         if (previous) {
-          embedsResults = [results[0], previous];
+          searchResults = [results[0], previous];
           criteriaLabel = criteriaLabel ?? `Round ${results[0].round}`;
+          introText =
+            `Round ${results[0].round} has no NR-GOTM winner yet. ` +
+            "Showing the previous NR-GOTM winner below.";
         }
       }
 
-      const embedAssets = await buildNrGotmEmbeds(
-        embedsResults,
-        criteriaLabel,
-        interaction.guildId ?? undefined,
+      const cards = buildNrGotmCards(searchResults);
+      const payloads = await buildGotmSearchMessages(
         interaction.client,
+        cards,
+        {
+          title: "NR-GOTM Search Results",
+          continuationTitle: "NR-GOTM Search Results (continued)",
+          emptyMessage: "No NR-GOTM games found for this query.",
+          queryLabel: criteriaLabel,
+          introText,
+          guildId: interaction.guildId ?? undefined,
+          maxGamesPerContainer: 10,
+        },
       );
-      const content = criteriaLabel ? `Query: "${criteriaLabel}"` : undefined;
-
-      if (embedAssets.length === 1) {
-        const asset = embedAssets[0];
-        const embedJson = asset.embed.toJSON();
-        const thumbFromEmbed: string | undefined = embedJson.thumbnail?.url;
-        const imageUrl =
-          (asset.files && asset.files.length > 0
-            ? `attachment://${asset.files[0].name}`
-            : thumbFromEmbed) ?? undefined;
-
-        asset.embed.setThumbnail(null as any);
-        if (imageUrl) {
-          asset.embed.setImage(imageUrl);
-        }
-      }
-
-      const sendGroup = async (group: IEmbedWithAttachments[], first: boolean) => {
-        const embeds = group.map((g) => g.embed);
-        const files = group.flatMap((g) => g.files ?? []);
-        const payload: any = {
-          content: first ? content : undefined,
-          embeds,
-          files: files.length ? files : undefined,
-          flags: ephemeral ? MessageFlags.Ephemeral : undefined,
-        };
-        if (first) {
-          await safeReply(interaction, payload);
-        } else {
-          await safeReply(interaction, { ...payload, __forceFollowUp: true });
-        }
-      };
-
-      if (embedAssets.length <= 10) {
-        await sendGroup(embedAssets, true);
-      } else {
-        const chunks = chunkAssets(embedAssets, 10);
-        await sendGroup(chunks[0], true);
-        for (let i = 1; i < chunks.length; i++) {
-          await sendGroup(chunks[i], false);
-        }
+      for (let i = 0; i < payloads.length; i += 1) {
+        const payload = payloads[i];
+        await safeReply(interaction, {
+          components: payload.components,
+          files: payload.files.length ? payload.files : undefined,
+          flags: buildComponentsV2Flags(ephemeral),
+          ...(i > 0 ? { __forceFollowUp: true } : {}),
+        });
       }
     } catch (err: any) {
       const msg = err?.message ?? String(err);
@@ -746,145 +725,8 @@ function parseMonthValue(input: string): number | string {
   return trimmed;
 }
 
-async function buildNrGotmEmbeds(
-  results: INrGotmEntry[],
-  criteriaLabel: string | undefined,
-  guildId: string | undefined,
-  client: Client,
-): Promise<IEmbedWithAttachments[]> {
-  const buildNoEmbed = (entry: INrGotmEntry): EmbedBuilder => {
-    return new EmbedBuilder()
-      .setColor(0x0099ff)
-      .setTitle(`NR-GOTM Round ${entry.round} - ${entry.monthYear}`)
-      .setDescription("No Non-RPG nominations for this round.");
-  };
-
-  if (results.length > 12) {
-    return buildCompactEmbeds(results, criteriaLabel, guildId).map((embed) => ({
-      embed,
-      files: [],
-    }));
-  }
-
-  const assets: IEmbedWithAttachments[] = [];
-
-  for (const entry of results) {
-    if (isNoNrGotm(entry)) {
-      assets.push({ embed: buildNoEmbed(entry), files: [] });
-      continue;
-    }
-
-    const embedAssets = await buildNrGotmEntryEmbed(entry, guildId, client);
-    assets.push(embedAssets);
-  }
-
-  return assets;
-}
-
-function buildCompactEmbeds(
-  results: INrGotmEntry[],
-  criteriaLabel: string | undefined,
-  guildId?: string,
-): EmbedBuilder[] {
-  const embeds: EmbedBuilder[] = [];
-  const MAX_FIELDS = 25;
-
-  const baseEmbed = new EmbedBuilder()
-    .setColor(0x0099ff)
-    .setTitle("NR-GOTM Search Results");
-
-  let current = baseEmbed;
-  let fieldCount = 0;
-  for (const entry of results) {
-    const name = `NR-GOTM Round ${entry.round} - ${entry.monthYear}`;
-    const value = formatGamesWithJump(entry, guildId);
-    if (fieldCount >= MAX_FIELDS) {
-      embeds.push(current);
-      current = new EmbedBuilder()
-        .setColor(0x0099ff)
-        .setTitle("NR-GOTM Search Results (cont.)");
-      fieldCount = 0;
-    }
-    current.addFields({ name, value, inline: false });
-    fieldCount++;
-  }
-  embeds.push(current);
-  return embeds;
-}
-
-function chunkAssets(list: IEmbedWithAttachments[], size: number): IEmbedWithAttachments[][] {
-  const out: IEmbedWithAttachments[][] = [];
-  for (let i = 0; i < list.length; i += size) {
-    out.push(list.slice(i, i + size));
-  }
-  return out;
-}
-
-function displayValueSafe(value: string | null | undefined): string | null {
-  if (value === AUDIT_NO_VALUE_SENTINEL) return null;
-  return value ?? null;
-}
-
-function formatGames(entry: INrGotmEntry, _guildId?: string): { body: string; winners: string[] } {
-  void _guildId;
-  const games = entry.gameOfTheMonth;
-  if (!games || games.length === 0) return { body: "(no games listed)", winners: [] };
-  const lines: string[] = [];
-  const winners: string[] = [];
-  for (const g of games) {
-    const parts: string[] = [];
-    const threadId = displayValueSafe(g.threadId);
-    const redditUrl = displayValueSafe(g.redditUrl);
-    const titleWithThread = threadId ? `${g.title} - <#${threadId}>` : g.title;
-    parts.push(titleWithThread);
-    if (redditUrl) {
-      parts.push(`[Reddit](${redditUrl})`);
-    }
-    const firstLine = `- ${parts.join(" | ")}`;
-    lines.push(firstLine);
-    if (threadId) winners.push(threadId);
-  }
-  return { body: lines.join("\n"), winners };
-}
-
-function truncateField(value: string): string {
-  const MAX = 1024;
-  if (value.length <= MAX) return value;
-  return value.slice(0, MAX - 3) + "...";
-}
-
-function buildResultsJumpLink(
-  entry: INrGotmEntry,
-  guildId?: string,
-): string | undefined {
-  if (!guildId || !ANNOUNCEMENTS_CHANNEL_ID) return undefined;
-  const rawMsgId = (entry as any).votingResultsMessageId as
-    | string
-    | undefined
-    | null;
-  const msgId = displayValueSafe(rawMsgId);
-  if (!msgId) return undefined;
-  return `https://discord.com/channels/${guildId}/${ANNOUNCEMENTS_CHANNEL_ID}/${msgId}`;
-}
-
-function formatGamesWithJump(
-  entry: INrGotmEntry,
-  guildId?: string,
-): string {
-  const { body } = formatGames(entry, guildId);
-  const link = buildResultsJumpLink(entry, guildId);
-  if (!link) return truncateField(body);
-  const tail = `[Voting Results](${link})`;
-  return appendWithTailTruncate(body, tail);
-}
-
-function appendWithTailTruncate(body: string, tail: string): string {
-  const MAX = 1024;
-  const sep = body ? "\n\n" : "";
-  const total = body.length + sep.length + tail.length;
-  if (total <= MAX) return body + sep + tail;
-  const availForBody = MAX - tail.length - sep.length;
-  if (availForBody <= 0) return tail.slice(0, MAX);
-  const trimmedBody = body.slice(0, Math.max(0, availForBody - 3)) + "...";
-  return trimmedBody + sep + tail;
+function buildNrGotmCards(entries: INrGotmEntry[]): GotmDisplayCard[] {
+  return buildGotmCardsFromEntries(entries, "NR-GOTM").filter(
+    (card) => card.title.trim().toLowerCase() !== "n/a",
+  );
 }
