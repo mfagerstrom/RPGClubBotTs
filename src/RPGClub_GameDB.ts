@@ -25,6 +25,29 @@ import { refreshGiveawayHubMessage } from "./services/GiveawayHubService.js";
 installConsoleLogging();
 
 const PRESENCE_CHECK_INTERVAL_MS: number = 30 * 60 * 1000;
+let presenceInterval: NodeJS.Timeout | null = null;
+
+function clearPresenceInterval(): void {
+  if (!presenceInterval) return;
+  clearInterval(presenceInterval);
+  presenceInterval = null;
+}
+
+async function refreshPresence(): Promise<void> {
+  try {
+    await updateBotPresence(bot);
+  } catch (err) {
+    console.error("Failed to refresh presence:", err);
+  }
+}
+
+function registerPresenceShutdownHooks(): void {
+  const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGBREAK"];
+  for (const signal of signals) {
+    process.once(signal, clearPresenceInterval);
+  }
+  process.once("beforeExit", clearPresenceInterval);
+}
 
 export const bot: Client = new Client({
   // To use only guild command
@@ -77,12 +100,13 @@ bot.once("clientReady", async () => {
   setConsoleLoggingClient(bot);
 
   // Set presence state from stored value
-  await updateBotPresence(bot);
+  await refreshPresence();
 
   // Periodically refresh presence from the database to stay in sync
-  setInterval(() => {
-    void updateBotPresence(bot);
+  presenceInterval = setInterval(() => {
+    void refreshPresence();
   }, PRESENCE_CHECK_INTERVAL_MS);
+  registerPresenceShutdownHooks();
 
   // Synchronize applications commands with Discord
   await bot.initApplicationCommands();
