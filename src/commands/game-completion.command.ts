@@ -203,7 +203,7 @@ async function autocompleteGameCompletionTitle(
     await interaction.respond([]);
     return;
   }
-  const results = await Game.searchGames(query);
+  const results = await Game.searchGamesAutocomplete(query);
   const resultOptions = results.slice(0, 24).map((game) => ({
     name: game.title.slice(0, 100),
     value: game.title,

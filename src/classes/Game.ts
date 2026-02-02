@@ -45,6 +45,12 @@ export interface IGameWithPlatforms extends IGame {
   platforms: IPlatformDef[];
 }
 
+export interface IGameAutocompleteResult {
+  id: number;
+  title: string;
+  initialReleaseDate: Date | null;
+}
+
 export interface IRegionDef {
   id: number;
   code: string;
@@ -116,6 +122,14 @@ const buildPlatformCode = (name: string | null, igdbId: number): string => {
   return codeWithId.length > 20 ? codeWithId.slice(0, 20) : codeWithId;
 };
 
+const AUTOCOMPLETE_CACHE_TTL_MS = 60_000;
+const AUTOCOMPLETE_CACHE_MAX_ENTRIES = 300;
+const autocompleteSearchCache = new Map<
+  string,
+  { expiresAt: number; results: IGameAutocompleteResult[] }
+>();
+const pendingAutocompleteSearches = new Map<string, Promise<IGameAutocompleteResult[]>>();
+
 // Helper functions for mapping rows
 function mapGameRow(row: any): IGame {
   return {
@@ -139,6 +153,27 @@ function mapGameRow(row: any): IGame {
     createdAt: row.CREATED_AT instanceof Date ? row.CREATED_AT : new Date(row.CREATED_AT),
     updatedAt: row.UPDATED_AT instanceof Date ? row.UPDATED_AT : new Date(row.UPDATED_AT),
   };
+}
+
+function normalizeAutocompleteQuery(query: string): string {
+  return query.trim().toLowerCase();
+}
+
+function buildAutocompleteCacheKey(query: string, limit: number): string {
+  return `${limit}:${normalizeAutocompleteQuery(query)}`;
+}
+
+function pruneAutocompleteCache(now: number): void {
+  for (const [key, entry] of autocompleteSearchCache.entries()) {
+    if (entry.expiresAt <= now) {
+      autocompleteSearchCache.delete(key);
+    }
+  }
+  while (autocompleteSearchCache.size > AUTOCOMPLETE_CACHE_MAX_ENTRIES) {
+    const oldestKey = autocompleteSearchCache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    autocompleteSearchCache.delete(oldestKey);
+  }
 }
 
 function mapReleaseRow(row: any): IRelease {
@@ -1555,6 +1590,109 @@ export default class Game {
       return row ? mapRegionDefRow(row) : null;
     } finally {
       await connection.close();
+    }
+  }
+
+  static async searchGamesAutocomplete(
+    query: string,
+    limit: number = 24,
+  ): Promise<IGameAutocompleteResult[]> {
+    const baseQuery = query.trim();
+    if (!baseQuery) {
+      return [];
+    }
+
+    const safeLimit = Math.min(24, Math.max(1, Math.trunc(limit) || 24));
+    const now = Date.now();
+    pruneAutocompleteCache(now);
+
+    const cacheKey = buildAutocompleteCacheKey(baseQuery, safeLimit);
+    const cached = autocompleteSearchCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return cached.results;
+    }
+    const pending = pendingAutocompleteSearches.get(cacheKey);
+    if (pending) {
+      return pending;
+    }
+
+    const lowerQuery = baseQuery.toLowerCase();
+    const normalizedQuery = lowerQuery.replace(/[^a-z0-9]/g, "");
+    if (!normalizedQuery && !/[a-z0-9]/.test(lowerQuery)) {
+      return [];
+    }
+
+    const queryPromise = (async () => {
+      const pool = getOraclePool();
+      const connection = await pool.getConnection();
+      try {
+        const binds = {
+          exactRaw: lowerQuery,
+          rawPrefix: `${lowerQuery}%`,
+          rawContains: `%${lowerQuery}%`,
+          exactNorm: normalizedQuery || null,
+          normPrefix: normalizedQuery ? `${normalizedQuery}%` : null,
+          normContains: normalizedQuery ? `%${normalizedQuery}%` : null,
+          limit: safeLimit,
+        };
+
+        const result = await connection.execute<{
+          GAME_ID: number;
+          TITLE: string;
+          INITIAL_RELEASE_DATE: Date | null;
+        }>(
+          `SELECT GAME_ID, TITLE, INITIAL_RELEASE_DATE
+             FROM GAMEDB_GAMES
+            WHERE LOWER(TITLE) LIKE :rawContains
+               OR (
+                 :exactNorm IS NOT NULL AND
+                 REGEXP_REPLACE(LOWER(TITLE), '[^a-z0-9]', '') LIKE :normContains
+               )
+            ORDER BY CASE
+                       WHEN LOWER(TITLE) = :exactRaw THEN 0
+                       WHEN LOWER(TITLE) LIKE :rawPrefix THEN 1
+                       WHEN :exactNorm IS NOT NULL AND
+                            REGEXP_REPLACE(LOWER(TITLE), '[^a-z0-9]', '') = :exactNorm THEN 2
+                       WHEN :exactNorm IS NOT NULL AND
+                            REGEXP_REPLACE(LOWER(TITLE), '[^a-z0-9]', '') LIKE :normPrefix THEN 3
+                       ELSE 4
+                     END,
+                     TITLE ASC
+            FETCH FIRST :limit ROWS ONLY`,
+          binds,
+          {
+            outFormat: oracledb.OUT_FORMAT_OBJECT,
+          },
+        );
+
+        const rows = result.rows ?? [];
+        const games: IGameAutocompleteResult[] = rows.map((row: any) => ({
+          id: Number(row.GAME_ID),
+          title: String(row.TITLE),
+          initialReleaseDate: row.INITIAL_RELEASE_DATE instanceof Date
+            ? row.INITIAL_RELEASE_DATE
+            : row.INITIAL_RELEASE_DATE
+              ? new Date(row.INITIAL_RELEASE_DATE)
+              : null,
+        }));
+
+        autocompleteSearchCache.set(cacheKey, {
+          expiresAt: Date.now() + AUTOCOMPLETE_CACHE_TTL_MS,
+          results: games,
+        });
+        pruneAutocompleteCache(Date.now());
+
+        return games;
+      } finally {
+        await connection.close();
+      }
+    })();
+
+    pendingAutocompleteSearches.set(cacheKey, queryPromise);
+    try {
+      return await queryPromise;
+    } finally {
+      pendingAutocompleteSearches.delete(cacheKey);
     }
   }
 

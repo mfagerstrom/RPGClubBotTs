@@ -316,7 +316,7 @@ async function autocompleteGameDbViewTitle(
     await interaction.respond([]);
     return;
   }
-  const results = await Game.searchGames(query);
+  const results = await Game.searchGamesAutocomplete(query);
   const titleCounts = new Map<string, number>();
   results.forEach((game) => {
     const title = String(game.title ?? "");
