@@ -41,7 +41,6 @@ import GameSearchSynonym from "../classes/GameSearchSynonym.js";
 import GameSearchSynonymDraft, {
   type ISynonymDraftPair,
 } from "../classes/GameSearchSynonymDraft.js";
-import { setThreadGameLink } from "../classes/Thread.js";
 import axios from "axios";
 import { igdbService } from "../services/IgdbService.js";
 import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
@@ -143,7 +142,7 @@ const AUDIT_SESSIONS = new Map<
     userId: string;
     games: IGame[];
     page: number;
-    filter: "all" | "image" | "thread" | "video" | "description" | "release" | "mixed" | "complete";
+    filter: "all" | "image" | "video" | "description" | "release" | "mixed" | "complete";
   }
 >();
 
@@ -365,7 +364,7 @@ export class GameDbAdmin {
     };
   }
   @Slash({
-    description: "Audit GameDB for missing images, threads, videos, descriptions, or release data (Admin only)",
+    description: "Audit GameDB for missing images, videos, descriptions, or release data (Admin only)",
     name: "audit",
   })
   async audit(
@@ -376,13 +375,6 @@ export class GameDbAdmin {
       type: ApplicationCommandOptionType.Boolean,
     })
     missingImages: boolean | undefined,
-    @SlashOption({
-      description: "Filter for missing thread links",
-      name: "missing_threads",
-      required: false,
-      type: ApplicationCommandOptionType.Boolean,
-    })
-    missingThreads: boolean | undefined,
     @SlashOption({
       description: "Filter for missing featured videos",
       name: "missing_featured_video",
@@ -489,13 +481,8 @@ export class GameDbAdmin {
       return;
     }
 
-    // Default to both if neither is specified, otherwise follow flags
-    // If user says missing_images: true, missing_threads: false -> only images
-    // If user says missing_images: true -> (missing_threads is undefined) -> treat undefined as false if one is set?
-    // Let's stick to: if both undefined, check both. If one defined, follow it.
-    
+    // Default to all if none specified, otherwise follow flags
     let checkImages = true;
-    let checkThreads = true;
     let checkFeaturedVideo = true;
     let checkDescriptions = true;
     let checkReleaseData = true;
@@ -503,13 +490,11 @@ export class GameDbAdmin {
 
     if (
       missingImages !== undefined ||
-      missingThreads !== undefined ||
       missingFeaturedVideo !== undefined ||
       missingDescriptions !== undefined ||
       missingReleaseData !== undefined
     ) {
       checkImages = !!missingImages;
-      checkThreads = !!missingThreads;
       checkFeaturedVideo = !!missingFeaturedVideo;
       checkDescriptions = !!missingDescriptions;
       checkReleaseData = !!missingReleaseData;
@@ -518,23 +503,19 @@ export class GameDbAdmin {
     if (
       !useCompleteOnly &&
       !checkImages &&
-      !checkThreads &&
       !checkFeaturedVideo &&
       !checkDescriptions &&
       !checkReleaseData
     ) {
       await safeReply(interaction, {
-        content: "You must check for at least one thing (images, threads, videos, descriptions, or release data).",
-        flags: MessageFlags.Ephemeral, // Always ephemeral for errors/warnings? Or match showInChat? 
-        // Typically warnings like this are okay to be ephemeral even if requested public, but let's stick to consistent visibility or force ephemeral for errors.
-        // Actually, previous code forced ephemeral. Let's force ephemeral for validation errors to reduce spam.
+        content: "You must check for at least one thing (images, videos, descriptions, or release data).",
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
     const games = await Game.getGamesForAudit(
       checkImages,
-      checkThreads,
       checkFeaturedVideo,
       checkDescriptions,
       checkReleaseData,
@@ -553,7 +534,6 @@ export class GameDbAdmin {
     const sessionId = interaction.id;
     const filterLabel = this.buildAuditFilterLabel(
       checkImages,
-      checkThreads,
       checkFeaturedVideo,
       checkDescriptions,
       checkReleaseData,
@@ -827,60 +807,7 @@ export class GameDbAdmin {
     }
   }
 
-  @ButtonComponent({ id: /^audit-thread:[^:]+:\d+$/ })
-  async handleAuditThread(interaction: ButtonInteraction): Promise<void> {
-    const [, sessionId, gameIdStr] = interaction.customId.split(":");
-    const gameId = Number(gameIdStr);
 
-    const session = AUDIT_SESSIONS.get(sessionId);
-    if (!session || session.userId !== interaction.user.id) return;
-
-    await safeReply(interaction, { 
-        content: "Please mention the thread (e.g. <#123456>) or paste the Thread ID to link.", 
-        flags: MessageFlags.Ephemeral 
-    });
-
-    const channel = interaction.channel as any;
-    if (!channel) return;
-
-    try {
-      const collected = await channel.awaitMessages({
-        filter: (m: any) => m.author.id === interaction.user.id,
-        max: 1,
-        time: 60000,
-        errors: ["time"],
-      });
-
-      const msg = collected.first();
-      if (!msg) return;
-
-      const content = msg.content.trim();
-      // Extract ID from mention or raw string
-      const threadId = content.replace(/<#(\d+)>/, "");
-
-      if (!/^\d+$/.test(threadId)) {
-        await safeReply(interaction, { content: "Invalid Thread ID.", flags: MessageFlags.Ephemeral });
-        return;
-      }
-
-      await safeReply(interaction, { content: "Linking thread...", flags: MessageFlags.Ephemeral });
-
-      try {
-        await setThreadGameLink(threadId, gameId);
-        await msg.delete().catch(() => {});
-        await safeReply(interaction, { content: "Thread linked successfully!", flags: MessageFlags.Ephemeral });
-        
-        // Remove from session list if checking threads? 
-        // Or just let it be. simpler to leave it.
-
-      } catch (err: any) {
-        await safeReply(interaction, { content: `Failed to link thread: ${err.message}`, flags: MessageFlags.Ephemeral });
-      }
-
-    } catch {
-        await safeReply(interaction, { content: "Timed out waiting for thread ID.", flags: MessageFlags.Ephemeral });
-    }
-  }
 
   @ButtonComponent({ id: /^audit-accept-video:[^:]+:\d+$/ })
   async handleAuditAcceptVideo(interaction: ButtonInteraction): Promise<void> {
@@ -1094,24 +1021,21 @@ export class GameDbAdmin {
 
   private buildAuditFilterLabel(
     checkImages: boolean,
-    checkThreads: boolean,
     checkFeaturedVideo: boolean,
     checkDescriptions: boolean,
     checkReleaseData: boolean,
     showComplete: boolean,
-  ): "all" | "image" | "thread" | "video" | "description" | "release" | "mixed" | "complete" {
+  ): "all" | "image" | "video" | "description" | "release" | "mixed" | "complete" {
     if (showComplete) return "complete";
     const enabled = [
       checkImages,
-      checkThreads,
       checkFeaturedVideo,
       checkDescriptions,
       checkReleaseData,
     ].filter(Boolean).length;
-    if (enabled === 5) return "all";
+    if (enabled === 4) return "all";
     if (enabled === 1) {
       if (checkImages) return "image";
-      if (checkThreads) return "thread";
       if (checkFeaturedVideo) return "video";
       if (checkDescriptions) return "description";
       return "release";
@@ -1128,20 +1052,17 @@ export class GameDbAdmin {
     const end = start + AUDIT_PAGE_SIZE;
     const slice = games.slice(start, end);
 
-    const threadStatus = await Game.getThreadStatusForGameIds(slice.map((g) => g.id));
-
     const embed = new EmbedBuilder()
       .setTitle(`GameDB Audit (${session.filter})`)
       .setDescription(
         `Showing items ${start + 1}-${Math.min(end, games.length)} of ${games.length}\n\n` +
         slice.map((g) => {
           const imageStatus = g.imageData ? "✅Img" : "❌Img";
-          const threadStatusText = threadStatus.has(g.id) ? "✅Thread" : "❌Thread";
           const videoStatus = g.featuredVideoUrl ? "✅Vid" : "❌Vid";
           const descStatus = g.description ? "✅Desc" : "❌Desc";
           const releaseStatus = g.initialReleaseDate ? "✅Rel" : "❌Rel";
           return `• **${g.title}** (ID: ${g.id}) ` +
-            `${imageStatus} ${threadStatusText} ${videoStatus} ${descStatus} ${releaseStatus}`;
+            `${imageStatus} ${videoStatus} ${descStatus} ${releaseStatus}`;
         }).join("\n")
       )
       .setFooter({ text: `Page ${page + 1}/${totalPages}` });
@@ -1327,10 +1248,6 @@ export class GameDbAdmin {
         .setCustomId(`audit-img:${sessionId}:${game.id}`)
         .setLabel("Upload Image")
         .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId(`audit-thread:${sessionId}:${game.id}`)
-        .setLabel("Link Thread")
-        .setStyle(ButtonStyle.Success),
     );
 
     const components: ActionRowBuilder<ButtonBuilder>[] = [navRow];

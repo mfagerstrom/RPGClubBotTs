@@ -969,9 +969,9 @@ const GAMEDB_HELP_TOPICS: GameDbHelpTopic[] = [
   {
     id: "audit",
     label: "/gamedb audit",
-    summary: "Audit GameDB for missing images, threads, videos, descriptions, or release data (admin only).",
+    summary: "Audit GameDB for missing images, videos, descriptions, or release data (admin only).",
     syntax:
-      "Syntax: /gamedb audit [missing_images:<boolean>] [missing_threads:<boolean>] " +
+      "Syntax: /gamedb audit [missing_images:<boolean>] " +
       "[missing_featured_video:<boolean>] [missing_descriptions:<boolean>] " +
       "[missing_release_data:<boolean>] [auto_accept_images:<boolean>] " +
       "[auto_accept_videos:<boolean>] [auto_accept_release_data:<boolean>] " +

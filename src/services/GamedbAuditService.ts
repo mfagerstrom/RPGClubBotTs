@@ -18,7 +18,7 @@ async function performAutoAcceptImages(
   shouldStop?: () => boolean,
   titleWords?: string[],
 ): Promise<AutoAcceptResult> {
-  const games = await Game.getGamesForAudit(true, false, false, false, false, titleWords);
+  const games = await Game.getGamesForAudit(true, false, false, false, titleWords);
   const candidates = games.filter((game) => !game.imageData && game.igdbId);
 
   if (!candidates.length) {
@@ -93,7 +93,7 @@ async function performAutoAcceptVideos(
   shouldStop?: () => boolean,
   titleWords?: string[],
 ): Promise<AutoAcceptResult> {
-  const games = await Game.getGamesForAudit(false, false, true, false, false, titleWords);
+  const games = await Game.getGamesForAudit(false, true, false, false, titleWords);
   const candidates = games.filter((game) => !game.featuredVideoUrl && game.igdbId);
 
   if (!candidates.length) {
@@ -172,7 +172,7 @@ async function performAutoAcceptReleaseData(
   shouldStop?: () => boolean,
   titleWords?: string[],
 ): Promise<AutoAcceptResult> {
-  const games = await Game.getGamesForAudit(false, false, false, false, true, titleWords);
+  const games = await Game.getGamesForAudit(false, false, false, true, titleWords);
   const candidates = games.filter((game) => game.igdbId);
 
   if (!candidates.length) {

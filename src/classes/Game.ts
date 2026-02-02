@@ -1875,7 +1875,6 @@ export default class Game {
 
   static async getGamesForAudit(
     missingImage: boolean,
-    missingThread: boolean,
     missingFeaturedVideo: boolean,
     missingDescription: boolean,
     missingReleaseData: boolean,
@@ -1889,25 +1888,6 @@ export default class Game {
       const whereClauses: string[] = [];
       if (missingImage) {
         whereClauses.push("IMAGE_DATA IS NULL");
-      }
-      if (missingThread) {
-        // Checking for missing thread links requires looking at associations or Thread table logic?
-        // The prompt says "check for missing images and thread links".
-        // GAMEDB_GAMES doesn't store thread_id directly.
-        // It's linked via GOTM_ENTRIES, NR_GOTM_ENTRIES, THREAD_GAME_LINKS, THREADS.
-        // But for "audit", we probably want to know if there is *any* thread linked to this game.
-        // A game is "missing thread" if no row exists in THREAD_GAME_LINKS and no row in THREADS for this GAME_ID.
-        // Wait, looking at `getGameAssociations` and `getNowPlayingMembers` queries...
-        // THREAD_GAME_LINKS seems to be the main join table for "generic" links.
-        // THREADS table might also have GAMEDB_GAME_ID.
-        // Let's assume a game has a thread if it appears in THREAD_GAME_LINKS or THREADS.
-        
-        whereClauses.push(`
-          NOT EXISTS (SELECT 1 FROM THREAD_GAME_LINKS tgl WHERE tgl.GAMEDB_GAME_ID = g.GAME_ID)
-          AND NOT EXISTS (SELECT 1 FROM THREADS th WHERE th.GAMEDB_GAME_ID = g.GAME_ID)
-          AND NOT EXISTS (SELECT 1 FROM GOTM_ENTRIES ge WHERE ge.GAMEDB_GAME_ID = g.GAME_ID AND ge.THREAD_ID IS NOT NULL)
-          AND NOT EXISTS (SELECT 1 FROM NR_GOTM_ENTRIES nge WHERE nge.GAMEDB_GAME_ID = g.GAME_ID AND nge.THREAD_ID IS NOT NULL)
-        `);
       }
       if (missingFeaturedVideo) {
         whereClauses.push("FEATURED_VIDEO_URL IS NULL");
@@ -1954,12 +1934,6 @@ export default class Game {
           AND FEATURED_VIDEO_URL IS NOT NULL
           AND DESCRIPTION IS NOT NULL
           AND EXISTS (SELECT 1 FROM GAMEDB_RELEASES r WHERE r.GAME_ID = g.GAME_ID)
-          AND (
-            EXISTS (SELECT 1 FROM THREAD_GAME_LINKS tgl WHERE tgl.GAMEDB_GAME_ID = g.GAME_ID)
-            OR EXISTS (SELECT 1 FROM THREADS th WHERE th.GAMEDB_GAME_ID = g.GAME_ID)
-            OR EXISTS (SELECT 1 FROM GOTM_ENTRIES ge WHERE ge.GAMEDB_GAME_ID = g.GAME_ID AND ge.THREAD_ID IS NOT NULL)
-            OR EXISTS (SELECT 1 FROM NR_GOTM_ENTRIES nge WHERE nge.GAMEDB_GAME_ID = g.GAME_ID AND nge.THREAD_ID IS NOT NULL)
-          )
         `;
         combinedClause = titleClause ? `(${completeClause}) AND ${titleClause}` : completeClause;
       }
