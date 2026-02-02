@@ -19,7 +19,8 @@
     "compile": "npx tsc --noEmit",
     "lint": "npx eslint",
     "snapshot:url": "node --no-warnings=ExperimentalWarning --loader ts-node/esm/transpile-only src/scripts/snapshot-url.ts",
-    "session:start": "node --no-warnings=ExperimentalWarning --loader ts-node/esm scripts/session-start.ts"
+    "session:start": "node --no-warnings=ExperimentalWarning --loader ts-node/esm scripts/session-start.ts",
+    "backup:docker-volumes": "node --no-warnings=ExperimentalWarning --loader ts-node/esm/transpile-only scripts/backup-docker-volumes.ts"
   },
   "dependencies": {
     "@discordx/importer": "^1.3.1",

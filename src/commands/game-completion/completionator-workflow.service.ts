@@ -28,6 +28,7 @@ import { STANDARD_PLATFORM_IDS } from "../../config/standardPlatforms.js";
 import { igdbService } from "../../services/IgdbService.js";
 import { importGameFromIgdb } from "./completionator-parser.service.js";
 import { searchGameDbWithFallback } from "./completionator-parser.service.js";
+import { runDockerVolumeBackup } from "../../services/DockerVolumeBackupService.js";
 
 export class CompletionatorWorkflowService {
   private uiService: CompletionatorUiService;
@@ -66,6 +67,14 @@ export class CompletionatorWorkflowService {
         );
         completionatorThreadContexts.delete(key);
       }
+      const backupReason = `completionator-import-${session.importId}`;
+      void runDockerVolumeBackup({ reason: backupReason }).catch((error) => {
+        console.error(
+          "Failed to run Docker backup after completionator import.",
+          session.importId,
+          error,
+        );
+      });
       return;
     }
 
