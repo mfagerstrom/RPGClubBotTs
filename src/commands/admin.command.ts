@@ -442,7 +442,7 @@ export class Admin {
       const adminName = interaction.user.tag ?? interaction.user.username ?? interaction.user.id;
       const content = `${adminName} deleted <@${user.id}>'s nomination "${nomination.gameTitle}" for GOTM Round ${targetRound}. Reason: ${reason}`;
 
-      await interaction.deleteReply().catch(() => {});
+      await interaction.deleteReply().catch(() => { });
 
       await announceNominationChange("gotm", interaction as any, content, embed);
     } catch (err: any) {
@@ -505,7 +505,7 @@ export class Admin {
       const adminName = interaction.user.tag ?? interaction.user.username ?? interaction.user.id;
       const content = `${adminName} deleted <@${user.id}>'s nomination "${nomination.gameTitle}" for NR-GOTM Round ${targetRound}. Reason: ${reason}`;
 
-      await interaction.deleteReply().catch(() => {});
+      await interaction.deleteReply().catch(() => { });
 
       await announceNominationChange("nr-gotm", interaction as any, content, embed);
     } catch (err: any) {
@@ -543,7 +543,8 @@ export class Admin {
       content: `Select a GOTM nomination to delete for Round ${window.targetRound}.`,
       embeds: [view.embed],
       components: view.components,
-              flags: MessageFlags.Ephemeral,    });
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   @Slash({
@@ -682,7 +683,8 @@ export class Admin {
       content: `Select an NR-GOTM nomination to delete for Round ${window.targetRound}.`,
       embeds: [view.embed],
       components: view.components,
-              flags: MessageFlags.Ephemeral,    });
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   @ButtonComponent({ id: /^admin-(gotm|nr-gotm)-nom-del-(\d+)-(\d+)$/ })
@@ -772,7 +774,7 @@ export class Admin {
         const first = collected.first();
         if (first) {
           const content = first.content.trim();
-          await first.delete().catch(() => {});
+          await first.delete().catch(() => { });
           await updateEmbed(`> *${content}*`);
           if (/^cancel$/i.test(content)) {
             await updateEmbed("❌ Cancelled by user.");
@@ -786,59 +788,59 @@ export class Admin {
         await updateEmbed("❌ Error waiting for input.");
         return null;
       }
-      };
+    };
 
-      const wizardChoice = async (
-        question: string,
-        options: PromptChoiceOption[],
-      ): Promise<string | null> => {
-        await updateEmbed(`\nƒ?" **${question}**`);
+    const wizardChoice = async (
+      question: string,
+      options: PromptChoiceOption[],
+    ): Promise<string | null> => {
+      await updateEmbed(`\nƒ?" **${question}**`);
 
-        const channel: any = interaction.channel;
-        const userId = interaction.user.id;
+      const channel: any = interaction.channel;
+      const userId = interaction.user.id;
 
-        if (!channel || typeof channel.send !== "function") {
-          await updateEmbed("ƒ?O Cannot prompt for input in this channel.");
+      if (!channel || typeof channel.send !== "function") {
+        await updateEmbed("ƒ?O Cannot prompt for input in this channel.");
+        return null;
+      }
+
+      const promptId = `wiz-choice:${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+      const rows = buildChoiceRows(promptId, options);
+      const promptMessage: Message | null = await channel.send({
+        content: `<@${userId}> ${question}`,
+        components: rows,
+        allowedMentions: { users: [userId] },
+      }).catch(() => null);
+
+      if (!promptMessage) {
+        await updateEmbed("ƒ?O Failed to send prompt.");
+        return null;
+      }
+
+      try {
+        const selection = await promptMessage.awaitMessageComponent({
+          componentType: ComponentType.Button,
+          filter: (i) => i.user.id === userId && i.customId.startsWith(`${promptId}:`),
+          time: 120_000,
+        });
+        await selection.deferUpdate().catch(() => { });
+        const value = selection.customId.slice(promptId.length + 1);
+        const chosenLabel = options.find((opt) => opt.value === value)?.label ?? value;
+        await promptMessage.edit({ components: [] }).catch(() => { });
+        await updateEmbed(`> *${chosenLabel}*`);
+        if (value === "cancel") {
+          await updateEmbed("ƒ?O Cancelled by user.");
           return null;
         }
+        return value;
+      } catch {
+        await promptMessage.edit({ components: [] }).catch(() => { });
+        await updateEmbed("ƒ?O Timed out waiting for a selection.");
+        return null;
+      }
+    };
 
-        const promptId = `wiz-choice:${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-        const rows = buildChoiceRows(promptId, options);
-        const promptMessage: Message | null = await channel.send({
-          content: `<@${userId}> ${question}`,
-          components: rows,
-          allowedMentions: { users: [userId] },
-        }).catch(() => null);
-
-        if (!promptMessage) {
-          await updateEmbed("ƒ?O Failed to send prompt.");
-          return null;
-        }
-
-        try {
-          const selection = await promptMessage.awaitMessageComponent({
-            componentType: ComponentType.Button,
-            filter: (i) => i.user.id === userId && i.customId.startsWith(`${promptId}:`),
-            time: 120_000,
-          });
-          await selection.deferUpdate().catch(() => {});
-          const value = selection.customId.slice(promptId.length + 1);
-          const chosenLabel = options.find((opt) => opt.value === value)?.label ?? value;
-          await promptMessage.edit({ components: [] }).catch(() => {});
-          await updateEmbed(`> *${chosenLabel}*`);
-          if (value === "cancel") {
-            await updateEmbed("ƒ?O Cancelled by user.");
-            return null;
-          }
-          return value;
-        } catch {
-          await promptMessage.edit({ components: [] }).catch(() => {});
-          await updateEmbed("ƒ?O Timed out waiting for a selection.");
-          return null;
-        }
-      };
-
-      let allActions: WizardAction[] = [];
+    let allActions: WizardAction[] = [];
 
     while (true) {
       logHistory = "";
@@ -864,15 +866,15 @@ export class Admin {
       await wizardLog(`Auto-assigned label: **${monthYear}**`);
 
       // 2. GOTM
-        const gotmResult = await setupRoundGames(
-          "GOTM",
-          nextRound,
-          testMode,
-          wizardLog,
-          wizardPrompt,
-          wizardChoice,
-          interaction,
-        );
+      const gotmResult = await setupRoundGames(
+        "GOTM",
+        nextRound,
+        testMode,
+        wizardLog,
+        wizardPrompt,
+        wizardChoice,
+        interaction,
+      );
       if (!gotmResult) {
         await wizardLog("Aborted during GOTM setup.");
         return;
@@ -881,15 +883,15 @@ export class Admin {
       allActions.push(...gotmResult.actions);
 
       // 3. NR-GOTM
-        const nrGotmResult = await setupRoundGames(
-          "NR-GOTM",
-          nextRound,
-          testMode,
-          wizardLog,
-          wizardPrompt,
-          wizardChoice,
-          interaction,
-        );
+      const nrGotmResult = await setupRoundGames(
+        "NR-GOTM",
+        nextRound,
+        testMode,
+        wizardLog,
+        wizardPrompt,
+        wizardChoice,
+        interaction,
+      );
       if (!nrGotmResult) {
         await wizardLog("Aborted during NR-GOTM setup.");
         return;
@@ -1932,7 +1934,7 @@ export class Admin {
           content: "This audit prompt is not for you.",
           flags: MessageFlags.Ephemeral,
         })
-        .catch(() => {});
+        .catch(() => { });
       return;
     }
 
@@ -1944,7 +1946,7 @@ export class Admin {
           content: "Invalid audit selection.",
           flags: MessageFlags.Ephemeral,
         })
-        .catch(() => {});
+        .catch(() => { });
       return;
     }
 
@@ -1956,11 +1958,11 @@ export class Admin {
           content: "Invalid GameDB selection.",
           flags: MessageFlags.Ephemeral,
         })
-        .catch(() => {});
+        .catch(() => { });
       return;
     }
 
-    await interaction.deferUpdate().catch(() => {});
+    await interaction.deferUpdate().catch(() => { });
 
     const session = await getGotmAuditImportById(importId);
     if (!session || session.userId !== ownerId) {
@@ -2026,7 +2028,7 @@ export class Admin {
           content: "This audit prompt is not for you.",
           flags: MessageFlags.Ephemeral,
         })
-        .catch(() => {});
+        .catch(() => { });
       return;
     }
 
@@ -2038,7 +2040,7 @@ export class Admin {
           content: "Invalid audit action.",
           flags: MessageFlags.Ephemeral,
         })
-        .catch(() => {});
+        .catch(() => { });
       return;
     }
 
@@ -2119,7 +2121,7 @@ export class Admin {
         return;
       }
 
-      await interaction.deferUpdate().catch(() => {});
+      await interaction.deferUpdate().catch(() => { });
 
       await updateGotmAuditItem(itemId, {
         status: "IMPORTED",
@@ -2201,7 +2203,7 @@ export class Admin {
           content: "This audit prompt is not for you.",
           flags: MessageFlags.Ephemeral,
         })
-        .catch(() => {});
+        .catch(() => { });
       return;
     }
 
@@ -2213,7 +2215,7 @@ export class Admin {
           content: "Invalid audit request.",
           flags: MessageFlags.Ephemeral,
         })
-        .catch(() => {});
+        .catch(() => { });
       return;
     }
 
@@ -2226,11 +2228,11 @@ export class Admin {
           content: "Please provide a valid GameDB id.",
           flags: MessageFlags.Ephemeral,
         })
-        .catch(() => {});
+        .catch(() => { });
       return;
     }
 
-    await interaction.deferUpdate().catch(() => {});
+    await interaction.deferUpdate().catch(() => { });
 
     const session = await getGotmAuditImportById(importId);
     if (!session || session.userId !== ownerId) {
@@ -2296,7 +2298,7 @@ export class Admin {
           content: "This audit prompt is not for you.",
           flags: MessageFlags.Ephemeral,
         })
-        .catch(() => {});
+        .catch(() => { });
       return;
     }
 
@@ -2308,7 +2310,7 @@ export class Admin {
           content: "Invalid audit request.",
           flags: MessageFlags.Ephemeral,
         })
-        .catch(() => {});
+        .catch(() => { });
       return;
     }
 
@@ -2320,11 +2322,11 @@ export class Admin {
           content: "Please provide a search query.",
           flags: MessageFlags.Ephemeral,
         })
-        .catch(() => {});
+        .catch(() => { });
       return;
     }
 
-    await interaction.deferUpdate().catch(() => {});
+    await interaction.deferUpdate().catch(() => { });
 
     const session = await getGotmAuditImportById(importId);
     if (!session || session.userId !== ownerId) {
@@ -2775,7 +2777,8 @@ export class Admin {
 
     await safeReply(interaction, {
       ...response,
-              flags: MessageFlags.Ephemeral,    });
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   @SelectMenuComponent({ id: "admin-help-select" })
@@ -2904,16 +2907,16 @@ async function promptUserForChoice(
       filter: (i) => i.user.id === userId && i.customId.startsWith(`${promptId}:`),
       time: timeoutMs,
     });
-    await selection.deferUpdate().catch(() => {});
+    await selection.deferUpdate().catch(() => { });
     const value = selection.customId.slice(promptId.length + 1);
-    await promptMessage.edit({ components: [] }).catch(() => {});
+    await promptMessage.edit({ components: [] }).catch(() => { });
     if (value === "cancel") {
       await safeReply(interaction, { content: cancelMessage });
       return null;
     }
     return value;
   } catch {
-    await promptMessage.edit({ components: [] }).catch(() => {});
+    await promptMessage.edit({ components: [] }).catch(() => { });
     await safeReply(interaction, { content: "Timed out waiting for a selection. Cancelled." });
     return null;
   }
@@ -3046,45 +3049,26 @@ type WizardAction = {
 };
 
 async function setupRoundGames(
-
   label: "GOTM" | "NR-GOTM",
-
   roundNumber: number,
-
   testMode: boolean,
-
   log: (msg: string) => Promise<void>,
-
   prompt: (q: string) => Promise<string | null>,
-
   promptChoice: (q: string, options: PromptChoiceOption[]) => Promise<string | null>,
-
   interaction: CommandInteraction,
-
 ): Promise<{
-
   games: {
-
     title: string;
-
     threadId: string | null;
-
     redditUrl: string | null;
-
     gamedbGameId: number;
-
   }[];
-
   actions: WizardAction[];
-
 } | null> {
-
   const kind = label.toLowerCase() as "gotm" | "nr-gotm";
   const forumTagId = label === "GOTM" ? GOTM_FORUM_TAG_ID : NR_GOTM_FORUM_TAG_ID;
 
   const nominations = await listNominationsForRound(kind, roundNumber);
-
-
 
   const games: {
 
@@ -3100,8 +3084,6 @@ async function setupRoundGames(
 
   const actions: WizardAction[] = [];
 
-
-
   if (nominations.length > 0) {
 
     const lines = nominations.map(
@@ -3112,8 +3094,6 @@ async function setupRoundGames(
 
     await log(`**${label} Nominations for Round ${roundNumber}:**\n${lines.join("\n")}`);
 
-
-
     const choiceRaw = await prompt(
 
       `Enter the number(s) of the winning game(s) (comma-separated for ties, e.g. \`1\` or \`1,3\`).\nOr type \`manual\` to enter GameDB IDs manually.`,
@@ -3121,8 +3101,6 @@ async function setupRoundGames(
     );
 
     if (!choiceRaw) return null;
-
-
 
     if (choiceRaw.trim().toLowerCase() !== "manual") {
 
@@ -3133,8 +3111,6 @@ async function setupRoundGames(
         .map((s) => Number(s.trim()))
 
         .filter((n) => Number.isInteger(n));
-
-
 
       if (indices.length === 0) {
 
@@ -3148,64 +3124,39 @@ async function setupRoundGames(
 
           .filter((n) => n !== undefined);
 
-
-
         if (selectedNoms.length === 0) {
 
           await log("Invalid selection indices. Switching to manual mode.");
 
         } else {
-
           for (const nom of selectedNoms) {
-
             await log(`Processing winner: **${nom.gameTitle}** (GameDB #${nom.gamedbGameId}).`);
-
             const result = await processWinnerGame(
-
               interaction,
-
               nom.gamedbGameId,
-
               nom.gameTitle,
-
-                testMode,
-
-                log,
-
-                prompt,
-
-                promptChoice,
-
-                forumTagId,
-
+              testMode,
+              log,
+              prompt,
+              promptChoice,
+              forumTagId,
             );
 
             if (!result) return null;
 
             games.push(result.data);
-
             actions.push(...result.actions);
-
           }
 
           return { games, actions };
-
         }
-
       }
-
     }
-
   } else {
-
     await log(`No nominations found for ${label} Round ${roundNumber}. Using manual mode.`);
-
   }
 
-
-
   // Manual Mode
-
   const countRaw = await promptChoice(
     `How many ${label} winners?`,
     addCancelOption(buildNumberChoiceOptions(1, 5)),
@@ -3214,318 +3165,121 @@ async function setupRoundGames(
   if (!countRaw) return null;
 
   const count = Number(countRaw);
-
   if (!Number.isInteger(count) || count < 1 || count > 5) {
-
     await log("Invalid count.");
-
     return null;
-
   }
 
-
-
   for (let i = 0; i < count; i++) {
-
     const n = i + 1;
-
     const gamedbRaw = await prompt(`Enter GameDB ID for ${label} #${n}.`);
 
     if (!gamedbRaw) return null;
 
     const gamedbId = Number(gamedbRaw);
-
     if (!Number.isInteger(gamedbId)) {
-
       await log("Invalid ID.");
-
       return null;
-
     }
-
-
 
     const game = await Game.getGameById(gamedbId);
-
     if (!game) {
-
       await log("Game not found.");
-
       return null;
-
     }
 
-
-
     const result = await processWinnerGame(
-
       interaction,
-
       gamedbId,
-
       game.title,
-
-        testMode,
-
-        log,
-
-        prompt,
-
-        promptChoice,
-
-        forumTagId,
-
+      testMode,
+      log,
+      prompt,
+      promptChoice,
+      forumTagId,
     );
 
     if (!result) return null;
 
     games.push(result.data);
-
     actions.push(...result.actions);
-
   }
 
-
-
   return { games, actions };
-
 }
 
-
-
 async function processWinnerGame(
-
-
-
   interaction: CommandInteraction,
-
-
-
   gamedbId: number,
-
-
-
   gameTitle: string,
-
-
-
   testMode: boolean,
-
-
-
   log: (msg: string) => Promise<void>,
-
-
-
   prompt: (q: string) => Promise<string | null>,
-
   promptChoice: (q: string, options: PromptChoiceOption[]) => Promise<string | null>,
-
-
-
   forumTagId: string,
-
-
-
 ): Promise<{
-
-
-
   data: {
-
-
-
     title: string;
-
-
-
     threadId: string | null;
-
-
-
     redditUrl: string | null;
-
-
-
     gamedbGameId: number;
-
-
-
   };
-
-
-
   actions: WizardAction[];
-
-
-
 } | null> {
-
-
-
   const actions: WizardAction[] = [];
 
-
-
   const threads = await getThreadsByGameId(gamedbId);
-
-
-
   const threadId: string | null = threads.length ? threads[0] : null;
 
-
-
-
-
-
-
   const gameData = {
-
-
-
     title: gameTitle,
-
-
-
     threadId,
-
-
-
     redditUrl: null,
-
-
-
     gamedbGameId: gamedbId,
-
-
-
   };
 
-
-
-
-
-
-
   if (threadId) {
-
-
-
     await log(`Found existing thread <#${threadId}> linked to this game. Using it.`);
-
-
-
   } else {
-
-
-
-      const createResp = await promptChoice(
-        `No linked thread found for "${gameTitle}". Create one in Now Playing?`,
-        addCancelOption([
-          { label: "Yes", value: "yes", style: ButtonStyle.Success },
-          { label: "No", value: "no" },
-          { label: "Enter ID", value: "id", style: ButtonStyle.Primary },
-        ]),
-      );
-
-
+    const createResp = await promptChoice(
+      `No linked thread found for "${gameTitle}". Create one in Now Playing?`,
+      addCancelOption([
+        { label: "Yes", value: "yes", style: ButtonStyle.Success },
+        { label: "No", value: "no" },
+        { label: "Enter ID", value: "id", style: ButtonStyle.Primary },
+      ]),
+    );
 
     if (!createResp) return null;
 
-
-
-
-
-
-
     if (createResp.toLowerCase() === "yes") {
-
-
-
       actions.push({
-
-
-
         description: `Create and link thread for "**${gameTitle}**"`,
-
-
-
         execute: async () => {
-
-
-
           if (testMode) {
-
-
-
             gameData.threadId = "TEST-THREAD";
-
-
-
             return;
-
-
-
           }
 
-
-
           const forum = (await interaction.guild?.channels.fetch(
-
-
-
             NOW_PLAYING_FORUM_ID,
-
-
-
           )) as ForumChannel;
-
-
 
           if (forum) {
 
-
-
             const thread = await forum.threads.create({
-
-
 
               name: gameTitle,
 
-
-
               message: { content: `Discussion thread for **${gameTitle}**.` },
-
-
-
               appliedTags: [forumTagId],
-
-
-
             });
 
-
-
             await setThreadGameLink(thread.id, gamedbId);
-
-
-
             gameData.threadId = thread.id;
-
-
-
           }
-
-
-
         },
-
-
-
       });
-
-
-
     } else if (createResp.toLowerCase() === "id") {
       const manualId = await prompt(
         `Enter the thread ID to link for "${gameTitle}" (or type \`cancel\`).`,
@@ -3547,21 +3301,9 @@ async function processWinnerGame(
         },
       });
     }
-
-
-
   }
 
-
-
-
-
-
-
   return { data: gameData, actions };
-
-
-
 }
 
 export async function isAdmin(interaction: AnyRepliable) {
