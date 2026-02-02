@@ -1,5 +1,7 @@
 # Commit snapshot (2026-02-02)
 
+6a3623b 2026-02-02 issue-133: implemented stable ids for help menus
+7e25548 2026-02-02 refactors
 4b37834 2026-02-02 added some lint rules
 9b180b9 2026-02-02 issue-149: implemented platform support for /now-playing
 9bd94a1 2026-02-02 issue-134: autocomplete optimizations

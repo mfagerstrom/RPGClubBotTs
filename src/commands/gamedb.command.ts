@@ -235,6 +235,19 @@ function buildSearchCustomId(
     : `${base}${encodedQuery}`;
 }
 
+function buildSearchRefreshCustomId(ownerId: string, encodedQuery: string): string {
+  return `gamedb-search-refresh:${ownerId}:${encodedQuery}`;
+}
+
+function buildSearchRecoveryComponents(ownerId: string, encodedQuery: string): ActionRowBuilder<ButtonBuilder>[] {
+  const button = new ButtonBuilder()
+    .setCustomId(buildSearchRefreshCustomId(ownerId, encodedQuery))
+    .setLabel("Refresh search")
+    .setStyle(ButtonStyle.Primary);
+
+  return [new ActionRowBuilder<ButtonBuilder>().addComponents(button)];
+}
+
 function isUniqueConstraintError(err: any): boolean {
   const msg = err?.message ?? "";
   return /ORA-00001/i.test(msg) || /unique constraint/i.test(msg);
@@ -3773,12 +3786,13 @@ export class GameDb {
 
     const searchTerm = sanitizeUserInput(decodeSearchQuery(encodedQuery), { preserveNewlines: false });
     if (!searchTerm) {
-      await interaction
-        .reply({
-          content: "This search request is no longer valid.",
-          flags: MessageFlags.Ephemeral,
-        })
-        .catch(() => {});
+      const components = buildSearchRecoveryComponents(ownerId, encodedQuery);
+      await safeReply(interaction, {
+        content: "This search request expired. Refresh to run it again.",
+        components,
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
       return;
     }
 
@@ -3854,12 +3868,13 @@ export class GameDb {
 
     const searchTerm = sanitizeUserInput(decodeSearchQuery(encodedQuery), { preserveNewlines: false });
     if (!searchTerm) {
-      await interaction
-        .reply({
-          content: "This search request is no longer valid.",
-          flags: MessageFlags.Ephemeral,
-        })
-        .catch(() => {});
+      const components = buildSearchRecoveryComponents(ownerId, encodedQuery);
+      await safeReply(interaction, {
+        content: "This search request expired. Refresh to run it again.",
+        components,
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
       return;
     }
 
@@ -3884,6 +3899,45 @@ export class GameDb {
     } catch {
       // ignore
     }
+  }
+
+  @ButtonComponent({ id: /^gamedb-search-refresh:\d+:[A-Za-z0-9_-]*$/ })
+  async handleSearchRefresh(interaction: ButtonInteraction): Promise<void> {
+    const parts = interaction.customId.split(":");
+    const ownerId = parts[1];
+    const encodedQuery = parts[2] ?? "";
+
+    if (interaction.user.id !== ownerId) {
+      await safeReply(interaction, {
+        content: "This refresh button isn't for you.",
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      return;
+    }
+
+    const searchTerm = sanitizeUserInput(decodeSearchQuery(encodedQuery), { preserveNewlines: false });
+    if (!searchTerm) {
+      await safeReply(interaction, {
+        content: "Unable to refresh: search details were not found.",
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      return;
+    }
+
+    const results = await Game.searchGames(searchTerm);
+    if (results.length === 0) {
+      await safeReply(interaction, {
+        content: `No results found for "${searchTerm}".`,
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+      return;
+    }
+
+    const response = this.buildSearchResponse(searchTerm, results, ownerId, 0, true);
+    await safeUpdate(interaction, response);
   }
 
   private buildSearchResponse(
