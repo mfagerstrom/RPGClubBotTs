@@ -5,6 +5,8 @@ import type {
 } from "discord.js";
 import {
   ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   EmbedBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
@@ -39,6 +41,24 @@ type HelpTopicId =
   | "todo"
   | "suggestion"
   | "suggestion-review";
+
+type HelpMenuView =
+  | "main"
+  | "category"
+  | "gotm"
+  | "nr-gotm"
+  | "remindme"
+  | "profile"
+  | "now-playing"
+  | "game-completion"
+  | "gamedb"
+  | "rss"
+  | "refresh";
+
+type HelpStatePayload = {
+  categoryId?: string;
+  activeTopicId?: string;
+};
 
 type HelpTopic = {
   id: HelpTopicId;
@@ -333,6 +353,72 @@ const HELP_CATEGORIES: { id: string; name: string; topicIds: HelpTopicId[] }[] =
   },
 ];
 
+const HELP_CUSTOM_ID_PREFIX = "help";
+
+function isHelpView(view: string): view is HelpMenuView {
+  return (
+    view === "main" ||
+    view === "category" ||
+    view === "gotm" ||
+    view === "nr-gotm" ||
+    view === "remindme" ||
+    view === "profile" ||
+    view === "now-playing" ||
+    view === "game-completion" ||
+    view === "gamedb" ||
+    view === "rss" ||
+    view === "refresh"
+  );
+}
+
+function toBase64Url(value: string): string {
+  return Buffer.from(value, "utf8").toString("base64url");
+}
+
+function fromBase64Url(value: string): string {
+  return Buffer.from(value, "base64url").toString("utf8");
+}
+
+function buildHelpCustomId(view: HelpMenuView, state: HelpStatePayload = {}): string {
+  const encodedState = toBase64Url(JSON.stringify(state));
+  return `${HELP_CUSTOM_ID_PREFIX}:${view}:${encodedState}`;
+}
+
+function parseHelpCustomId(
+  customId: string,
+): { view: HelpMenuView; state: HelpStatePayload } | null {
+  const [prefix, view, encodedState] = customId.split(":");
+  if (prefix !== HELP_CUSTOM_ID_PREFIX || !view || !encodedState) return null;
+  if (!isHelpView(view)) return null;
+
+  try {
+    const state = JSON.parse(fromBase64Url(encodedState)) as HelpStatePayload;
+    return { view, state };
+  } catch {
+    return null;
+  }
+}
+
+function buildHelpRefreshComponents(): ActionRowBuilder<ButtonBuilder>[] {
+  const button = new ButtonBuilder()
+    .setCustomId(buildHelpCustomId("refresh"))
+    .setLabel("Refresh help menu")
+    .setStyle(ButtonStyle.Primary);
+
+  return [new ActionRowBuilder<ButtonBuilder>().addComponents(button)];
+}
+
+async function sendHelpRefreshPrompt(
+  interaction: StringSelectMenuInteraction | ButtonInteraction,
+  message = "This help menu expired. Tap refresh to regenerate.",
+): Promise<void> {
+  await safeUpdate(interaction, {
+    content: message,
+    components: buildHelpRefreshComponents(),
+    embeds: [],
+  });
+}
+
 function getCategoryById(id: string): (typeof HELP_CATEGORIES)[number] | undefined {
   return HELP_CATEGORIES.find((cat) => cat.id === id);
 }
@@ -398,7 +484,7 @@ const GOTM_HELP_TOPICS: GotmHelpTopic[] = [
 
 function buildGotmHelpButtons(activeId?: GotmHelpTopicId): ActionRowBuilder<StringSelectMenuBuilder>[] {
   const select = new StringSelectMenuBuilder()
-    .setCustomId("gotm-help-select")
+    .setCustomId(buildHelpCustomId("gotm", { activeTopicId: activeId }))
     .setPlaceholder("/gotm help")
     .addOptions(
       GOTM_HELP_TOPICS.map((topic) => ({
@@ -430,7 +516,7 @@ function buildRemindMeHelpButtons(
   activeId?: RemindMeHelpTopicId,
 ): ActionRowBuilder<StringSelectMenuBuilder>[] {
   const select = new StringSelectMenuBuilder()
-    .setCustomId("remindme-help-select")
+    .setCustomId(buildHelpCustomId("remindme", { activeTopicId: activeId }))
     .setPlaceholder("/remindme help")
     .addOptions(
       REMINDME_HELP_TOPICS.map((topic) => ({
@@ -462,7 +548,7 @@ function buildProfileHelpButtons(
   activeId?: ProfileHelpTopicId,
 ): ActionRowBuilder<StringSelectMenuBuilder>[] {
   const select = new StringSelectMenuBuilder()
-    .setCustomId("profile-help-select")
+    .setCustomId(buildHelpCustomId("profile", { activeTopicId: activeId }))
     .setPlaceholder("/profile help")
     .addOptions(
       PROFILE_HELP_TOPICS.map((topic) => ({
@@ -494,7 +580,7 @@ function buildNowPlayingHelpButtons(
   activeId?: NowPlayingHelpTopicId,
 ): ActionRowBuilder<StringSelectMenuBuilder>[] {
   const select = new StringSelectMenuBuilder()
-    .setCustomId("now-playing-help-select")
+    .setCustomId(buildHelpCustomId("now-playing", { activeTopicId: activeId }))
     .setPlaceholder("/now-playing help")
     .addOptions(
       NOW_PLAYING_HELP_TOPICS.map((topic) => ({
@@ -537,7 +623,7 @@ function buildGamedbHelpButtons(
   activeId?: GameDbHelpTopicId,
 ): ActionRowBuilder<StringSelectMenuBuilder>[] {
   const select = new StringSelectMenuBuilder()
-    .setCustomId("gamedb-help-select")
+    .setCustomId(buildHelpCustomId("gamedb", { activeTopicId: activeId }))
     .setPlaceholder("/gamedb help")
     .addOptions(
       GAMEDB_HELP_TOPICS.map((topic) => ({
@@ -602,7 +688,7 @@ function buildNrGotmHelpButtons(
   activeId?: NrGotmHelpTopicId,
 ): ActionRowBuilder<StringSelectMenuBuilder>[] {
   const select = new StringSelectMenuBuilder()
-    .setCustomId("nr-gotm-help-select")
+    .setCustomId(buildHelpCustomId("nr-gotm", { activeTopicId: activeId }))
     .setPlaceholder("/nr-gotm help")
     .addOptions(
       NR_GOTM_HELP_TOPICS.map((topic) => ({
@@ -803,7 +889,7 @@ function buildGameCompletionHelpButtons(
   activeId?: GameCompletionHelpTopicId,
 ): ActionRowBuilder<StringSelectMenuBuilder>[] {
   const select = new StringSelectMenuBuilder()
-    .setCustomId("game-completion-help-select")
+    .setCustomId(buildHelpCustomId("game-completion", { activeTopicId: activeId }))
     .setPlaceholder("/game-completion help")
     .addOptions(
       GAME_COMPLETION_HELP_TOPICS.map((topic) => ({
@@ -916,7 +1002,7 @@ const GAMEDB_HELP_TOPICS: GameDbHelpTopic[] = [
 
 function buildRssHelpButtons(activeId?: RssHelpTopicId): ActionRowBuilder<StringSelectMenuBuilder>[] {
   const select = new StringSelectMenuBuilder()
-    .setCustomId("rss-help-select")
+    .setCustomId(buildHelpCustomId("rss", { activeTopicId: activeId }))
     .setPlaceholder("/rss help")
     .addOptions(
       RSS_HELP_TOPICS.map((topic) => ({
@@ -1060,28 +1146,22 @@ export class BotHelp {
   }
 
   @SelectMenuComponent({ id: "help-main-select" })
-  async handleHelpCategory(interaction: StringSelectMenuInteraction): Promise<void> {
-    const categoryId = interaction.values?.[0];
-    const category = categoryId ? getCategoryById(categoryId) : undefined;
+  async handleLegacyHelpCategory(interaction: StringSelectMenuInteraction): Promise<void> {
+    await sendHelpRefreshPrompt(interaction);
+  }
 
-    if (!category) {
-      const response = buildMainHelpResponse();
-      await safeUpdate(interaction, {
-        ...response,
-        content: "Sorry, I don't recognize that help category. Showing the main menu.",
-      });
+  @SelectMenuComponent({ id: /^(help:category:|help-category-select:)/ })
+  async handleCategoryCommand(interaction: StringSelectMenuInteraction): Promise<void> {
+    const parsed = parseHelpCustomId(interaction.customId);
+    if (!parsed || parsed.view !== "category" || !parsed.state.categoryId) {
+      await sendHelpRefreshPrompt(interaction);
       return;
     }
 
-    const response = buildCategoryHelpResponse(category.id);
-    await safeUpdate(interaction, response);
-  }
-
-  @SelectMenuComponent({ id: /^help-category-select:.+/ })
-  async handleCategoryCommand(interaction: StringSelectMenuInteraction): Promise<void> {
-    const [, categoryId] = interaction.customId.split(":");
-    const category = getCategoryById(categoryId);
-    const topicId = interaction.values?.[0] as HelpTopicId | "help-main" | undefined;
+    const topicId =
+      (interaction.values?.[0] as HelpTopicId | "help-main" | undefined) ??
+      (parsed.state.activeTopicId as HelpTopicId | "help-main" | undefined);
+    const category = getCategoryById(parsed.state.categoryId);
 
     if (!category || topicId === "help-main") {
       const response = buildMainHelpResponse();
@@ -1090,7 +1170,7 @@ export class BotHelp {
     }
 
     if (!topicId) {
-      const response = buildCategoryHelpResponse(category.id);
+      const response = buildCategoryHelpResponse(category.id, parsed.state.activeTopicId as HelpTopicId | undefined);
       await safeUpdate(interaction, {
         ...response,
         content: "Please pick a command from the list.",
@@ -1137,9 +1217,17 @@ export class BotHelp {
     });
   }
 
-  @SelectMenuComponent({ id: "gotm-help-select" })
+  @SelectMenuComponent({ id: /^(help:gotm:|gotm-help-select)/ })
   async handleGotmHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
-    const topicId = interaction.values?.[0] as GotmHelpTopicId | "help-main" | undefined;
+    const parsed = parseHelpCustomId(interaction.customId);
+    if (!parsed || parsed.view !== "gotm") {
+      await sendHelpRefreshPrompt(interaction);
+      return;
+    }
+
+    const topicId =
+      (interaction.values?.[0] as GotmHelpTopicId | "help-main" | undefined) ??
+      (parsed.state.activeTopicId as GotmHelpTopicId | "help-main" | undefined);
     if (topicId === "help-main") {
       const response = buildMainHelpResponse();
       await safeUpdate(interaction, response);
@@ -1148,7 +1236,7 @@ export class BotHelp {
     const topic = GOTM_HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (!topic) {
-      const response = buildGotmHelpResponse();
+      const response = buildGotmHelpResponse(parsed.state.activeTopicId as GotmHelpTopicId | undefined);
       await safeUpdate(interaction, {
         ...response,
         content: "Sorry, I don't recognize that GOTM help topic. Showing the GOTM help menu.",
@@ -1163,9 +1251,17 @@ export class BotHelp {
     });
   }
 
-  @SelectMenuComponent({ id: "nr-gotm-help-select" })
+  @SelectMenuComponent({ id: /^(help:nr-gotm:|nr-gotm-help-select)/ })
   async handleNrGotmHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
-    const topicId = interaction.values?.[0] as NrGotmHelpTopicId | "help-main" | undefined;
+    const parsed = parseHelpCustomId(interaction.customId);
+    if (!parsed || parsed.view !== "nr-gotm") {
+      await sendHelpRefreshPrompt(interaction);
+      return;
+    }
+
+    const topicId =
+      (interaction.values?.[0] as NrGotmHelpTopicId | "help-main" | undefined) ??
+      (parsed.state.activeTopicId as NrGotmHelpTopicId | "help-main" | undefined);
     if (topicId === "help-main") {
       const response = buildMainHelpResponse();
       await safeUpdate(interaction, response);
@@ -1174,7 +1270,7 @@ export class BotHelp {
     const topic = NR_GOTM_HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (!topic) {
-      const response = buildNrGotmHelpResponse();
+      const response = buildNrGotmHelpResponse(parsed.state.activeTopicId as NrGotmHelpTopicId | undefined);
       await safeUpdate(interaction, {
         ...response,
         content: "Sorry, I don't recognize that NR-GOTM help topic. Showing the NR-GOTM help menu.",
@@ -1189,9 +1285,17 @@ export class BotHelp {
     });
   }
 
-  @SelectMenuComponent({ id: "rss-help-select" })
+  @SelectMenuComponent({ id: /^(help:rss:|rss-help-select)/ })
   async handleRssHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
-    const topicId = interaction.values?.[0] as RssHelpTopicId | "help-main" | undefined;
+    const parsed = parseHelpCustomId(interaction.customId);
+    if (!parsed || parsed.view !== "rss") {
+      await sendHelpRefreshPrompt(interaction);
+      return;
+    }
+
+    const topicId =
+      (interaction.values?.[0] as RssHelpTopicId | "help-main" | undefined) ??
+      (parsed.state.activeTopicId as RssHelpTopicId | "help-main" | undefined);
     if (topicId === "help-main") {
       const response = buildMainHelpResponse();
       await safeUpdate(interaction, response);
@@ -1200,7 +1304,7 @@ export class BotHelp {
     const topic = RSS_HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (!topic) {
-      const response = buildRssHelpResponse();
+      const response = buildRssHelpResponse(parsed.state.activeTopicId as RssHelpTopicId | undefined);
       await safeUpdate(interaction, {
         ...response,
         content: "Sorry, I don't recognize that RSS help topic. Showing the RSS help menu.",
@@ -1215,9 +1319,17 @@ export class BotHelp {
     });
   }
 
-  @SelectMenuComponent({ id: "remindme-help-select" })
+  @SelectMenuComponent({ id: /^(help:remindme:|remindme-help-select)/ })
   async handleRemindMeHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
-    const topicId = interaction.values?.[0] as RemindMeHelpTopicId | "help-main" | undefined;
+    const parsed = parseHelpCustomId(interaction.customId);
+    if (!parsed || parsed.view !== "remindme") {
+      await sendHelpRefreshPrompt(interaction);
+      return;
+    }
+
+    const topicId =
+      (interaction.values?.[0] as RemindMeHelpTopicId | "help-main" | undefined) ??
+      (parsed.state.activeTopicId as RemindMeHelpTopicId | "help-main" | undefined);
     if (topicId === "help-main") {
       const response = buildMainHelpResponse();
       await safeUpdate(interaction, response);
@@ -1226,7 +1338,7 @@ export class BotHelp {
     const topic = REMINDME_HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (!topic) {
-      const response = buildRemindMeHelpResponse();
+      const response = buildRemindMeHelpResponse(parsed.state.activeTopicId as RemindMeHelpTopicId | undefined);
       await safeUpdate(interaction, {
         ...response,
         content:
@@ -1242,9 +1354,17 @@ export class BotHelp {
     });
   }
 
-  @SelectMenuComponent({ id: "profile-help-select" })
+  @SelectMenuComponent({ id: /^(help:profile:|profile-help-select)/ })
   async handleProfileHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
-    const topicId = interaction.values?.[0] as ProfileHelpTopicId | "help-main" | undefined;
+    const parsed = parseHelpCustomId(interaction.customId);
+    if (!parsed || parsed.view !== "profile") {
+      await sendHelpRefreshPrompt(interaction);
+      return;
+    }
+
+    const topicId =
+      (interaction.values?.[0] as ProfileHelpTopicId | "help-main" | undefined) ??
+      (parsed.state.activeTopicId as ProfileHelpTopicId | "help-main" | undefined);
     if (topicId === "help-main") {
       const response = buildMainHelpResponse();
       await safeUpdate(interaction, response);
@@ -1253,7 +1373,7 @@ export class BotHelp {
     const topic = PROFILE_HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (!topic) {
-      const response = buildProfileHelpResponse();
+      const response = buildProfileHelpResponse(parsed.state.activeTopicId as ProfileHelpTopicId | undefined);
       await safeUpdate(interaction, {
         ...response,
         content: "Sorry, I don't recognize that profile help topic. Showing the profile help menu.",
@@ -1268,9 +1388,17 @@ export class BotHelp {
     });
   }
 
-  @SelectMenuComponent({ id: "now-playing-help-select" })
+  @SelectMenuComponent({ id: /^(help:now-playing:|now-playing-help-select)/ })
   async handleNowPlayingHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
-    const topicId = interaction.values?.[0] as NowPlayingHelpTopicId | "help-main" | undefined;
+    const parsed = parseHelpCustomId(interaction.customId);
+    if (!parsed || parsed.view !== "now-playing") {
+      await sendHelpRefreshPrompt(interaction);
+      return;
+    }
+
+    const topicId =
+      (interaction.values?.[0] as NowPlayingHelpTopicId | "help-main" | undefined) ??
+      (parsed.state.activeTopicId as NowPlayingHelpTopicId | "help-main" | undefined);
     if (topicId === "help-main") {
       const response = buildMainHelpResponse();
       await safeUpdate(interaction, response);
@@ -1279,7 +1407,7 @@ export class BotHelp {
     const topic = NOW_PLAYING_HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (!topic) {
-      const response = buildNowPlayingHelpResponse();
+      const response = buildNowPlayingHelpResponse(parsed.state.activeTopicId as NowPlayingHelpTopicId | undefined);
       await safeUpdate(interaction, {
         ...response,
         content: "Sorry, I don't recognize that now-playing help topic. Showing the help menu.",
@@ -1294,9 +1422,17 @@ export class BotHelp {
     });
   }
 
-  @SelectMenuComponent({ id: "gamedb-help-select" })
+  @SelectMenuComponent({ id: /^(help:gamedb:|gamedb-help-select)/ })
   async handleGamedbHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
-    const topicId = interaction.values?.[0] as GameDbHelpTopicId | "help-main" | undefined;
+    const parsed = parseHelpCustomId(interaction.customId);
+    if (!parsed || parsed.view !== "gamedb") {
+      await sendHelpRefreshPrompt(interaction);
+      return;
+    }
+
+    const topicId =
+      (interaction.values?.[0] as GameDbHelpTopicId | "help-main" | undefined) ??
+      (parsed.state.activeTopicId as GameDbHelpTopicId | "help-main" | undefined);
     if (topicId === "help-main") {
       const response = buildMainHelpResponse();
       await safeUpdate(interaction, response);
@@ -1305,7 +1441,7 @@ export class BotHelp {
     const topic = GAMEDB_HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (!topic) {
-      const response = buildGamedbHelpResponse();
+      const response = buildGamedbHelpResponse(parsed.state.activeTopicId as GameDbHelpTopicId | undefined);
       await safeUpdate(interaction, {
         ...response,
         content: "Sorry, I don't recognize that gamedb help topic. Showing the gamedb help menu.",
@@ -1320,9 +1456,17 @@ export class BotHelp {
     });
   }
 
-  @SelectMenuComponent({ id: "game-completion-help-select" })
+  @SelectMenuComponent({ id: /^(help:game-completion:|game-completion-help-select)/ })
   async handleGameCompletionHelpButton(interaction: StringSelectMenuInteraction): Promise<void> {
-    const topicId = interaction.values?.[0] as GameCompletionHelpTopicId | "help-main" | undefined;
+    const parsed = parseHelpCustomId(interaction.customId);
+    if (!parsed || parsed.view !== "game-completion") {
+      await sendHelpRefreshPrompt(interaction);
+      return;
+    }
+
+    const topicId =
+      (interaction.values?.[0] as GameCompletionHelpTopicId | "help-main" | undefined) ??
+      (parsed.state.activeTopicId as GameCompletionHelpTopicId | "help-main" | undefined);
     if (topicId === "help-main") {
       const response = buildMainHelpResponse();
       await safeUpdate(interaction, response);
@@ -1331,7 +1475,9 @@ export class BotHelp {
     const topic = GAME_COMPLETION_HELP_TOPICS.find((entry) => entry.id === topicId);
 
     if (!topic) {
-      const response = buildGameCompletionHelpResponse();
+      const response = buildGameCompletionHelpResponse(
+        parsed.state.activeTopicId as GameCompletionHelpTopicId | undefined,
+      );
       await safeUpdate(interaction, {
         ...response,
         content: "Sorry, I don't recognize that game-completion help topic. Showing the help menu.",
@@ -1346,10 +1492,19 @@ export class BotHelp {
     });
   }
 
-  @ButtonComponent({ id: "help-main" })
+  @ButtonComponent({ id: /^(help:(refresh|main):|help-main)/ })
   async handleHelpMainButton(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseHelpCustomId(interaction.customId);
+    if (!parsed || (parsed.view !== "refresh" && parsed.view !== "main")) {
+      await sendHelpRefreshPrompt(interaction);
+      return;
+    }
+
     const response = buildMainHelpResponse();
-    await safeUpdate(interaction, response);
+    await safeUpdate(interaction, {
+      ...response,
+      content: "Help menu refreshed.",
+    });
   }
 }
 
@@ -1399,7 +1554,7 @@ function buildCategoryComponents(
     .filter((t): t is HelpTopic => Boolean(t));
 
   const select = new StringSelectMenuBuilder()
-    .setCustomId(`help-category-select:${categoryId}`)
+    .setCustomId(buildHelpCustomId("category", { categoryId, activeTopicId }))
     .setPlaceholder(`${category.name} commands`)
     .addOptions(
       topics.map((topic) => ({
