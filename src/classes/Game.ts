@@ -851,6 +851,9 @@ export default class Game {
 
     const earliestByPlatform = new Map<number, { release: IGDBReleaseDate; date: Date }>();
     for (const release of releases) {
+      // Ignore Japanese release dates (region 5)
+      if (release.region === 5) continue;
+
       const platformId = release.platform?.id;
       if (!platformId) continue;
       const releaseDate = Game.resolveReleaseDate(release);

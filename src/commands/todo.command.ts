@@ -479,8 +479,14 @@ function buildIssueCommentsText(comments: IGithubIssueComment[]): string {
     const author = comment.author ?? "Unknown";
     const createdAt = formatDiscordTimestamp(comment.createdAt);
     const body = sanitizeTodoText(comment.body, true).slice(0, 500);
-    lines.push(`- **${author}** ${createdAt}`);
-    lines.push(`  ${body || "*No comment content.*"}`);
+    lines.push(`**${author}** ${createdAt}`);
+    if (body) {
+      lines.push("```");
+      lines.push(body);
+      lines.push("```");
+    } else {
+      lines.push("*No comment content.*");
+    }
   });
   return lines.join("\n");
 }
