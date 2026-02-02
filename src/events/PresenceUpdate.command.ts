@@ -210,7 +210,19 @@ export class PresenceUpdate {
         return;
       }
 
-      await Member.addNowPlaying(session.userId, resolved.gameId, null);
+      const platforms = await Game.getPlatformsForGame(resolved.gameId);
+      if (!platforms.length) {
+        await interaction.update({
+          content:
+            `I found **${resolved.title}**, but it has no platform data yet. ` +
+            "Please add it manually from `/now-playing list` when platform data is available.",
+          components: [],
+        });
+        presencePromptSessions.delete(sessionId);
+        return;
+      }
+      const defaultPlatform = platforms[0];
+      await Member.addNowPlaying(session.userId, resolved.gameId, defaultPlatform.id, null);
       await interaction.update({
         content: `Added **${resolved.title}** to your Now Playing list.`,
         components: [],

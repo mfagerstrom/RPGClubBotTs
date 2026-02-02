@@ -87,6 +87,8 @@ export interface IMemberNickHistory {
 export interface IMemberNowPlayingEntry {
   gameId: number;
   title: string;
+  platformId: number | null;
+  platformName: string | null;
   threadId: string | null;
   note: string | null;
   addedAt: Date | null;
@@ -177,6 +179,8 @@ export default class Member {
       const res = await connection.execute<{
         GAME_ID: number;
         TITLE: string;
+        PLATFORM_ID: number | null;
+        PLATFORM_NAME: string | null;
         THREAD_ID: string | null;
         NOTE: string | null;
         ADDED_AT: Date | string | null;
@@ -185,6 +189,8 @@ export default class Member {
       }>(
         `SELECT g.GAME_ID,
                 g.TITLE,
+                u.PLATFORM_ID,
+                p.PLATFORM_NAME,
                 COALESCE(
                   (
                     SELECT MIN(tgl.THREAD_ID)
@@ -215,6 +221,7 @@ export default class Member {
                 u.SORT_ORDER
            FROM USER_NOW_PLAYING u
            JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
+           LEFT JOIN GAMEDB_PLATFORMS p ON p.PLATFORM_ID = u.PLATFORM_ID
           WHERE u.USER_ID = :userId
             AND u.GAMEDB_GAME_ID IS NOT NULL
           ORDER BY u.SORT_ORDER NULLS LAST, u.ADDED_AT DESC, u.ENTRY_ID DESC`,
@@ -225,6 +232,8 @@ export default class Member {
         .map((r) => ({
           gameId: Number(r.GAME_ID),
           title: r.TITLE,
+          platformId: r.PLATFORM_ID == null ? null : Number(r.PLATFORM_ID),
+          platformName: r.PLATFORM_NAME ?? null,
           threadId: r.THREAD_ID ?? null,
           note: r.NOTE ?? null,
           addedAt: r.ADDED_AT instanceof Date
@@ -254,6 +263,8 @@ export default class Member {
         GLOBAL_NAME: string | null;
         GAME_ID: number;
         TITLE: string;
+        PLATFORM_ID: number | null;
+        PLATFORM_NAME: string | null;
         THREAD_ID: string | null;
         NOTE: string | null;
         ADDED_AT: Date | string | null;
@@ -264,6 +275,8 @@ export default class Member {
                 ru.GLOBAL_NAME,
                 g.GAME_ID,
                 g.TITLE,
+                u.PLATFORM_ID,
+                p.PLATFORM_NAME,
                 COALESCE(
                   (
                     SELECT MIN(tgl.THREAD_ID)
@@ -295,6 +308,7 @@ export default class Member {
            FROM USER_NOW_PLAYING u
            JOIN RPG_CLUB_USERS ru ON ru.USER_ID = u.USER_ID
            JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
+           LEFT JOIN GAMEDB_PLATFORMS p ON p.PLATFORM_ID = u.PLATFORM_ID
           WHERE NVL(ru.IS_BOT, 0) = 0
             AND ru.SERVER_LEFT_AT IS NULL
           ORDER BY COALESCE(ru.GLOBAL_NAME, ru.USERNAME, ru.USER_ID),
@@ -321,6 +335,8 @@ export default class Member {
           record.entries.push({
             gameId: Number(row.GAME_ID),
             title: row.TITLE,
+            platformId: row.PLATFORM_ID == null ? null : Number(row.PLATFORM_ID),
+            platformName: row.PLATFORM_NAME ?? null,
             threadId: row.THREAD_ID ?? null,
             note: row.NOTE ?? null,
             addedAt: row.ADDED_AT instanceof Date
@@ -431,6 +447,8 @@ export default class Member {
   ): Promise<{
     gameId: number;
     title: string;
+    platformId: number | null;
+    platformName: string | null;
     note: string | null;
     addedAt: Date | null;
     noteUpdatedAt: Date | null;
@@ -441,6 +459,8 @@ export default class Member {
       const res = await connection.execute<{
         GAME_ID: number;
         TITLE: string;
+        PLATFORM_ID: number | null;
+        PLATFORM_NAME: string | null;
         NOTE: string | null;
         ADDED_AT: Date | string | null;
         NOTE_UPDATED_AT: Date | string | null;
@@ -448,12 +468,15 @@ export default class Member {
       }>(
         `SELECT u.GAMEDB_GAME_ID AS GAME_ID,
                 g.TITLE,
+                u.PLATFORM_ID,
+                p.PLATFORM_NAME,
                 u.NOTE,
                 u.ADDED_AT,
                 u.NOTE_UPDATED_AT,
                 u.SORT_ORDER
            FROM USER_NOW_PLAYING u
            JOIN GAMEDB_GAMES g ON g.GAME_ID = u.GAMEDB_GAME_ID
+           LEFT JOIN GAMEDB_PLATFORMS p ON p.PLATFORM_ID = u.PLATFORM_ID
           WHERE u.USER_ID = :userId
             AND u.GAMEDB_GAME_ID IS NOT NULL
           ORDER BY u.SORT_ORDER NULLS LAST, u.ADDED_AT DESC, u.ENTRY_ID DESC`,
@@ -463,6 +486,8 @@ export default class Member {
       return (res.rows ?? []).map((r) => ({
         gameId: Number(r.GAME_ID),
         title: r.TITLE,
+        platformId: r.PLATFORM_ID == null ? null : Number(r.PLATFORM_ID),
+        platformName: r.PLATFORM_NAME ?? null,
         note: r.NOTE ?? null,
         addedAt: r.ADDED_AT instanceof Date
           ? r.ADDED_AT
@@ -547,10 +572,14 @@ export default class Member {
   static async addNowPlaying(
     userId: string,
     gameId: number,
+    platformId: number,
     note: string | null = null,
   ): Promise<void> {
     if (!Number.isInteger(gameId) || gameId <= 0) {
       throw new Error("Invalid GameDB id.");
+    }
+    if (!Number.isInteger(platformId) || platformId <= 0) {
+      throw new Error("Invalid platform selection.");
     }
     const connection = await getOraclePool().getConnection();
     const normalizedNote = note?.trim();
@@ -580,9 +609,9 @@ export default class Member {
 
       await connection.execute(
         `INSERT INTO USER_NOW_PLAYING
-          (USER_ID, GAMEDB_GAME_ID, NOTE, NOTE_UPDATED_AT, SORT_ORDER)
-         VALUES (:userId, :gameId, :note, :noteUpdatedAt, :sortOrder)`,
-        { userId, gameId, note: noteValue, noteUpdatedAt, sortOrder: nextSort },
+          (USER_ID, GAMEDB_GAME_ID, PLATFORM_ID, NOTE, NOTE_UPDATED_AT, SORT_ORDER)
+         VALUES (:userId, :gameId, :platformId, :note, :noteUpdatedAt, :sortOrder)`,
+        { userId, gameId, platformId, note: noteValue, noteUpdatedAt, sortOrder: nextSort },
         { autoCommit: true },
       );
     } catch (err: any) {
@@ -1496,6 +1525,33 @@ export default class Member {
         profileImage: row.PROFILE_IMAGE ?? null,
         profileImageAt: row.PROFILE_IMAGE_AT ?? null,
       };
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async updateNowPlayingPlatform(
+    userId: string,
+    gameId: number,
+    platformId: number,
+  ): Promise<boolean> {
+    if (!Number.isInteger(gameId) || gameId <= 0) {
+      throw new Error("Invalid GameDB id.");
+    }
+    if (!Number.isInteger(platformId) || platformId <= 0) {
+      throw new Error("Invalid platform selection.");
+    }
+    const connection = await getOraclePool().getConnection();
+    try {
+      const res = await connection.execute(
+        `UPDATE USER_NOW_PLAYING
+            SET PLATFORM_ID = :platformId
+          WHERE USER_ID = :userId
+            AND GAMEDB_GAME_ID = :gameId`,
+        { userId, gameId, platformId },
+        { autoCommit: true },
+      );
+      return (res.rowsAffected ?? 0) > 0;
     } finally {
       await connection.close();
     }

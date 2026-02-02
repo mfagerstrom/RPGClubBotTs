@@ -3164,7 +3164,16 @@ export class GameDb {
 
     const note = noteRaw.length ? noteRaw : null;
     try {
-      await Member.addNowPlaying(interaction.user.id, gameId, note);
+      const platforms = await Game.getPlatformsForGame(gameId);
+      if (!platforms.length) {
+        await interaction.editReply({
+          content:
+            "This game has no platform data yet. Add to Now Playing from `/now-playing list` after platform data is available.",
+        }).catch(() => {});
+        return;
+      }
+      const defaultPlatform = platforms[0];
+      await Member.addNowPlaying(interaction.user.id, gameId, defaultPlatform.id, note);
       const nowPlaying = new NowPlayingCommand();
       await nowPlaying.showSingle(interaction, interaction.user, true);
     } catch (err: any) {
