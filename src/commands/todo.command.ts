@@ -39,6 +39,7 @@ import { countSuggestions } from "../classes/Suggestion.js";
 import {
   addComment,
   closeIssue,
+  reopenIssue,
   createIssue,
   getIssue,
   listAllIssues,
@@ -95,6 +96,7 @@ const TODO_EDIT_DESC_BUTTON_PREFIX = "todo-edit-desc-button";
 const TODO_EDIT_DESC_MODAL_PREFIX = "todo-edit-desc-modal";
 const TODO_EDIT_DESC_INPUT_ID = "todo-edit-desc-input";
 const TODO_CLOSE_VIEW_PREFIX = "todo-close-view";
+const TODO_REOPEN_VIEW_PREFIX = "todo-reopen-view";
 const TODO_LABEL_EDIT_BUTTON_PREFIX = "todo-label-edit-button";
 const TODO_LABEL_EDIT_SELECT_PREFIX = "todo-label-edit-select";
 const TODO_QUERY_BUTTON_PREFIX = "todo-query-button";
@@ -593,6 +595,10 @@ function buildTodoCloseViewId(payloadToken: string, page: number, issueNumber: n
   return [TODO_CLOSE_VIEW_PREFIX, payloadToken, page, issueNumber].join(":");
 }
 
+function buildTodoReopenViewId(payloadToken: string, page: number, issueNumber: number): string {
+  return [TODO_REOPEN_VIEW_PREFIX, payloadToken, page, issueNumber].join(":");
+}
+
 function buildTodoLabelEditButtonId(
   payloadToken: string,
   page: number,
@@ -808,6 +814,13 @@ function parseTodoIssueModalId(
 }
 
 function parseTodoCloseViewId(
+  id: string,
+  prefix: string,
+): { payloadToken: string; page: number; issueNumber: number } | null {
+  return parseTodoIssueActionId(id, prefix);
+}
+
+function parseTodoReopenViewId(
   id: string,
   prefix: string,
 ): { payloadToken: string; page: number; issueNumber: number } | null {
@@ -1127,6 +1140,17 @@ function buildIssueViewComponents(
   ].join(" | ");
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(footerLine));
 
+  const isOpen = issue.state === "open";
+  const stateButton = isOpen
+    ? new ButtonBuilder()
+        .setCustomId(buildTodoCloseViewId(payloadToken, payload.page, issue.number))
+        .setLabel("Close Issue")
+        .setStyle(ButtonStyle.Danger)
+    : new ButtonBuilder()
+        .setCustomId(buildTodoReopenViewId(payloadToken, payload.page, issue.number))
+        .setLabel("Reopen Issue")
+        .setStyle(ButtonStyle.Success);
+
   const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(buildTodoCommentButtonId(payloadToken, payload.page, issue.number))
@@ -1144,10 +1168,7 @@ function buildIssueViewComponents(
       .setCustomId(buildTodoLabelEditButtonId(payloadToken, payload.page, issue.number))
       .setLabel("Add/Edit Labels")
       .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId(buildTodoCloseViewId(payloadToken, payload.page, issue.number))
-      .setLabel("Close Issue")
-      .setStyle(ButtonStyle.Danger),
+    stateButton,
   );
 
   const backRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -2375,6 +2396,60 @@ export class TodoCommand {
     }
 
     if (!closed) {
+      await safeUpdate(interaction, {
+        content: `Issue #${parsed.issueNumber} was not found.`,
+        components: [],
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const listPayload = await this.buildTodoListPayload(parsed.payloadToken, parsed.page);
+    if (!listPayload) {
+      await replyTodoExpired(interaction);
+      return;
+    }
+
+    try {
+      await interaction.message.edit({
+        components: listPayload.components,
+      });
+    } catch {
+      await replyTodoExpired(interaction);
+      return;
+    }
+  }
+
+  @ButtonComponent({ id: /^todo-reopen-view:[^:]+:\d+:\d+$/ })
+  async reopenFromView(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseTodoReopenViewId(interaction.customId, TODO_REOPEN_VIEW_PREFIX);
+    if (!parsed) {
+      await replyTodoExpired(interaction);
+      return;
+    }
+
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
+
+    try {
+      await interaction.deferUpdate();
+    } catch {
+      // ignore
+    }
+
+    let reopened: IGithubIssue | null;
+    try {
+      reopened = await reopenIssue(parsed.issueNumber);
+    } catch (err: any) {
+      await safeUpdate(interaction, {
+        content: getGithubErrorMessage(err),
+        components: [],
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (!reopened) {
       await safeUpdate(interaction, {
         content: `Issue #${parsed.issueNumber} was not found.`,
         components: [],
