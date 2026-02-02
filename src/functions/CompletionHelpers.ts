@@ -179,17 +179,21 @@ export async function announceCompletion(
     const playtimeText = formatPlaytimeHours(finalPlaytimeHours);
     const dateStr = completedAt ? formatTableDate(completedAt) : "No date";
     const hoursStr = playtimeText ? ` - ${playtimeText}` : "";
-    const completionYear = (completedAt ?? new Date()).getFullYear();
-    const yearlyCount = await Member.countCompletions(userId, completionYear);
+    let yearlySummary = "";
+    if (completedAt) {
+      const completionYear = completedAt.getFullYear();
+      const yearlyCount = await Member.countCompletions(userId, completionYear);
+      yearlySummary = `\nGame completion #${yearlyCount} for ${completionYear}`;
+    }
     let desc =
       `<@${user.id}> has added a game completion: **${game.title}** - ` +
-      `${completionType} - ${dateStr}${hoursStr}\n` +
-      `Game completion #${yearlyCount} for ${completionYear}`;
+      `${completionType} - ${dateStr}${hoursStr}` +
+      yearlySummary;
     if (isAdminOverride && interaction.user.id !== userId) {
       desc =
         `<@${interaction.user.id}> added a game completion for <@${user.id}>: ` +
-        `**${game.title}** - ${completionType} - ${dateStr}${hoursStr}\n` +
-        `Game completion #${yearlyCount} for ${completionYear}`;
+        `**${game.title}** - ${completionType} - ${dateStr}${hoursStr}` +
+        yearlySummary;
     }
 
     const embed = new EmbedBuilder()

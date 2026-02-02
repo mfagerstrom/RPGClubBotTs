@@ -1,3 +1,4 @@
+2026-02-01 - Commit ID: a2a43f0 - fixes for game completion import from completionator
 2026-02-01 - Commit ID: e9dc06e - issue-143: added standard platforms for completions
 2026-02-01 - Commit ID: bb36bfe - issue-141: let usesrs choose any platform for game completions
 2026-02-01 - Commit ID: b7d74dc - issue-140: add good/bad thumbnail buttons to gamedb view
