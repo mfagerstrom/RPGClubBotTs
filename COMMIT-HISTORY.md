@@ -1,5 +1,6 @@
 # Commit snapshot (2026-02-02)
 
+2ef9c78 2026-02-02 trashing the tests for now
 14a99aa 2026-02-02 chore: added some unit tests
 b6b7e34 2026-02-02 feat: refactored game-completion
 bd4b38b 2026-02-02 refactor: split admin.command.ts into multiple files

@@ -18,7 +18,6 @@
     "watch": "nodemon --exec npm run dev --watch src --ext ts",
     "compile": "npx tsc --noEmit",
     "lint": "npx eslint",
-    "test": "jest",
     "snapshot:url": "node --no-warnings=ExperimentalWarning --loader ts-node/esm/transpile-only src/scripts/snapshot-url.ts",
     "session:start": "node --no-warnings=ExperimentalWarning --loader ts-node/esm scripts/session-start.ts"
   },
@@ -48,19 +47,16 @@
   },
   "devDependencies": {
     "@types/fast-levenshtein": "^0.0.4",
-    "@types/jest": "^30.0.0",
     "@types/luxon": "^3.7.1",
     "@types/node": "^20.14.4",
     "@types/oracledb": "^6.10.0",
     "@types/user-agents": "^1.0.4",
     "dotenv": "^16.4.5",
-    "jest": "^30.2.0",
     "mongodb": "^6.9.0",
     "nodemon": "^3.1.3",
     "playwright": "^1.54.2",
     "prettier": "^3.3.2",
     "rimraf": "^6.1.2",
-    "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
   },

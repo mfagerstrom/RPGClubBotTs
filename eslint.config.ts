@@ -10,12 +10,6 @@ export default [
   pluginJs.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ["jest.config.cjs"],
-    rules: {
-      "no-undef": "off",
-    },
-  },
-  {
     files: ["src/**/*.{ts}"],
     ignores: ["**/*.config.{ts}", "*.reference.ts"],
     plugins: {
