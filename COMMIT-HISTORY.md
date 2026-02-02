@@ -1,5 +1,13 @@
 # Commit snapshot (2026-02-02)
 
+14a99aa 2026-02-02 chore: added some unit tests
+b6b7e34 2026-02-02 feat: refactored game-completion
+bd4b38b 2026-02-02 refactor: split admin.command.ts into multiple files
+6c276a0 2026-02-02 refactor: removed excess blank lines
+e8ef0e1 2026-02-02 issue-116: remove threads from /gamedb audit
+b996ab1 2026-02-02 issue-104: when viewing a closed issue, offer a reopen issue button
+4608f1d 2026-02-02 issue=114: cleaned up comments in /todo view
+68d5d2b 2026-02-02 issue-131: implemented stable identifiers for /suggestion review
 0e9cec7 2026-02-02 issue-132: implemented stable ids for /gamedb search interactive elements
 6a3623b 2026-02-02 issue-133: implemented stable ids for help menus
 7e25548 2026-02-02 refactors
