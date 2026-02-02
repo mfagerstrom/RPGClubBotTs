@@ -108,7 +108,7 @@ export const ADMIN_HELP_TOPICS: AdminHelpTopic[] = [
   },
 ];
 
-function buildAdminHelpButtons(
+export function buildAdminHelpButtons(
   activeId?: AdminHelpTopicId,
 ): ActionRowBuilder<StringSelectMenuBuilder>[] {
   const select = new StringSelectMenuBuilder()
