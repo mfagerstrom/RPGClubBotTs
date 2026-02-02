@@ -13,7 +13,8 @@ import {
   MessageFlags,
 } from "discord.js";
 import { ButtonComponent, Discord, SelectMenuComponent, Slash } from "discordx";
-import { buildAdminHelpResponse, isAdmin } from "./admin.command.js";
+import { isAdmin } from "./admin.command.js";
+import { buildAdminHelpResponse } from "./admin/admin-help.service.js";
 import { buildModHelpResponse, isModerator } from "./mod.command.js";
 import { buildSuperAdminHelpResponse, isSuperAdmin } from "./superadmin.command.js";
 import { safeDeferReply, safeReply, safeUpdate } from "../functions/InteractionUtils.js";
