@@ -286,9 +286,37 @@ export default {
         },
       },
       create(context) {
-        const reportOption = (node, key) => {
+        const reportOption = (propNode, key) => {
+          // Offer an autofix when the deprecated `ephemeral` property is a boolean literal.
+          if (propNode && propNode.type === "Property") {
+            const valueNode = propNode.value;
+            context.report({
+              node: propNode.key,
+              messageId: "deprecatedOption",
+              data: { key },
+              fix: (fixer) => {
+                try {
+                  if (valueNode && valueNode.type === "Literal") {
+                    if (valueNode.value === true) {
+                      // Replace `ephemeral: true` with `flags: MessageFlags.Ephemeral`
+                      return fixer.replaceText(propNode, "flags: MessageFlags.Ephemeral");
+                    }
+                    if (valueNode.value === false) {
+                      // Remove the property entirely. Try to remove trailing comma if present.
+                      return fixer.remove(propNode);
+                    }
+                  }
+                } catch {
+                  // fallthrough to no-fix
+                }
+                return null;
+              },
+            });
+            return;
+          }
+
           context.report({
-            node,
+            node: propNode,
             messageId: "deprecatedOption",
             data: { key },
           });

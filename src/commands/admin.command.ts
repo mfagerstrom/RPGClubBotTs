@@ -348,7 +348,7 @@ export class Admin {
     interaction: CommandInteraction,
   ): Promise<void> {
     // Run publicly; avoid default ephemeral deferral for admin commands
-    await safeDeferReply(interaction, { ephemeral: false });
+    await safeDeferReply(interaction, {});
     dateText = sanitizeUserInput(dateText, { preserveNewlines: false });
 
     const okToUseCommand: boolean = await isAdmin(interaction);
@@ -712,7 +712,7 @@ export class Admin {
     testModeInput: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { ephemeral: false });
+    await safeDeferReply(interaction, {});
 
     if (interaction.channelId !== ADMIN_CHANNEL_ID) {
       await safeReply(interaction, {
