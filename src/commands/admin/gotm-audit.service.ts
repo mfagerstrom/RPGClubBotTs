@@ -6,8 +6,14 @@ import { EmbedBuilder, MessageFlags } from "discord.js";
 import { safeReply } from "../../functions/InteractionUtils.js";
 import type { IGameWithPlatforms } from "../../classes/Game.js";
 import Game from "../../classes/Game.js";
-import Gotm, { insertGotmRoundInDatabase } from "../../classes/Gotm.js";
-import NrGotm, { insertNrGotmRoundInDatabase } from "../../classes/NrGotm.js";
+import Gotm, {
+  insertGotmRoundInDatabase,
+  updateGotmGameFieldInDatabase,
+} from "../../classes/Gotm.js";
+import NrGotm, {
+  insertNrGotmRoundInDatabase,
+  updateNrGotmGameFieldInDatabase,
+} from "../../classes/NrGotm.js";
 import {
   createGotmAuditImportSession,
   countGotmAuditItems,
@@ -293,6 +299,7 @@ export async function tryInsertGotmAuditRound(
       ? Gotm.getByRound(item.roundNumber).length > 0
       : NrGotm.getByRound(item.roundNumber).length > 0;
   if (hasExisting) {
+    await updateMissingGotmAuditLinks(interaction, item, roundItems);
     return;
   }
 
@@ -340,6 +347,93 @@ export async function tryInsertGotmAuditRound(
       item.roundNumber,
       err?.message ?? "Failed to insert round.",
     );
+  }
+}
+
+async function updateMissingGotmAuditLinks(
+  interaction: any,
+  item: IGotmAuditItem,
+  roundItems: IGotmAuditItem[],
+): Promise<void> {
+  const roundNumber = item.roundNumber;
+  if (item.kind === "gotm") {
+    const existingRounds = Gotm.getByRound(roundNumber);
+    const entry = existingRounds[0];
+    if (!entry) return;
+
+    let updated = 0;
+    for (const roundItem of roundItems) {
+      const index = roundItem.gameIndex;
+      const existingGame = entry.gameOfTheMonth[index];
+      if (!existingGame) continue;
+
+      if (!existingGame.threadId && roundItem.threadId) {
+        await updateGotmGameFieldInDatabase(roundNumber, index, "threadId", roundItem.threadId);
+        Gotm.updateThreadIdByRound(roundNumber, roundItem.threadId, index);
+        updated += 1;
+      }
+
+      if (!existingGame.redditUrl && roundItem.redditUrl) {
+        await updateGotmGameFieldInDatabase(
+          roundNumber,
+          index,
+          "redditUrl",
+          roundItem.redditUrl,
+        );
+        Gotm.updateRedditUrlByRound(roundNumber, roundItem.redditUrl, index);
+        updated += 1;
+      }
+    }
+
+    if (updated > 0) {
+      await safeReply(interaction, {
+        content: `Updated ${updated} missing GOTM link${updated === 1 ? "" : "s"} for Round ${roundNumber}.`,
+        flags: MessageFlags.Ephemeral,
+        __forceFollowUp: true,
+      });
+    }
+    return;
+  }
+
+  const existingNrRounds = NrGotm.getByRound(roundNumber);
+  const nrEntry = existingNrRounds[0];
+  if (!nrEntry) return;
+
+  let updated = 0;
+  for (const roundItem of roundItems) {
+    const index = roundItem.gameIndex;
+    const existingGame = nrEntry.gameOfTheMonth[index];
+    if (!existingGame) continue;
+
+    if (!existingGame.threadId && roundItem.threadId) {
+      await updateNrGotmGameFieldInDatabase({
+        round: roundNumber,
+        gameIndex: index,
+        field: "threadId",
+        value: roundItem.threadId,
+      });
+      NrGotm.updateThreadIdByRound(roundNumber, roundItem.threadId, index);
+      updated += 1;
+    }
+
+    if (!existingGame.redditUrl && roundItem.redditUrl) {
+      await updateNrGotmGameFieldInDatabase({
+        round: roundNumber,
+        gameIndex: index,
+        field: "redditUrl",
+        value: roundItem.redditUrl,
+      });
+      NrGotm.updateRedditUrlByRound(roundNumber, roundItem.redditUrl, index);
+      updated += 1;
+    }
+  }
+
+  if (updated > 0) {
+    await safeReply(interaction, {
+      content: `Updated ${updated} missing NR-GOTM link${updated === 1 ? "" : "s"} for Round ${roundNumber}.`,
+      flags: MessageFlags.Ephemeral,
+      __forceFollowUp: true,
+    });
   }
 }
 
