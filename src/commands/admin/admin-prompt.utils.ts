@@ -6,7 +6,7 @@ import {
   type Message,
   type CommandInteraction,
 } from "discord.js";
-import { safeReply } from "../../functions/InteractionUtils";
+import { safeReply } from "../../functions/InteractionUtils.js";
 import { type PromptChoiceOption } from "./admin.types.js";
 
 export function buildChoiceRows(

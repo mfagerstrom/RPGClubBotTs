@@ -45,6 +45,7 @@ import Member, { type IMemberNowPlayingEntry } from "../classes/Member.js";
 import {
   safeDeferReply,
   safeReply,
+  safeUpdate,
   sanitizeUserInput,
   stripModalInput,
   type AnyRepliable,
@@ -59,6 +60,7 @@ import {
   announceCompletion,
   notifyUnknownCompletionPlatform,
 } from "../functions/CompletionHelpers.js";
+import { formatPlatformDisplayName } from "../functions/PlatformDisplay.js";
 import {
   COMPLETION_TYPES,
   type CompletionType,
@@ -95,6 +97,7 @@ const NOW_PLAYING_COMPLETE_NOTE_SELECT_PREFIX = "np-complete-note";
 const NOW_PLAYING_COMPLETE_DETAILS_PREFIX = "np-complete-details";
 const NOW_PLAYING_COMPLETE_PLATFORM_SELECT_PREFIX = "np-complete-platform";
 const NOW_PLAYING_GALLERY_MAX = 5;
+const NOW_PLAYING_ALL_SELECT_ID = "nowplaying-all-select:v1";
 type NowPlayingAddSession = {
   userId: string;
   query: string;
@@ -266,12 +269,26 @@ function setNowPlayingListContext(userId: string, message: Message<boolean>): vo
   });
 }
 
+function resolvePlatformLabel(entry: IMemberNowPlayingEntry): string | null {
+  const candidate =
+    entry.platformAbbreviation ??
+    formatPlatformDisplayName(entry.platformName) ??
+    entry.platformName ??
+    "Unknown Platform";
+  if (candidate === "Unknown Platform") {
+    return null;
+  }
+  return candidate;
+}
+
 function formatEntry(
   entry: IMemberNowPlayingEntry,
   guildId: string | null,
 ): string {
-  const platformLabel = entry.platformName ?? "Unknown Platform";
-  const baseTitle = `${entry.title} (${platformLabel})`;
+  const platformLabel = resolvePlatformLabel(entry);
+  const baseTitle = platformLabel
+    ? `${entry.title} (${platformLabel})`
+    : entry.title;
   if (entry.threadId && guildId) {
     return `[${baseTitle}](https://discord.com/channels/${guildId}/${entry.threadId})`;
   }
@@ -281,8 +298,10 @@ function formatEntry(
 function formatEntryTitleWithPlatform(
   entry: { title: string; platformName: string | null },
 ): string {
-  const platformLabel = entry.platformName ?? "Unknown Platform";
-  return `${entry.title} (${platformLabel})`;
+  const platformLabel = resolvePlatformLabel(entry as IMemberNowPlayingEntry);
+  return platformLabel
+    ? `${entry.title} (${platformLabel})`
+    : entry.title;
 }
 
 function sortNowPlayingEntries(
@@ -2773,7 +2792,7 @@ export class NowPlayingCommand {
     });
   }
 
-  @SelectMenuComponent({ id: "nowplaying-all-select" })
+  @SelectMenuComponent({ id: /^nowplaying-all-select(?::v1)?$/ })
   async handleNowPlayingAllSelect(interaction: StringSelectMenuInteraction): Promise<void> {
     const selectedUserId = interaction.values?.[0];
     if (!selectedUserId) return;
@@ -2793,7 +2812,7 @@ export class NowPlayingCommand {
         `No Now Playing entries found for <@${selectedUserId}>.`,
       );
       const isEphemeral = interaction.message.flags?.has(MessageFlags.Ephemeral) ?? false;
-      await interaction.update({
+      await safeUpdate(interaction, {
         components: [container, ...(selectRow ? [selectRow] : [])],
         flags: buildComponentsV2Flags(isEphemeral),
       });
@@ -2816,7 +2835,7 @@ export class NowPlayingCommand {
       false,
       isEphemeral,
     );
-    await interaction.update({
+    await safeUpdate(interaction, {
       components: [...containers, ...(selectRow ? [selectRow] : [])],
       files,
       flags: buildComponentsV2Flags(isEphemeral),
@@ -3514,7 +3533,7 @@ export class NowPlayingCommand {
     });
 
     const select = new StringSelectMenuBuilder()
-      .setCustomId("nowplaying-all-select")
+      .setCustomId(NOW_PLAYING_ALL_SELECT_ID)
       .setPlaceholder("View a member's Now Playing list")
       .addOptions(options);
 

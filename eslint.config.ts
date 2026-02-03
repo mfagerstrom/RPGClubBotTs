@@ -77,6 +77,7 @@ export default [
       }],
       "local/no-djs-button-in-v2-accessory": "error",
       "local/no-deprecated-interaction-options": "error",
+      "local/require-relative-import-js-extension": "error",
       "local/custom-id-has-matching-handler": "error",
     },
   },

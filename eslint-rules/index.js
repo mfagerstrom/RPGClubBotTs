@@ -24,6 +24,26 @@ const CHECKED_SET_CUSTOM_ID_BUILDERS = new Set([
   "StringSelectMenuBuilder",
   "ModalBuilder",
 ]);
+const RELATIVE_IMPORT_ALLOWED_EXTENSIONS = new Set([".js", ".json", ".mjs", ".cjs"]);
+
+function isRelativeImportPath(value) {
+  return typeof value === "string" && value.startsWith(".");
+}
+
+function getImportPathExtension(value) {
+  if (typeof value !== "string") return null;
+  const lastSlash = value.lastIndexOf("/");
+  const lastSegment = lastSlash >= 0 ? value.slice(lastSlash + 1) : value;
+  if (!lastSegment || !lastSegment.includes(".")) return null;
+  const lastDot = lastSegment.lastIndexOf(".");
+  if (lastDot <= 0) return null;
+  return lastSegment.slice(lastDot);
+}
+
+function hasAllowedRelativeImportExtension(value) {
+  const ext = getImportPathExtension(value);
+  return ext ? RELATIVE_IMPORT_ALLOWED_EXTENSIONS.has(ext) : false;
+}
 
 function getLiteralString(node) {
   if (!node) return null;
@@ -349,6 +369,43 @@ export default {
             if (node.property.type !== "Identifier") return;
             if (node.property.name !== "fetchReply") return;
             context.report({ node: node.property, messageId: "deprecatedFetchReply" });
+          },
+        };
+      },
+    },
+    "require-relative-import-js-extension": {
+      meta: {
+        type: "problem",
+        docs: {
+          description:
+            "Require relative import and export paths to include .js or other allowed extensions.",
+        },
+        schema: [],
+        messages: {
+          missingExtension:
+            "Relative import paths must include an explicit extension like .js.",
+        },
+      },
+      create(context) {
+        const checkSource = (sourceNode) => {
+          if (!sourceNode || sourceNode.type !== "Literal") return;
+          const value = sourceNode.value;
+          if (!isRelativeImportPath(value)) return;
+          if (hasAllowedRelativeImportExtension(value)) return;
+          context.report({ node: sourceNode, messageId: "missingExtension" });
+        };
+
+        return {
+          ImportDeclaration(node) {
+            checkSource(node.source);
+          },
+          ExportNamedDeclaration(node) {
+            if (!node.source) return;
+            checkSource(node.source);
+          },
+          ExportAllDeclaration(node) {
+            if (!node.source) return;
+            checkSource(node.source);
           },
         };
       },

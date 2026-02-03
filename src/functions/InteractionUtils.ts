@@ -4,7 +4,7 @@ import type {
   InteractionDeferReplyOptions,
   RepliableInteraction,
 } from "discord.js";
-import { BOT_DEV_CHANNEL_ID } from "../config/channels";
+import { BOT_DEV_CHANNEL_ID } from "../config/channels.js";
 
 export type AnyRepliable = RepliableInteraction | CommandInteraction;
 

@@ -89,6 +89,7 @@ export interface IMemberNowPlayingEntry {
   title: string;
   platformId: number | null;
   platformName: string | null;
+  platformAbbreviation: string | null;
   threadId: string | null;
   note: string | null;
   addedAt: Date | null;
@@ -181,6 +182,7 @@ export default class Member {
         TITLE: string;
         PLATFORM_ID: number | null;
         PLATFORM_NAME: string | null;
+        PLATFORM_ABBREVIATION: string | null;
         THREAD_ID: string | null;
         NOTE: string | null;
         ADDED_AT: Date | string | null;
@@ -191,6 +193,7 @@ export default class Member {
                 g.TITLE,
                 u.PLATFORM_ID,
                 p.PLATFORM_NAME,
+                p.PLATFORM_ABBREVIATION,
                 COALESCE(
                   (
                     SELECT MIN(tgl.THREAD_ID)
@@ -234,6 +237,7 @@ export default class Member {
           title: r.TITLE,
           platformId: r.PLATFORM_ID == null ? null : Number(r.PLATFORM_ID),
           platformName: r.PLATFORM_NAME ?? null,
+          platformAbbreviation: r.PLATFORM_ABBREVIATION ?? null,
           threadId: r.THREAD_ID ?? null,
           note: r.NOTE ?? null,
           addedAt: r.ADDED_AT instanceof Date
@@ -265,6 +269,7 @@ export default class Member {
         TITLE: string;
         PLATFORM_ID: number | null;
         PLATFORM_NAME: string | null;
+        PLATFORM_ABBREVIATION: string | null;
         THREAD_ID: string | null;
         NOTE: string | null;
         ADDED_AT: Date | string | null;
@@ -277,6 +282,7 @@ export default class Member {
                 g.TITLE,
                 u.PLATFORM_ID,
                 p.PLATFORM_NAME,
+                p.PLATFORM_ABBREVIATION,
                 COALESCE(
                   (
                     SELECT MIN(tgl.THREAD_ID)
@@ -337,6 +343,7 @@ export default class Member {
             title: row.TITLE,
             platformId: row.PLATFORM_ID == null ? null : Number(row.PLATFORM_ID),
             platformName: row.PLATFORM_NAME ?? null,
+            platformAbbreviation: row.PLATFORM_ABBREVIATION ?? null,
             threadId: row.THREAD_ID ?? null,
             note: row.NOTE ?? null,
             addedAt: row.ADDED_AT instanceof Date
@@ -449,6 +456,7 @@ export default class Member {
     title: string;
     platformId: number | null;
     platformName: string | null;
+    platformAbbreviation: string | null;
     note: string | null;
     addedAt: Date | null;
     noteUpdatedAt: Date | null;
@@ -461,6 +469,7 @@ export default class Member {
         TITLE: string;
         PLATFORM_ID: number | null;
         PLATFORM_NAME: string | null;
+        PLATFORM_ABBREVIATION: string | null;
         NOTE: string | null;
         ADDED_AT: Date | string | null;
         NOTE_UPDATED_AT: Date | string | null;
@@ -470,6 +479,7 @@ export default class Member {
                 g.TITLE,
                 u.PLATFORM_ID,
                 p.PLATFORM_NAME,
+                p.PLATFORM_ABBREVIATION,
                 u.NOTE,
                 u.ADDED_AT,
                 u.NOTE_UPDATED_AT,
@@ -488,6 +498,7 @@ export default class Member {
         title: r.TITLE,
         platformId: r.PLATFORM_ID == null ? null : Number(r.PLATFORM_ID),
         platformName: r.PLATFORM_NAME ?? null,
+        platformAbbreviation: r.PLATFORM_ABBREVIATION ?? null,
         note: r.NOTE ?? null,
         addedAt: r.ADDED_AT instanceof Date
           ? r.ADDED_AT
