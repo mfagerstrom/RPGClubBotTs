@@ -376,11 +376,11 @@ export async function updateNrGotmGameFieldInDatabase(
     if (opts.rowId) {
       await connection.execute(
         `UPDATE NR_GOTM_ENTRIES
-            SET ${columnName} = :value
-          WHERE NR_GOTM_ID = :rowId`,
+            SET ${columnName} = :bindValue
+          WHERE NR_GOTM_ID = :rowIdValue`,
         {
-          rowId: opts.rowId,
-          value: dbValue,
+          rowIdValue: opts.rowId,
+          bindValue: dbValue,
         },
         { autoCommit: true },
       );
@@ -424,9 +424,9 @@ export async function updateNrGotmGameFieldInDatabase(
               ROUND_NUMBER,
               GAME_INDEX
          FROM NR_GOTM_ENTRIES
-        WHERE ROUND_NUMBER = :round
+        WHERE ROUND_NUMBER = :roundNumber
         ORDER BY GAME_INDEX`,
-      { round },
+      { roundNumber: round },
       { outFormat: oracledb.OUT_FORMAT_OBJECT },
     );
 
@@ -453,11 +453,11 @@ export async function updateNrGotmGameFieldInDatabase(
 
     await connection.execute(
       `UPDATE NR_GOTM_ENTRIES
-          SET ${columnName} = :value
-        WHERE NR_GOTM_ID = :rowId`,
+          SET ${columnName} = :bindValue
+        WHERE NR_GOTM_ID = :rowIdValue`,
       {
-        rowId,
-        value: dbValue,
+        rowIdValue: rowId,
+        bindValue: dbValue,
       },
       { autoCommit: true },
     );
@@ -490,9 +490,9 @@ export async function updateNrGotmVotingResultsInDatabase(
   try {
     await connection.execute(
       `UPDATE NR_GOTM_ENTRIES
-          SET VOTING_RESULTS_MESSAGE_ID = :value
-        WHERE ROUND_NUMBER = :round`,
-      { round, value: messageId },
+          SET VOTING_RESULTS_MESSAGE_ID = :bindValue
+        WHERE ROUND_NUMBER = :roundNumber`,
+      { roundNumber: round, bindValue: messageId },
       { autoCommit: true },
     );
   } finally {
@@ -519,8 +519,8 @@ export async function insertNrGotmRoundInDatabase(
     const existing = await connection.execute<{ CNT: number }>(
       `SELECT COUNT(*) AS CNT
          FROM NR_GOTM_ENTRIES
-        WHERE ROUND_NUMBER = :round`,
-      { round },
+        WHERE ROUND_NUMBER = :roundNumber`,
+      { roundNumber: round },
       { outFormat: oracledb.OUT_FORMAT_OBJECT },
     );
 
@@ -548,7 +548,7 @@ export async function insertNrGotmRoundInDatabase(
            VOTING_RESULTS_MESSAGE_ID,
            GAMEDB_GAME_ID
          ) VALUES (
-           :round,
+           :roundNumber,
            :monthYear,
            :gameIndex,
            :threadId,
@@ -558,7 +558,7 @@ export async function insertNrGotmRoundInDatabase(
          )
          RETURNING NR_GOTM_ID INTO :outId`,
         {
-          round,
+          roundNumber: round,
           monthYear,
           gameIndex: i,
           threadId: g.threadId ?? null,
@@ -595,8 +595,8 @@ export async function deleteNrGotmRoundFromDatabase(round: number): Promise<numb
   try {
     const result = await connection.execute(
       `DELETE FROM NR_GOTM_ENTRIES
-        WHERE ROUND_NUMBER = :round`,
-      { round },
+        WHERE ROUND_NUMBER = :roundNumber`,
+      { roundNumber: round },
       { autoCommit: true },
     );
 
