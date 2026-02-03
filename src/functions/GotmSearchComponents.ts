@@ -163,7 +163,10 @@ export async function buildGotmSearchMessages(
 function buildDetailsLine(card: GotmDisplayCard, guildId?: string): string | null {
   const parts: string[] = [];
   if (card.threadId) {
-    parts.push(`<#${card.threadId}>`);
+    const threadLink = guildId
+      ? `https://discord.com/channels/${guildId}/${card.threadId}`
+      : null;
+    parts.push(threadLink ? `[Thread](${threadLink})` : card.threadId);
   }
   if (card.redditUrl) {
     parts.push(`[Reddit](${card.redditUrl})`);

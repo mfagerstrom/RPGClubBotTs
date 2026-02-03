@@ -489,6 +489,7 @@ export async function handleGotmAuditQueryModal(interaction: ModalSubmitInteract
   const baseContent = buildGotmAuditPromptContent(
     session,
     item,
+    interaction.guildId ?? null,
     options.length > 0,
   );
   const content = `${baseContent}\n\nManual search: ${query}`;

@@ -15,10 +15,18 @@ import {
 export function buildGotmAuditPromptContent(
   session: IGotmAuditImport,
   item: IGotmAuditItem,
+  guildId: string | null,
   hasResults: boolean,
 ): string {
   const kindLabel = item.kind === "nr-gotm" ? "NR-GOTM" : "GOTM";
-  const threadText = item.threadId ? `<#${item.threadId}>` : "None";
+  const threadLink = item.threadId && guildId
+    ? `https://discord.com/channels/${guildId}/${item.threadId}`
+    : null;
+  const threadText = threadLink
+    ? `[Thread Link](${threadLink})`
+    : item.threadId
+      ? item.threadId
+      : "None";
   const redditText = item.redditUrl ?? "None";
   const base =
     `## ${kindLabel} Audit #${session.importId} - Item ${item.rowIndex}/${session.totalCount}\n` +

@@ -242,7 +242,12 @@ export async function processNextGotmAuditItem(
     };
   });
 
-  const content = buildGotmAuditPromptContent(session, nextItem, options.length > 0);
+  const content = buildGotmAuditPromptContent(
+    session,
+    nextItem,
+    interaction.guildId ?? null,
+    options.length > 0,
+  );
   const container = buildGotmAuditPromptContainer(content);
   const components = buildGotmAuditPromptComponents(
     interaction.user.id,
