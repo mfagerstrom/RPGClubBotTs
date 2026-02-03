@@ -3,7 +3,7 @@ import type {
   TextBasedChannel,
   StringSelectMenuInteraction,
 } from "discord.js";
-import { ApplicationCommandOptionType, EmbedBuilder, MessageFlags } from "discord.js";
+import { ApplicationCommandOptionType, MessageFlags } from "discord.js";
 import {
   Discord,
   SelectMenuComponent,
@@ -287,14 +287,14 @@ export class GotmSearch {
       });
 
       const nominations = await listNominationsForRound("gotm", window.targetRound);
-      const embed = buildNominationEmbed(
+      const payload = await buildNominationListPayload(
         "GOTM",
         "/gotm nominate",
         window,
         nominations,
+        false,
       );
-      const content = `<@${interaction.user.id}> nominated "${saved.gameTitle}" (GameDB #${game.id}) for GOTM Round ${window.targetRound}.`;
-      await announceNomination("GOTM", interaction, content, embed);
+      await announceNomination("GOTM", interaction, payload);
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
@@ -340,14 +340,14 @@ export class GotmSearch {
                 flags: MessageFlags.Ephemeral,
       });
 
-      const embed = buildNominationEmbed(
+      const payload = await buildNominationListPayload(
         "GOTM",
         "/gotm nominate",
         window,
         nominations,
+        false,
       );
-      const content = `<@${interaction.user.id}> removed their GOTM nomination "${existing.gameTitle}" for GOTM Round ${window.targetRound}.`;
-      await announceNomination("GOTM", interaction, content, embed);
+      await announceNomination("GOTM", interaction, payload);
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       await safeReply(interaction, {
@@ -416,38 +416,10 @@ export class GotmSearch {
 
 }
 
-function buildNominationEmbed(
-  kindLabel: string,
-  commandLabel: string,
-  window: { closesAt: Date; nextVoteAt: Date; targetRound: number },
-  nominations: Awaited<ReturnType<typeof listNominationsForRound>>,
-): EmbedBuilder {
-  const lines =
-    nominations.length > 0
-      ? nominations.map((n, idx) => {
-          const reason = n.reason ? `\n> Reason: ${n.reason}` : "";
-          return `${numberEmoji(idx + 1)} ${n.gameTitle} — <@${n.userId}>${reason}`;
-        })
-      : ["No nominations yet."];
-
-  const voteLabel = formatDate(window.nextVoteAt);
-
-  return new EmbedBuilder()
-    .setColor(0x0099ff)
-    .setTitle(`${kindLabel} Nominations - Round ${window.targetRound}`)
-    .setDescription(lines.join("\n"))
-    .setFooter({
-      text:
-        `Vote on ${voteLabel}\n` +
-        `Do you want to nominate a game? Use ${commandLabel}`,
-    });
-}
-
 async function announceNomination(
   kindLabel: string,
   interaction: CommandInteraction,
-  content: string,
-  embed: EmbedBuilder,
+  payload: Awaited<ReturnType<typeof buildNominationListPayload>>,
 ): Promise<void> {
   const channelId = GOTM_NOMINATION_CHANNEL_ID;
   try {
@@ -456,7 +428,12 @@ async function announceNomination(
       ? (channel as TextBasedChannel)
       : null;
     if (!textChannel || !isSendableTextChannel(textChannel)) return;
-    await textChannel.send({ content, embeds: [embed] });
+    await textChannel.send({
+      components: payload.components,
+      files: payload.files,
+      flags: buildComponentsV2Flags(false),
+      allowedMentions: { parse: [] },
+    });
   } catch (err) {
     console.error(`Failed to announce ${kindLabel} nomination in channel ${channelId}:`, err);
   }
@@ -659,26 +636,6 @@ type SendableTextChannel = TextBasedChannel & {
 
 function isSendableTextChannel(channel: TextBasedChannel | null): channel is SendableTextChannel {
   return Boolean(channel && typeof (channel as any).send === "function");
-}
-
-function numberEmoji(n: number): string {
-  const lookup: Record<number, string> = {
-    1: ":one:",
-    2: ":two:",
-    3: ":three:",
-    4: ":four:",
-    5: ":five:",
-    6: ":six:",
-    7: ":seven:",
-    8: ":eight:",
-    9: ":nine:",
-    10: ":keycap_ten:",
-  };
-  return lookup[n] ?? `${n}.`;
-}
-
-function formatDate(date: Date): string {
-  return date.toLocaleDateString("en-US", { timeZone: "America/New_York" });
 }
 
 function parseMonthValue(input: string): number | string {

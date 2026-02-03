@@ -18,6 +18,7 @@ const INTERACTION_DECORATORS = new Set([
   "SelectMenuComponent",
   "ModalComponent",
 ]);
+const SLASH_OPTION_DECORATOR = "SlashOption";
 const CHECKED_SET_CUSTOM_ID_BUILDERS = new Set([
   "ButtonBuilder",
   "V2ButtonBuilder",
@@ -25,6 +26,20 @@ const CHECKED_SET_CUSTOM_ID_BUILDERS = new Set([
   "ModalBuilder",
 ]);
 const RELATIVE_IMPORT_ALLOWED_EXTENSIONS = new Set([".js", ".json", ".mjs", ".cjs"]);
+const CHANNEL_ID_SUFFIX = "_CHANNEL_ID";
+const USER_ID_SUFFIX = "_USER_ID";
+const TAG_ID_SUFFIX = "_TAG_ID";
+const MESSAGE_FLAG_ID_SUFFIX = "_MESSAGE_FLAG_ID";
+const UNSTABLE_ID_CALLEE_NAMES = new Set(["Date", "Math", "crypto"]);
+const UNSTABLE_ID_METHODS = new Set(["now", "random", "randomUUID"]);
+const DISALLOWED_TOP_LEVEL_COMPONENT_BUILDERS = new Set([
+  "SectionBuilder",
+  "TextDisplayBuilder",
+  "MediaGalleryBuilder",
+  "MediaGalleryItemBuilder",
+  "ThumbnailBuilder",
+  "SeparatorBuilder",
+]);
 
 function isRelativeImportPath(value) {
   return typeof value === "string" && value.startsWith(".");
@@ -175,6 +190,108 @@ function getDecoratorIdValueArg(decoratorExpression) {
     }
   }
   return null;
+}
+
+function getDecoratorOptionsArg(decoratorExpression) {
+  if (!decoratorExpression || decoratorExpression.type !== "CallExpression") {
+    return null;
+  }
+  const firstArg = decoratorExpression.arguments[0];
+  if (!firstArg || firstArg.type !== "ObjectExpression") return null;
+  return firstArg;
+}
+
+function getObjectPropertyValue(objectNode, key) {
+  if (!objectNode || objectNode.type !== "ObjectExpression") return null;
+  for (const prop of objectNode.properties) {
+    if (!prop || prop.type !== "Property") continue;
+    const keyName = getPropertyName(prop.key);
+    if (keyName === key) return prop.value;
+  }
+  return null;
+}
+
+function isAllowedIdConstantLocation(filename, suffix) {
+  if (!filename) return false;
+  if (suffix === CHANNEL_ID_SUFFIX) return filename.endsWith("/src/config/channels.ts");
+  if (suffix === USER_ID_SUFFIX) return filename.endsWith("/src/config/users.ts");
+  if (suffix === TAG_ID_SUFFIX || suffix === MESSAGE_FLAG_ID_SUFFIX) {
+    return filename.endsWith("/src/config/tags.ts");
+  }
+  return false;
+}
+
+function isLiteralIdString(node) {
+  return Boolean(node && node.type === "Literal" && typeof node.value === "string");
+}
+
+function isNumericIdString(node) {
+  return isLiteralIdString(node) && /^\d+$/.test(node.value);
+}
+
+function containsUnstableExpression(node) {
+  if (!node) return false;
+  const nodes = [node];
+  while (nodes.length) {
+    const current = nodes.pop();
+    if (!current) continue;
+
+    if (current.type === "CallExpression") {
+      const callee = current.callee;
+      if (callee.type === "MemberExpression" && callee.property.type === "Identifier") {
+        const objectName = callee.object.type === "Identifier"
+          ? callee.object.name
+          : null;
+        const methodName = callee.property.name;
+        if (objectName && UNSTABLE_ID_CALLEE_NAMES.has(objectName)) {
+          if (UNSTABLE_ID_METHODS.has(methodName)) return true;
+        }
+      }
+      if (callee.type === "Identifier" && UNSTABLE_ID_METHODS.has(callee.name)) {
+        return true;
+      }
+    }
+
+    if (current.type === "NewExpression") {
+      if (current.callee.type === "Identifier" && current.callee.name === "Date") {
+        return true;
+      }
+    }
+
+    for (const key of Object.keys(current)) {
+      const value = current[key];
+      if (!value) continue;
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (item && typeof item.type === "string") nodes.push(item);
+        }
+      } else if (value && typeof value.type === "string") {
+        nodes.push(value);
+      }
+    }
+  }
+  return false;
+}
+
+function shouldIgnoreUnusedVariable(variable) {
+  if (!variable || !variable.identifiers?.length) return true;
+  const name = variable.identifiers[0]?.name ?? "";
+  return name.startsWith("_");
+}
+
+function collectUnusedVariables(scope, unused) {
+  for (const variable of scope.variables) {
+    if (shouldIgnoreUnusedVariable(variable)) continue;
+    const isImport = variable.defs.some((def) => def.type === "ImportBinding");
+    const isVariable = variable.defs.some((def) => def.type === "Variable");
+    if (!isImport && !isVariable) continue;
+    if (variable.references.length === 0) {
+      unused.push(variable);
+    }
+  }
+  for (const child of scope.childScopes) {
+    collectUnusedVariables(child, unused);
+  }
 }
 
 function getDecoratorKind(name) {
@@ -406,6 +523,445 @@ export default {
           ExportAllDeclaration(node) {
             if (!node.source) return;
             checkSource(node.source);
+          },
+        };
+      },
+    },
+    "slash-options-required-first": {
+      meta: {
+        type: "problem",
+        docs: {
+          description:
+            "Require required SlashOption parameters to appear before optional parameters.",
+        },
+        schema: [],
+        messages: {
+          requiredAfterOptional:
+            "Required slash options must be declared before optional options.",
+        },
+      },
+      create(context) {
+        return {
+          MethodDefinition(node) {
+            const params = node.value?.params;
+            if (!params || !params.length) return;
+            let seenOptional = false;
+
+            for (const param of params) {
+              const paramNode = param.type === "TSParameterProperty"
+                ? param.parameter
+                : param;
+              const decorators = paramNode?.decorators ?? param.decorators ?? [];
+              if (!decorators.length) continue;
+
+              for (const decorator of decorators) {
+                const decoratorExpression = decorator.expression;
+                const decoratorName = getDecoratorIdentifierName(decoratorExpression);
+                if (decoratorName !== SLASH_OPTION_DECORATOR) continue;
+
+                const optionsNode = getDecoratorOptionsArg(decoratorExpression);
+                const requiredValue = getObjectPropertyValue(optionsNode, "required");
+                const isRequired = Boolean(
+                  requiredValue &&
+                  requiredValue.type === "Literal" &&
+                  requiredValue.value === true,
+                );
+                if (!isRequired) {
+                  seenOptional = true;
+                } else if (seenOptional) {
+                  context.report({ node: decorator, messageId: "requiredAfterOptional" });
+                }
+              }
+            }
+          },
+        };
+      },
+    },
+    "no-unused-imports-vars-local": {
+      meta: {
+        type: "problem",
+        docs: {
+          description: "Disallow unused imports and variables.",
+        },
+        schema: [],
+        messages: {
+          unusedVariable: "Unused variable '{{name}}'.",
+        },
+      },
+      create(context) {
+        return {
+          "Program:exit"() {
+            const unused = [];
+            collectUnusedVariables(context.getScope(), unused);
+            for (const variable of unused) {
+              const identifier = variable.identifiers[0];
+              if (!identifier) continue;
+              context.report({
+                node: identifier,
+                messageId: "unusedVariable",
+                data: { name: identifier.name },
+              });
+            }
+          },
+        };
+      },
+    },
+    "no-build-folder-edits": {
+      meta: {
+        type: "problem",
+        docs: {
+          description: "Disallow linting files inside build folder.",
+        },
+        schema: [],
+        messages: {
+          buildFolder: "Do not edit files in the build folder.",
+        },
+      },
+      create(context) {
+        return {
+          Program(node) {
+            const filename = context.getFilename();
+            if (!filename || filename === "<input>") return;
+            if (filename.includes("/build/") || filename.includes("\\\\build\\\\")) {
+              context.report({ node, messageId: "buildFolder" });
+            }
+          },
+        };
+      },
+    },
+    "no-emdash": {
+      meta: {
+        type: "problem",
+        docs: {
+          description: "Disallow em dash characters.",
+        },
+        schema: [],
+        messages: {
+          emdash: "Do not use em dash characters.",
+        },
+      },
+      create(context) {
+        const sourceCode = context.getSourceCode();
+        const reportIfEmdash = (node, text) => {
+          if (typeof text !== "string") return;
+          if (text.includes("—")) {
+            context.report({ node, messageId: "emdash" });
+          }
+        };
+
+        return {
+          Program() {
+            for (const comment of sourceCode.getAllComments()) {
+              reportIfEmdash(comment, comment.value);
+            }
+          },
+          Literal(node) {
+            if (typeof node.value === "string") {
+              reportIfEmdash(node, node.value);
+            }
+          },
+          TemplateElement(node) {
+            reportIfEmdash(node, node.value?.cooked ?? node.value?.raw);
+          },
+        };
+      },
+    },
+    "channel-id-constants-in-channels-config": {
+      meta: {
+        type: "problem",
+        docs: {
+          description: "Require channel ID constants to be declared in channels config.",
+        },
+        schema: [],
+        messages: {
+          wrongFile: "Channel ID constants must be declared in src/config/channels.ts.",
+        },
+      },
+      create(context) {
+        const filename = context.getFilename().replace(/\\/g, "/");
+        return {
+          VariableDeclarator(node) {
+            if (node.id.type !== "Identifier") return;
+            const name = node.id.name;
+            if (!name.endsWith(CHANNEL_ID_SUFFIX)) return;
+            if (!isNumericIdString(node.init)) return;
+            if (isAllowedIdConstantLocation(filename, CHANNEL_ID_SUFFIX)) return;
+            context.report({ node: node.id, messageId: "wrongFile" });
+          },
+        };
+      },
+    },
+    "user-id-constants-in-users-config": {
+      meta: {
+        type: "problem",
+        docs: {
+          description: "Require user ID constants to be declared in users config.",
+        },
+        schema: [],
+        messages: {
+          wrongFile: "User ID constants must be declared in src/config/users.ts.",
+        },
+      },
+      create(context) {
+        const filename = context.getFilename().replace(/\\/g, "/");
+        return {
+          VariableDeclarator(node) {
+            if (node.id.type !== "Identifier") return;
+            const name = node.id.name;
+            if (!name.endsWith(USER_ID_SUFFIX)) return;
+            if (!isNumericIdString(node.init)) return;
+            if (isAllowedIdConstantLocation(filename, USER_ID_SUFFIX)) return;
+            context.report({ node: node.id, messageId: "wrongFile" });
+          },
+        };
+      },
+    },
+    "tag-id-constants-in-tags-config": {
+      meta: {
+        type: "problem",
+        docs: {
+          description: "Require tag ID constants to be declared in tags config.",
+        },
+        schema: [],
+        messages: {
+          wrongFile: "Tag ID constants must be declared in src/config/tags.ts.",
+        },
+      },
+      create(context) {
+        const filename = context.getFilename().replace(/\\/g, "/");
+        return {
+          VariableDeclarator(node) {
+            if (node.id.type !== "Identifier") return;
+            const name = node.id.name;
+            if (!name.endsWith(TAG_ID_SUFFIX)) return;
+            if (!isNumericIdString(node.init)) return;
+            if (isAllowedIdConstantLocation(filename, TAG_ID_SUFFIX)) return;
+            context.report({ node: node.id, messageId: "wrongFile" });
+          },
+        };
+      },
+    },
+    "message-flag-id-constants-in-tags-config": {
+      meta: {
+        type: "problem",
+        docs: {
+          description: "Require message flag ID constants to be declared in tags config.",
+        },
+        schema: [],
+        messages: {
+          wrongFile:
+            "Message flag ID constants must be declared in src/config/tags.ts.",
+        },
+      },
+      create(context) {
+        const filename = context.getFilename().replace(/\\/g, "/");
+        return {
+          VariableDeclarator(node) {
+            if (node.id.type !== "Identifier") return;
+            const name = node.id.name;
+            if (!name.endsWith(MESSAGE_FLAG_ID_SUFFIX)) return;
+            if (!isNumericIdString(node.init)) return;
+            if (isAllowedIdConstantLocation(filename, MESSAGE_FLAG_ID_SUFFIX)) return;
+            context.report({ node: node.id, messageId: "wrongFile" });
+          },
+        };
+      },
+    },
+    "stable-custom-id": {
+      meta: {
+        type: "problem",
+        docs: {
+          description: "Disallow unstable values in interaction custom IDs.",
+        },
+        schema: [],
+        messages: {
+          unstableId: "Custom IDs must not use Date.now, Math.random, or randomUUID.",
+        },
+      },
+      create(context) {
+        return {
+          CallExpression(node) {
+            const callee = node.callee;
+            if (
+              callee.type !== "MemberExpression" ||
+              callee.property.type !== "Identifier" ||
+              callee.property.name !== "setCustomId"
+            ) {
+              return;
+            }
+            const [arg] = node.arguments;
+            if (!arg) return;
+            if (containsUnstableExpression(arg)) {
+              context.report({ node: arg, messageId: "unstableId" });
+            }
+          },
+          Decorator(node) {
+            const decoratorExpression = node.expression;
+            const decoratorName = getDecoratorIdentifierName(decoratorExpression);
+            if (!decoratorName || !INTERACTION_DECORATORS.has(decoratorName)) return;
+            const idValueNode = getDecoratorIdValueArg(decoratorExpression);
+            if (!idValueNode) return;
+            if (containsUnstableExpression(idValueNode)) {
+              context.report({ node: idValueNode, messageId: "unstableId" });
+            }
+          },
+        };
+      },
+    },
+    "components-v2-structure": {
+      meta: {
+        type: "problem",
+        docs: {
+          description:
+            "Enforce valid Components v2 container usage and ActionRow sizes.",
+        },
+        schema: [],
+        messages: {
+          tooManyComponents: "ActionRowBuilder supports 1 to 5 components.",
+          invalidTopLevel:
+            "Top-level components should be ContainerBuilder or ActionRowBuilder.",
+        },
+      },
+      create(context) {
+        const checkArrayElements = (elements) => {
+          for (const element of elements) {
+            if (!element) continue;
+            if (element.type === "NewExpression") {
+              if (
+                element.callee.type === "Identifier" &&
+                DISALLOWED_TOP_LEVEL_COMPONENT_BUILDERS.has(element.callee.name)
+              ) {
+                context.report({ node: element, messageId: "invalidTopLevel" });
+              }
+            }
+            if (element.type === "ObjectExpression") {
+              const typeValue = getObjectPropertyValue(element, "type");
+              if (
+                typeValue &&
+                typeValue.type === "Literal" &&
+                typeof typeValue.value === "number" &&
+                typeValue.value !== 1
+              ) {
+                context.report({ node: element, messageId: "invalidTopLevel" });
+              }
+            }
+          }
+        };
+
+        return {
+          CallExpression(node) {
+            const callee = node.callee;
+            if (
+              callee.type !== "MemberExpression" ||
+              callee.property.type !== "Identifier" ||
+              callee.property.name !== "addComponents"
+            ) {
+              return;
+            }
+            if (node.arguments.length > 5) {
+              context.report({ node, messageId: "tooManyComponents" });
+              return;
+            }
+            if (node.arguments.length === 1 && node.arguments[0].type === "ArrayExpression") {
+              const arrayArg = node.arguments[0];
+              if (arrayArg.elements.length > 5) {
+                context.report({ node, messageId: "tooManyComponents" });
+              }
+            }
+          },
+          Property(node) {
+            if (node.key.type !== "Identifier" && node.key.type !== "Literal") return;
+            const keyName = getPropertyName(node.key);
+            if (keyName !== "components") return;
+            if (!node.value || node.value.type !== "ArrayExpression") return;
+            checkArrayElements(node.value.elements);
+          },
+        };
+      },
+    },
+    "no-components-v2-with-content": {
+      meta: {
+        type: "problem",
+        docs: {
+          description:
+            "Disallow content when MessageFlags.IS_COMPONENTS_V2 is used.",
+        },
+        schema: [],
+        messages: {
+          noContent: "Do not include content when using Components v2 flags.",
+        },
+      },
+      create(context) {
+        const isComponentsV2Flag = (node) => {
+          if (!node) return false;
+          if (node.type === "Identifier" && node.name === "COMPONENTS_V2_FLAG") {
+            return true;
+          }
+          if (
+            node.type === "MemberExpression" &&
+            node.property.type === "Identifier" &&
+            node.property.name === "IS_COMPONENTS_V2"
+          ) {
+            return true;
+          }
+          return false;
+        };
+
+        const expressionIncludesComponentsV2 = (node) => {
+          if (!node) return false;
+          const nodes = [node];
+          while (nodes.length) {
+            const current = nodes.pop();
+            if (!current) continue;
+            if (isComponentsV2Flag(current)) return true;
+            if (current.type === "CallExpression") {
+              if (current.callee.type === "Identifier" &&
+                current.callee.name === "buildComponentsV2Flags"
+              ) {
+                return true;
+              }
+            }
+            for (const key of Object.keys(current)) {
+              const value = current[key];
+              if (!value) continue;
+              if (Array.isArray(value)) {
+                for (const item of value) {
+                  if (item && typeof item.type === "string") nodes.push(item);
+                }
+              } else if (value && typeof value.type === "string") {
+                nodes.push(value);
+              }
+            }
+          }
+          return false;
+        };
+
+        const checkObject = (node) => {
+          if (!node || node.type !== "ObjectExpression") return;
+          const contentProp = getObjectPropertyValue(node, "content");
+          if (!contentProp) return;
+          const flagsProp = getObjectPropertyValue(node, "flags");
+          if (!flagsProp) return;
+          if (expressionIncludesComponentsV2(flagsProp)) {
+            context.report({ node: contentProp, messageId: "noContent" });
+          }
+        };
+
+        return {
+          CallExpression(node) {
+            const callee = node.callee;
+            if (callee.type === "Identifier") {
+              if (!INTERACTION_RESPONSE_HELPERS.has(callee.name)) return;
+              const arg = node.arguments[0];
+              checkObject(arg);
+              return;
+            }
+            if (callee.type === "MemberExpression") {
+              const methodName = getCalleePropertyName(callee);
+              if (!methodName || !INTERACTION_RESPONSE_METHODS.has(methodName)) return;
+              const arg = node.arguments[0];
+              checkObject(arg);
+            }
           },
         };
       },
