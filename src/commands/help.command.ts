@@ -878,9 +878,10 @@ const GAME_COMPLETION_HELP_TOPICS: GameCompletionHelpTopic[] = [
     id: "edit",
     label: "/game-completion edit",
     summary: "Edit one of your completion records.",
-    syntax: "Syntax: /game-completion edit [title:<string>] [year:<int>]",
+    syntax:
+      "Syntax: /game-completion edit title:<string> [completion_type:<choice>] [completion_date:<date>] [platform:<string>] [final_playtime_hours:<number>] [note:<string>] [clear_platform:<boolean>] [clear_final_playtime:<boolean>] [clear_note:<boolean>]",
     notes:
-      "Interactive menu to pick a completion and field to update (type/date/platform/playtime/note). You can filter the selection by title or year.",
+      "Title is required and autocompletes from your own completion records. The command updates fields directly without opening an edit menu. Platform autocompletes from all GameDB platforms.",
   },
   {
     id: "delete",

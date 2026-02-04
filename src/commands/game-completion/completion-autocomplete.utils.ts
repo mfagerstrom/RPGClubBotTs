@@ -3,8 +3,11 @@
 import type { AutocompleteInteraction } from "discord.js";
 import { sanitizeUserInput } from "../../functions/InteractionUtils.js";
 import Game, { type IPlatformDef } from "../../classes/Game.js";
+import Member from "../../classes/Member.js";
+import { formatTableDate } from "../profile.command.js";
 
 const PLATFORM_CACHE_TTL_MS = 5 * 60 * 1000;
+const COMPLETION_TITLE_VALUE_PREFIX = "completion";
 
 let platformCache: { expiresAt: number; platforms: IPlatformDef[] } | null = null;
 
@@ -56,6 +59,50 @@ export async function autocompleteGameCompletionTitle(
   }));
   const options = [buildKeepTypingOption(query), ...resultOptions];
   await interaction.respond(options);
+}
+
+function buildCompletionTitleAutocompleteName(completion: {
+  title: string;
+  completionType: string;
+  completedAt: Date | null;
+}): string {
+  const dateLabel = completion.completedAt ? formatTableDate(completion.completedAt) : "No date";
+  const line = `${completion.title} | ${completion.completionType} | ${dateLabel}`;
+  return line.slice(0, 100);
+}
+
+function buildCompletionTitleAutocompleteValue(completionId: number): string {
+  return `${COMPLETION_TITLE_VALUE_PREFIX}:${completionId}`;
+}
+
+export function parseCompletionTitleAutocompleteValue(raw: string): number | null {
+  const normalized = raw.trim();
+  const match = /^completion:(\d+)$/.exec(normalized);
+  if (!match) return null;
+  const completionId = Number(match[1]);
+  if (!Number.isInteger(completionId) || completionId <= 0) return null;
+  return completionId;
+}
+
+export async function autocompleteUserCompletionTitle(
+  interaction: AutocompleteInteraction,
+): Promise<void> {
+  const focused = interaction.options.getFocused(true);
+  const rawQuery = focused?.value ? String(focused.value) : "";
+  const query = sanitizeUserInput(rawQuery, { preserveNewlines: false }).trim();
+
+  const completions = await Member.getCompletions({
+    userId: interaction.user.id,
+    limit: 25,
+    title: query || undefined,
+  });
+
+  const options = completions.map((completion) => ({
+    name: buildCompletionTitleAutocompleteName(completion),
+    value: buildCompletionTitleAutocompleteValue(completion.completionId),
+  }));
+
+  await interaction.respond(options.slice(0, 25));
 }
 
 export async function autocompleteGameCompletionPlatform(

@@ -27,7 +27,10 @@ import { saveCompletion } from "../functions/CompletionHelpers.js";
 import {
   autocompleteGameCompletionTitle,
   autocompleteGameCompletionPlatform,
+  autocompleteUserCompletionTitle,
+  parseCompletionTitleAutocompleteValue,
   resolveGameCompletionPlatformId,
+  resolveGameCompletionPlatformLabel,
 } from "./game-completion/completion-autocomplete.utils.js";
 import { handleCompletionExport } from "./game-completion/completion-export.service.js";
 import {
@@ -58,12 +61,8 @@ import {
   handleCompletionLeaderboardSelect,
 } from "./game-completion/completion-pagination.service.js";
 import {
-  handleCompletionEditMenu,
-  handleCompletionEditDone,
-  handleCompletionFieldEdit,
-  handleCompletionTypeSelect,
-} from "./game-completion/completion-edit.service.js";
-import { handleCompletionDeleteMenu } from "./game-completion/completion-delete.service.js";
+  handleCompletionDeleteMenu,
+} from "./game-completion/completion-delete.service.js";
 import {
   handleCompletionatorSelect,
   handleCompletionatorUpdateFields,
@@ -478,32 +477,204 @@ export class GameCompletionCommands {
   @Slash({ description: "Edit one of your completion records", name: "edit" })
   async completionEdit(
     @SlashOption({
-      description: "Filter by title (optional)",
+      description: "Completion title (autocomplete from your completions)",
       name: "title",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+      autocomplete: autocompleteUserCompletionTitle,
+    })
+    selectedCompletionRaw: string,
+    @SlashChoice(
+      ...COMPLETION_TYPES.map((t) => ({
+        name: t,
+        value: t,
+      })),
+    )
+    @SlashOption({
+      description: "New completion type",
+      name: "completion_type",
       required: false,
       type: ApplicationCommandOptionType.String,
     })
-    query: string | undefined,
+    completionType: CompletionType | undefined,
     @SlashOption({
-      description: "Filter by year (optional)",
-      name: "year",
+      description: "New completion date (YYYY-MM-DD, today, or unknown)",
+      name: "completion_date",
       required: false,
-      type: ApplicationCommandOptionType.Integer,
+      type: ApplicationCommandOptionType.String,
     })
-    year: number | undefined,
+    completionDate: string | undefined,
+    @SlashOption({
+      description: "New platform (autocomplete from all GameDB platforms)",
+      name: "platform",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+      autocomplete: autocompleteGameCompletionPlatform,
+    })
+    platformRaw: string | undefined,
+    @SlashOption({
+      description: "New final playtime in hours (e.g., 42.5)",
+      name: "final_playtime_hours",
+      required: false,
+      type: ApplicationCommandOptionType.Number,
+    })
+    finalPlaytimeHours: number | undefined,
+    @SlashOption({
+      description: "New note text",
+      name: "note",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    noteRaw: string | undefined,
+    @SlashOption({
+      description: "Clear platform value",
+      name: "clear_platform",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    clearPlatform: boolean | undefined,
+    @SlashOption({
+      description: "Clear final playtime value",
+      name: "clear_final_playtime",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    clearFinalPlaytime: boolean | undefined,
+    @SlashOption({
+      description: "Clear note value",
+      name: "clear_note",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    clearNote: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-    const sanitizedQuery = query
-      ? sanitizeUserInput(query, { preserveNewlines: false })
-      : undefined;
-    await renderSelectionPage(
-      interaction,
-      interaction.user.id,
-      0,
-      "edit",
-      year ?? null,
-      sanitizedQuery,
+    const completionId = parseCompletionTitleAutocompleteValue(selectedCompletionRaw);
+    if (!completionId) {
+      await interaction.editReply("Select a completion from the title autocomplete list.");
+      return;
+    }
+
+    if (clearPlatform && platformRaw) {
+      await interaction.editReply("Use either `platform` or `clear_platform:true`, not both.");
+      return;
+    }
+    if (clearFinalPlaytime && finalPlaytimeHours !== undefined) {
+      await interaction.editReply(
+        "Use either `final_playtime_hours` or `clear_final_playtime:true`, not both.",
+      );
+      return;
+    }
+    if (clearNote && noteRaw !== undefined) {
+      await interaction.editReply("Use either `note` or `clear_note:true`, not both.");
+      return;
+    }
+
+    const updates: Partial<{
+      completionType: string;
+      completedAt: Date | null;
+      platformId: number | null;
+      finalPlaytimeHours: number | null;
+      note: string | null;
+    }> = {};
+
+    if (completionType !== undefined) {
+      if (!COMPLETION_TYPES.includes(completionType)) {
+        await interaction.editReply("Invalid completion type.");
+        return;
+      }
+      updates.completionType = completionType;
+    }
+
+    if (completionDate !== undefined) {
+      const sanitizedDate = sanitizeUserInput(completionDate, { preserveNewlines: false });
+      try {
+        updates.completedAt = parseCompletionDateInput(sanitizedDate);
+      } catch (err: any) {
+        await interaction.editReply(err?.message ?? "Invalid completion date.");
+        return;
+      }
+    }
+
+    if (clearPlatform) {
+      updates.platformId = null;
+    } else if (platformRaw !== undefined) {
+      const platformId = await resolveGameCompletionPlatformId(platformRaw);
+      if (platformId == null) {
+        await interaction.editReply("Invalid platform selection.");
+        return;
+      }
+      updates.platformId = platformId;
+    }
+
+    if (clearFinalPlaytime) {
+      updates.finalPlaytimeHours = null;
+    } else if (finalPlaytimeHours !== undefined) {
+      if (Number.isNaN(finalPlaytimeHours) || finalPlaytimeHours < 0) {
+        await interaction.editReply("Final playtime must be a non-negative number of hours.");
+        return;
+      }
+      updates.finalPlaytimeHours = finalPlaytimeHours;
+    }
+
+    if (clearNote) {
+      updates.note = null;
+    } else if (noteRaw !== undefined) {
+      const sanitizedNote = sanitizeUserInput(noteRaw, { preserveNewlines: true });
+      if (sanitizedNote.length > this.maxNoteLength) {
+        await interaction.editReply(`Note must be ${this.maxNoteLength} characters or fewer.`);
+        return;
+      }
+      updates.note = sanitizedNote.length ? sanitizedNote : null;
+    }
+
+    if (!Object.keys(updates).length) {
+      await interaction.editReply(
+        "Provide at least one field to update (type, date, platform, playtime, or note).",
+      );
+      return;
+    }
+
+    const saved = await Member.updateCompletion(interaction.user.id, completionId, updates);
+    if (!saved) {
+      await interaction.editReply("Completion not found.");
+      return;
+    }
+
+    const updated = await Member.getCompletionForUser(interaction.user.id, completionId);
+    if (!updated) {
+      await interaction.editReply("Completion updated.");
+      return;
+    }
+
+    const changedLines: string[] = [];
+    if (updates.completionType !== undefined) {
+      changedLines.push(`- Completion Type: **${updated.completionType}**`);
+    }
+    if (updates.completedAt !== undefined) {
+      const dateLabel = updated.completedAt
+        ? `<t:${Math.floor(updated.completedAt.getTime() / 1000)}:D>`
+        : "No date";
+      changedLines.push(`- Completion Date: **${dateLabel}**`);
+    }
+    if (updates.platformId !== undefined) {
+      const platformLabel = await resolveGameCompletionPlatformLabel(updated.platformId);
+      changedLines.push(`- Platform: **${platformLabel}**`);
+    }
+    if (updates.finalPlaytimeHours !== undefined) {
+      const playtimeLabel = updated.finalPlaytimeHours == null
+        ? "No playtime"
+        : `${updated.finalPlaytimeHours}h`;
+      changedLines.push(`- Final Playtime: **${playtimeLabel}**`);
+    }
+    if (updates.note !== undefined) {
+      const noteLabel = updated.note ? updated.note : "No note";
+      changedLines.push(`- Note: ${noteLabel}`);
+    }
+
+    await interaction.editReply(
+      `Saved: **${updated.title}** updated.\n${changedLines.join("\n")}`,
     );
   }
 
@@ -613,26 +784,6 @@ export class GameCompletionCommands {
   @SelectMenuComponent({ id: /^comp-del-menu:.+$/ })
   async handleCompletionDeleteMenu(interaction: StringSelectMenuInteraction): Promise<void> {
     await handleCompletionDeleteMenu(interaction);
-  }
-
-  @SelectMenuComponent({ id: /^comp-edit-menu:.+$/ })
-  async handleCompletionEditMenuHandler(interaction: StringSelectMenuInteraction): Promise<void> {
-    await handleCompletionEditMenu(interaction);
-  }
-
-  @ButtonComponent({ id: /^comp-edit-done:[^:]+:\d+$/ })
-  async handleCompletionEditDoneHandler(interaction: ButtonInteraction): Promise<void> {
-    await handleCompletionEditDone(interaction);
-  }
-
-  @ButtonComponent({ id: /^comp-edit-field:[^:]+:\d+:(type|date|platform|playtime|note)$/ })
-  async handleCompletionFieldEditHandler(interaction: ButtonInteraction): Promise<void> {
-    await handleCompletionFieldEdit(interaction);
-  }
-
-  @SelectMenuComponent({ id: /^comp-edit-type-select:[^:]+:\d+$/ })
-  async handleCompletionTypeSelectHandler(interaction: StringSelectMenuInteraction): Promise<void> {
-    await handleCompletionTypeSelect(interaction);
   }
 
   @SelectMenuComponent({ id: /^comp-page-select:.+$/ })
