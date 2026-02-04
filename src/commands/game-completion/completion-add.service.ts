@@ -14,6 +14,7 @@ import {
 import axios from "axios";
 import Game from "../../classes/Game.js";
 import Member from "../../classes/Member.js";
+import { saveCompletion } from "../../functions/CompletionHelpers.js";
 import { safeReply } from "../../functions/InteractionUtils.js";
 import { formatDiscordTimestamp, formatPlaytimeHours } from "../profile.command.js";
 import { igdbService } from "../../services/IgdbService.js";
@@ -149,17 +150,34 @@ export async function promptIgdbSelection(
         ctx.completedAt,
         false,
       );
-      await promptCompletionPlatformSelection(sel, {
-        userId: ctx.userId,
-        gameId: imported.gameId,
-        gameTitle: imported.title,
-        completionType: ctx.completionType,
-        completedAt: ctx.completedAt,
-        finalPlaytimeHours: ctx.finalPlaytimeHours,
-        note: ctx.note,
-        announce: ctx.announce,
-        removeFromNowPlaying,
-      });
+      if (ctx.selectedPlatformId != null) {
+        await saveCompletion(
+          sel,
+          ctx.userId,
+          imported.gameId,
+          ctx.selectedPlatformId,
+          ctx.completionType,
+          ctx.completedAt,
+          ctx.finalPlaytimeHours,
+          ctx.note,
+          imported.title,
+          ctx.announce,
+          false,
+          removeFromNowPlaying,
+        );
+      } else {
+        await promptCompletionPlatformSelection(sel, {
+          userId: ctx.userId,
+          gameId: imported.gameId,
+          gameTitle: imported.title,
+          completionType: ctx.completionType,
+          completedAt: ctx.completedAt,
+          finalPlaytimeHours: ctx.finalPlaytimeHours,
+          note: ctx.note,
+          announce: ctx.announce,
+          removeFromNowPlaying,
+        });
+      }
     },
   );
 
@@ -277,17 +295,34 @@ export async function processCompletionSelection(
       ctx.completedAt,
       false,
     );
-    await promptCompletionPlatformSelection(interaction, {
-      userId: ctx.userId,
-      gameId,
-      gameTitle: gameTitle ?? "this game",
-      completionType: ctx.completionType,
-      completedAt: ctx.completedAt,
-      finalPlaytimeHours: ctx.finalPlaytimeHours,
-      note: ctx.note,
-      announce: ctx.announce,
-      removeFromNowPlaying,
-    });
+    if (ctx.selectedPlatformId != null) {
+      await saveCompletion(
+        interaction,
+        ctx.userId,
+        gameId,
+        ctx.selectedPlatformId,
+        ctx.completionType,
+        ctx.completedAt,
+        ctx.finalPlaytimeHours,
+        ctx.note,
+        gameTitle ?? "this game",
+        ctx.announce,
+        false,
+        removeFromNowPlaying,
+      );
+    } else {
+      await promptCompletionPlatformSelection(interaction, {
+        userId: ctx.userId,
+        gameId,
+        gameTitle: gameTitle ?? "this game",
+        completionType: ctx.completionType,
+        completedAt: ctx.completedAt,
+        finalPlaytimeHours: ctx.finalPlaytimeHours,
+        note: ctx.note,
+        announce: ctx.announce,
+        removeFromNowPlaying,
+      });
+    }
     return false;
   } catch (err: any) {
     const msg = err?.message ?? String(err);

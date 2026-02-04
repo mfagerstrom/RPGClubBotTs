@@ -16,6 +16,7 @@ import {
   formatPlaytimeHours,
   parseCompletionDateInput,
 } from "../profile.command.js";
+import { resolveGameCompletionPlatformId } from "./completion-autocomplete.utils.js";
 
 const MAX_NOTE_LENGTH = 500;
 
@@ -121,6 +122,8 @@ export async function handleCompletionFieldEdit(interaction: ButtonInteraction):
   const prompt =
     field === "date"
       ? "Type the new completion date (e.g., 2025-12-11)."
+      : field === "platform"
+        ? "Type the new platform (or `clear` to remove it)."
       : field === "playtime"
         ? "Type the new final playtime in hours (e.g., 42.5)."
         : "Type the new note (or `clear` to remove it).";
@@ -182,6 +185,16 @@ export async function handleCompletionFieldEdit(interaction: ButtonInteraction):
     if (field === "date") {
       const dt = parseCompletionDateInput(value);
       await Member.updateCompletion(ownerId, completionId, { completedAt: dt });
+    } else if (field === "platform") {
+      if (/^clear$/i.test(value)) {
+        await Member.updateCompletion(ownerId, completionId, { platformId: null });
+      } else {
+        const platformId = await resolveGameCompletionPlatformId(value);
+        if (platformId == null) {
+          throw new Error("Platform not found. Use the platform autocomplete in `/game-completion add`.");
+        }
+        await Member.updateCompletion(ownerId, completionId, { platformId });
+      }
     } else if (field === "playtime") {
       const num = Number(value);
       if (Number.isNaN(num) || num < 0)
@@ -311,6 +324,13 @@ function buildCompletionEditPrompt(
       .setLabel("Completion Date")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
+      .setCustomId(`comp-edit-field:${ownerId}:${completionId}:platform`)
+      .setLabel("Platform")
+      .setStyle(ButtonStyle.Secondary),
+  ];
+
+  const secondaryButtons = [
+    new ButtonBuilder()
       .setCustomId(`comp-edit-field:${ownerId}:${completionId}:playtime`)
       .setLabel("Final Playtime")
       .setStyle(ButtonStyle.Secondary),
@@ -327,6 +347,7 @@ function buildCompletionEditPrompt(
   const currentParts = [
     completion.completionType,
     completion.completedAt ? formatDiscordTimestamp(completion.completedAt) : "No date",
+    completion.platformId != null ? `Platform #${completion.platformId}` : "No platform",
     completion.finalPlaytimeHours != null
       ? formatPlaytimeHours(completion.finalPlaytimeHours)
       : null,
@@ -339,6 +360,9 @@ function buildCompletionEditPrompt(
     embeds: [
       new EmbedBuilder().setDescription(`Current: ${currentParts.join(" — ")}${noteLine}`),
     ],
-    components: [new ActionRowBuilder<ButtonBuilder>().addComponents(fieldButtons)],
+    components: [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(fieldButtons),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(secondaryButtons),
+    ],
   };
 }

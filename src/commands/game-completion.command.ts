@@ -23,7 +23,12 @@ import {
 } from "discordx";
 import { safeDeferReply, sanitizeUserInput } from "../functions/InteractionUtils.js";
 import { COMPLETION_TYPES, type CompletionType, parseCompletionDateInput } from "./profile.command.js";
-import { autocompleteGameCompletionTitle } from "./game-completion/completion-autocomplete.utils.js";
+import { saveCompletion } from "../functions/CompletionHelpers.js";
+import {
+  autocompleteGameCompletionTitle,
+  autocompleteGameCompletionPlatform,
+  resolveGameCompletionPlatformId,
+} from "./game-completion/completion-autocomplete.utils.js";
 import { handleCompletionExport } from "./game-completion/completion-export.service.js";
 import {
   handleCompletionPlatformSelect,
@@ -96,6 +101,14 @@ export class GameCompletionCommands {
     })
     completionType: CompletionType,
     @SlashOption({
+      description: "Platform (autocomplete from all GameDB platforms)",
+      name: "platform",
+      required: true,
+      type: ApplicationCommandOptionType.String,
+      autocomplete: autocompleteGameCompletionPlatform,
+    })
+    selectedPlatformRaw: string,
+    @SlashOption({
       description: "Optional note for this completion",
       name: "note",
       required: false,
@@ -157,6 +170,12 @@ export class GameCompletionCommands {
     const playtime = finalPlaytimeHours === undefined ? null : finalPlaytimeHours;
     const userId = interaction.user.id;
     const trimmedNote = note?.trim() ?? null;
+    const selectedPlatformId = await resolveGameCompletionPlatformId(selectedPlatformRaw);
+    if (selectedPlatformId == null) {
+      await interaction.editReply("Invalid platform selection.");
+      return;
+    }
+
     if (trimmedNote && trimmedNote.length > this.maxNoteLength) {
       await interaction.editReply(`Note must be ${this.maxNoteLength} characters or fewer.`);
       return;
@@ -188,17 +207,35 @@ export class GameCompletionCommands {
         completedAt,
         false,
       );
-      await promptCompletionPlatformSelection(interaction, {
-        userId,
-        gameId: exactMatch.id,
-        gameTitle: exactMatch.title,
-        completionType,
-        completedAt,
-        finalPlaytimeHours: playtime,
-        note: trimmedNote,
-        announce,
-        removeFromNowPlaying,
-      });
+
+      if (selectedPlatformId != null) {
+        await saveCompletion(
+          interaction,
+          userId,
+          exactMatch.id,
+          selectedPlatformId,
+          completionType,
+          completedAt,
+          playtime,
+          trimmedNote,
+          exactMatch.title,
+          announce,
+          false,
+          removeFromNowPlaying,
+        );
+      } else {
+        await promptCompletionPlatformSelection(interaction, {
+          userId,
+          gameId: exactMatch.id,
+          gameTitle: exactMatch.title,
+          completionType,
+          completedAt,
+          finalPlaytimeHours: playtime,
+          note: trimmedNote,
+          announce,
+          removeFromNowPlaying,
+        });
+      }
       return;
     }
 
@@ -208,6 +245,7 @@ export class GameCompletionCommands {
       completionType,
       completedAt,
       finalPlaytimeHours: playtime,
+      selectedPlatformId,
       note: trimmedNote,
       source: "existing",
       query: searchTerm,
@@ -447,7 +485,7 @@ export class GameCompletionCommands {
     await handleCompletionEditDone(interaction);
   }
 
-  @ButtonComponent({ id: /^comp-edit-field:[^:]+:\d+:(type|date|playtime|note)$/ })
+  @ButtonComponent({ id: /^comp-edit-field:[^:]+:\d+:(type|date|platform|playtime|note)$/ })
   async handleCompletionFieldEditHandler(interaction: ButtonInteraction): Promise<void> {
     await handleCompletionFieldEdit(interaction);
   }

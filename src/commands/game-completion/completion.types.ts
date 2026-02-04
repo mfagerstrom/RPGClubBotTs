@@ -8,6 +8,7 @@ export type CompletionAddContext = {
   completionType: CompletionType;
   completedAt: Date | null;
   finalPlaytimeHours: number | null;
+  selectedPlatformId?: number | null;
   note: string | null;
   source: "existing" | "igdb";
   query?: string;

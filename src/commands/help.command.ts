@@ -849,9 +849,9 @@ const GAME_COMPLETION_HELP_TOPICS: GameCompletionHelpTopic[] = [
     label: "/game-completion add",
     summary: "Log that you completed a game (removes it from Now Playing if present).",
     syntax:
-      "Syntax: /game-completion add title:<string> completion_type:<choice> [completion_date:<date>] [final_playtime_hours:<number>] [note:<string>] [announce:<boolean>]",
+      "Syntax: /game-completion add title:<string> completion_type:<choice> platform:<string> [completion_date:<date>] [final_playtime_hours:<number>] [note:<string>] [announce:<boolean>]",
     notes:
-      "Completion type choices: Main Story, Main Story + Side Content, Completionist. Completion date defaults to today; playtime is optional (e.g., 42.5). Title autocompletes from GameDB. If no exact match, you can import from IGDB. You will be prompted to select a platform from release data with standard-platform fallback. Set announce:true to post to the completions channel.",
+      "Completion type choices: Main Story, Main Story + Side Content, Completionist. Completion date defaults to today; playtime is optional (e.g., 42.5). Title autocompletes from GameDB. Platform is required and autocompletes from all GameDB platforms. If no exact title match, you can import from IGDB. Set announce:true to post to the completions channel.",
   },
   {
     id: "list",
@@ -868,7 +868,7 @@ const GAME_COMPLETION_HELP_TOPICS: GameCompletionHelpTopic[] = [
     summary: "Edit one of your completion records.",
     syntax: "Syntax: /game-completion edit [title:<string>] [year:<int>]",
     notes:
-      "Interactive menu to pick a completion and field to update. You can filter the selection by title or year.",
+      "Interactive menu to pick a completion and field to update (type/date/platform/playtime/note). You can filter the selection by title or year.",
   },
   {
     id: "delete",

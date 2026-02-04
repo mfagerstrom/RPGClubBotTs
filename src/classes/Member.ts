@@ -1143,6 +1143,7 @@ export default class Member {
     updates: Partial<{
       completionType: string;
       completedAt: Date | null;
+      platformId: number | null;
       finalPlaytimeHours: number | null;
       note: string | null;
     }>,
@@ -1161,6 +1162,13 @@ export default class Member {
     if (updates.completedAt !== undefined) {
       fields.push("COMPLETED_AT = :completedAt");
       binds.completedAt = updates.completedAt;
+    }
+    if (updates.platformId !== undefined) {
+      if (updates.platformId != null && (!Number.isInteger(updates.platformId) || updates.platformId <= 0)) {
+        throw new Error("Invalid platform selection.");
+      }
+      fields.push("PLATFORM_ID = :platformId");
+      binds.platformId = updates.platformId;
     }
     if (updates.finalPlaytimeHours !== undefined) {
       fields.push("FINAL_PLAYTIME_HRS = :playtime");
