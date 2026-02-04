@@ -16,6 +16,8 @@ Discord emoji constraints, and returns an upload-ready attachment.
   - Input: `member` (required), optional `activity`, `icon`, `size`, `showinchat`
   - Flow: extract icon candidate -> fetch bytes -> validate format -> validate square + size ->
     deterministic naming -> dedupe check -> return attachment.
+- Added historical snapshot capture from presence updates so command can use recent activity-feed
+  style data instead of requiring a currently active game.
 - Added shared service: `src/services/ActivityEmojiService.ts`
   - Candidate extraction from activity assets
   - Retrieval with timeout and content-type checks

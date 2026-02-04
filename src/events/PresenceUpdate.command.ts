@@ -13,6 +13,7 @@ import Game from "../classes/Game.js";
 import Member from "../classes/Member.js";
 import PresencePromptOptOut, { normalizePresenceGameTitle } from "../classes/PresencePromptOptOut.js";
 import PresencePromptHistory from "../classes/PresencePromptHistory.js";
+import UserActivityIcon from "../classes/UserActivityIcon.js";
 import { igdbService } from "../services/IgdbService.js";
 import { PRESENCE_PROMPT_CHANNEL_ID } from "../config/channels.js";
 
@@ -98,10 +99,21 @@ export class PresenceUpdate {
     [oldPresence, newPresence]: ArgsOf<"presenceUpdate">,
     client: Client,
   ): Promise<void> {
-    if (!RICH_PRESENCE_PROMPTS_ENABLED) return;
     const member = newPresence?.member;
     const user = member?.user;
     if (!user || user.bot) return;
+
+    if (newPresence?.activities?.length) {
+      void UserActivityIcon.recordFromPresence(
+        user.id,
+        user.username ?? user.globalName ?? "",
+        newPresence.activities,
+      ).catch((err) => {
+        console.error("Failed to record user activity icons:", err);
+      });
+    }
+
+    if (!RICH_PRESENCE_PROMPTS_ENABLED) return;
 
     const newGame = getPresenceGameTitle(newPresence);
     if (!newGame) {

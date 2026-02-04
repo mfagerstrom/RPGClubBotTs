@@ -10,6 +10,20 @@ export type ActivityIconCandidate = {
   url: string;
 };
 
+export function createActivityIconCandidate(input: {
+  activityName: string;
+  iconType: "large" | "small";
+  sourceRef: string;
+  url: string;
+}): ActivityIconCandidate {
+  return {
+    activityName: input.activityName,
+    iconType: input.iconType,
+    sourceRef: input.sourceRef,
+    url: input.url,
+  };
+}
+
 export type ActivityEmojiErrorCode =
   | "activity-not-found"
   | "icon-not-accessible"

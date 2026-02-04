@@ -196,11 +196,11 @@ const HELP_TOPICS: HelpTopic[] = [
     label: "/activity-emoji",
     summary: "Generate a server-ready emoji asset from Rich Presence activity icons.",
     syntax:
-      "Syntax: /activity-emoji member:<user> [activity:<exact name>] " +
-      "[icon:<auto|large|small>] [size:<128|256>] [showinchat:<boolean>]",
+      "Syntax: /activity-emoji [member:<user>] [activity:<exact name>] " +
+      "[icon:<auto|large|small>] [size:<128|256>] [days:<7|30|60>] [showinchat:<boolean>]",
     notes:
-      "Best for game activities that include icon assets. Output is deterministic and includes " +
-      "duplicate detection based on source reference and final file bytes.",
+      "Uses recorded activity-feed icon snapshots across guild history (or one member if provided). " +
+      "Output is deterministic and includes duplicate detection based on source reference and byte hash.",
   },
   {
     id: "mp-info",

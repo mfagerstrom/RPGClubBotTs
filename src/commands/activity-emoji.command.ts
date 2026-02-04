@@ -5,10 +5,13 @@ import {
   MessageFlags,
 } from "discord.js";
 import { Discord, Slash, SlashChoice, SlashOption } from "discordx";
+import UserActivityIcon from "../classes/UserActivityIcon.js";
 import {
+  type ActivityIconCandidate,
   type ActivityIconPreference,
   ActivityEmojiError,
   collectActivityIconCandidates,
+  createActivityIconCandidate,
   getOrCreateActivityEmojiAsset,
 } from "../services/ActivityEmojiService.js";
 import {
@@ -25,6 +28,11 @@ const ICON_CHOICES = [
 const SIZE_CHOICES = [
   { name: "128 x 128", value: 128 },
   { name: "256 x 256", value: 256 },
+] as const;
+const DAYS_CHOICES = [
+  { name: "Last 7 days", value: 7 },
+  { name: "Last 30 days", value: 30 },
+  { name: "Last 60 days", value: 60 },
 ] as const;
 
 function getErrorMessage(err: unknown): string {
@@ -62,6 +70,33 @@ function getPresenceActivities(member: GuildMember): readonly Activity[] {
   return activities.filter((activity) => activity?.assets?.largeImage || activity?.assets?.smallImage);
 }
 
+async function getRecentActivityIconCandidates(
+  userIds: readonly string[],
+  activityName: string | undefined,
+  iconPreference: ActivityIconPreference,
+  days: number,
+): Promise<ActivityIconCandidate[]> {
+  const iconTypes: ("large" | "small")[] = iconPreference === "auto"
+    ? ["large", "small"]
+    : [iconPreference];
+  const rows: Awaited<ReturnType<typeof UserActivityIcon.getRecentForUser>> = [];
+  for (const iconType of iconTypes) {
+    const found = await UserActivityIcon.getRecentForUsers(userIds, {
+      activityName,
+      iconType,
+      days,
+    });
+    rows.push(...found);
+  }
+
+  return rows.map((row) => createActivityIconCandidate({
+    activityName: row.activityName,
+    iconType: row.iconType,
+    sourceRef: row.sourceRef,
+    url: row.iconUrl,
+  }));
+}
+
 @Discord()
 export class ActivityEmojiCommand {
   @Slash({
@@ -71,11 +106,11 @@ export class ActivityEmojiCommand {
   async activityEmoji(
     @SlashOption({
       name: "member",
-      description: "Member whose Rich Presence activity icon should be used",
-      required: true,
+      description: "Optional member filter (omit to scan the whole guild activity history)",
+      required: false,
       type: ApplicationCommandOptionType.User,
     })
-    memberUser: User,
+    memberUser: User | undefined,
     @SlashOption({
       name: "activity",
       description: "Exact activity name (optional when only one icon is available)",
@@ -99,6 +134,14 @@ export class ActivityEmojiCommand {
       type: ApplicationCommandOptionType.Number,
     })
     sizeRaw: number | undefined,
+    @SlashChoice(...DAYS_CHOICES)
+    @SlashOption({
+      name: "days",
+      description: "Look back window for activity feed snapshots",
+      required: false,
+      type: ApplicationCommandOptionType.Number,
+    })
+    daysRaw: number | undefined,
     @SlashOption({
       name: "showinchat",
       description: "If true, send output publicly instead of ephemerally",
@@ -111,32 +154,70 @@ export class ActivityEmojiCommand {
     const ephemeral = !showInChat;
     await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
-    const guildMember = interaction.guild?.members.cache.get(memberUser.id)
-      ?? await interaction.guild?.members.fetch(memberUser.id).catch(() => null);
-    if (!guildMember) {
+    if (!interaction.guild) {
       await safeReply(interaction, {
-        content: "I could not find that member in this server.",
+        content: "This command can only be used in a server.",
         flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
+    }
+    const guild = interaction.guild;
+
+    let guildMember: GuildMember | null = null;
+    if (memberUser) {
+      guildMember = guild.members.cache.get(memberUser.id)
+        ?? await guild.members.fetch(memberUser.id).catch(() => null);
+      if (!guildMember) {
+        await safeReply(interaction, {
+          content: "I could not find that member in this server.",
+          flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+        });
+        return;
+      }
     }
 
     const activityName = sanitizeOptionalInput(activityNameRaw, { preserveNewlines: false });
     const iconPreference = iconPreferenceRaw ?? "auto";
     const targetSize = sizeRaw === 256 ? 256 : 128;
+    const days = daysRaw === 7 || daysRaw === 60 ? daysRaw : 30;
 
-    const activityIcons = collectActivityIconCandidates(getPresenceActivities(guildMember), {
+    let userIds: string[] = [];
+    if (memberUser) {
+      userIds = [memberUser.id];
+    } else {
+      const members = await guild.members.fetch();
+      userIds = members.map((m) => m.user.id);
+    }
+
+    const historyCandidates = await getRecentActivityIconCandidates(
+      userIds,
       activityName,
       iconPreference,
-      targetSize,
+      days,
+    );
+
+    const liveCandidates = guildMember
+      ? collectActivityIconCandidates(getPresenceActivities(guildMember), {
+        activityName,
+        iconPreference,
+        targetSize,
+      })
+      : [];
+    const dedupe = new Set<string>();
+    const activityIcons = [...historyCandidates, ...liveCandidates].filter((item) => {
+      const key = `${item.sourceRef}:${item.iconType}:${item.url}`;
+      if (dedupe.has(key)) return false;
+      dedupe.add(key);
+      return true;
     });
 
     if (!activityIcons.length) {
+      const targetLabel = guildMember?.displayName ?? "this guild";
       const hint = activityName
-        ? `No activity icon found for "${activityName}" on ${guildMember.displayName}.`
-        : `No Rich Presence icon found for ${guildMember.displayName}.`;
+        ? `No activity icon found for "${activityName}" in ${targetLabel}.`
+        : `No Rich Presence icon found in ${targetLabel}.`;
       await safeReply(interaction, {
-        content: `${hint} Make sure they are actively playing a game with Activity Data assets.`,
+        content: `${hint} I can only use icons captured from activity feed snapshots or current activity assets.`,
         flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
