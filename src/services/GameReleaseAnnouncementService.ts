@@ -29,7 +29,7 @@ function buildAnnouncementPreface(candidate: IReleaseAnnouncementCandidate): str
   const releaseUnix = Math.floor(releaseTime.toSeconds());
 
   const lines: string[] = [
-    "🎮 **Upcoming release next week**",
+    "🎮 **Upcoming release!**",
     `Release: <t:${releaseUnix}:F> (<t:${releaseUnix}:R>)`,
   ];
 

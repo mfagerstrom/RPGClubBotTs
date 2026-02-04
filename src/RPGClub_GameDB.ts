@@ -1,6 +1,12 @@
 import "dotenv/config";
 import { dirname, importx } from "@discordx/importer";
-import type { Channel, Interaction, Message, TextBasedChannel } from "discord.js";
+import type {
+  Channel,
+  ChatInputCommandInteraction,
+  Interaction,
+  Message,
+  TextBasedChannel,
+} from "discord.js";
 import { IntentsBitField, Partials } from "discord.js";
 import { Client } from "discordx";
 
@@ -77,6 +83,11 @@ export const bot: Client = new Client({
 });
 
 type ChannelWithName = { id?: string; name?: string };
+type ISlashOptionNode = {
+  name: string;
+  value?: unknown;
+  options?: readonly ISlashOptionNode[];
+};
 
 function getChannelName(channel: Channel | TextBasedChannel | null): string {
   if (!channel) {
@@ -93,6 +104,56 @@ function getChannelName(channel: Channel | TextBasedChannel | null): string {
   }
 
   return "unknown";
+}
+
+function sanitizeSlashValue(value: unknown): string {
+  if (typeof value === "string") {
+    return JSON.stringify(value.length > 120 ? `${value.slice(0, 117)}...` : value);
+  }
+
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+
+  if (value === null || value === undefined) {
+    return "null";
+  }
+
+  try {
+    const serialized = JSON.stringify(value);
+    if (!serialized) return "\"\"";
+    return serialized.length > 200 ? `${serialized.slice(0, 197)}...` : serialized;
+  } catch {
+    return String(value);
+  }
+}
+
+function formatSlashOption(option: ISlashOptionNode): string {
+  if (option.options && option.options.length > 0) {
+    const nested = option.options.map(formatSlashOption).join(", ");
+    return `${option.name}={${nested}}`;
+  }
+
+  if (option.value === undefined) {
+    return option.name;
+  }
+
+  return `${option.name}=${sanitizeSlashValue(option.value)}`;
+}
+
+function getSlashCommandPath(interaction: ChatInputCommandInteraction): string {
+  const commandPath: string[] = [interaction.commandName];
+  const subcommandGroup = interaction.options.getSubcommandGroup(false);
+  const subcommand = interaction.options.getSubcommand(false);
+  if (subcommandGroup) commandPath.push(subcommandGroup);
+  if (subcommand) commandPath.push(subcommand);
+  return commandPath.join(" ");
+}
+
+function getSlashCommandParams(interaction: ChatInputCommandInteraction): string {
+  const options = interaction.options.data as readonly ISlashOptionNode[];
+  if (!options || options.length === 0) return "none";
+  return options.map(formatSlashOption).join("; ");
 }
 
 bot.once("clientReady", async () => {
@@ -134,10 +195,15 @@ bot.once("clientReady", async () => {
 
 bot.on("interactionCreate", async (interaction: Interaction) => {
   if ("isChatInputCommand" in interaction && interaction.isChatInputCommand()) {
+    const commandPath: string = getSlashCommandPath(interaction);
+    const params: string = getSlashCommandParams(interaction);
     const userTag: string = interaction.user?.tag ?? interaction.user?.id ?? "unknown";
     const channel: Channel | null = interaction.channel;
     const channelName: string = getChannelName(channel);
-    console.log(`[SlashCommand] /${interaction.commandName} by ${userTag} in ${channelName}`);
+    console.log(
+      `[SlashCommand] /${commandPath} by ${userTag} in ${channelName} ` +
+      `params: ${params}`,
+    );
     if (interaction.user?.id) {
       void Member.touchLastSeen(interaction.user.id);
     }

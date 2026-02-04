@@ -1,14 +1,25 @@
-import { EmbedBuilder } from "discord.js";
+import { join } from "node:path";
+import { AttachmentBuilder, EmbedBuilder, type MessageCreateOptions, type TextBasedChannel } from "discord.js";
+import type { Client } from "discordx";
 
 import { DISCORD_CONSOLE_LOG_CHANNEL_ID } from "../config/channels.js";
 const MAX_DESCRIPTION_LENGTH = 3900;
-const LEVEL_COLORS: Record<ConsoleLevel, number> = {
+const LEVEL_COLORS: Record<string, number> = {
   log: 0x95a5a6,
   info: 0x3498db,
   warn: 0xf39c12,
   error: 0xe74c3c,
   debug: 0x9b59b6,
 };
+const LOG_BATCH_INTERVAL_MS = 15 * 1000;
+const FORCE_WIDTH_IMAGE_NAME = "force-message-width.png";
+const FORCE_WIDTH_IMAGE_PATH = join(
+  process.cwd(),
+  "src",
+  "assets",
+  "images",
+  FORCE_WIDTH_IMAGE_NAME,
+);
 
 type ConsoleLevel = "log" | "error" | "warn" | "info" | "debug";
 
@@ -17,12 +28,16 @@ const originalConsole = {
   error: console.error.bind(console),
   warn: console.warn.bind(console),
   info: console.info.bind(console),
-  debug: (console as any).debug ? (console as any).debug.bind(console) : console.log.bind(console),
+  debug: console.debug.bind(console),
 };
 
-let discordClient: any | null = null;
-let logChannel: any | null = null;
+type ILoggerChannel = TextBasedChannel & { send: (options: MessageCreateOptions) => Promise<unknown> };
+
+let discordClient: Client | null = null;
+let logChannel: ILoggerChannel | null = null;
 let resolvingChannel = false;
+let logBuffer: { time: number; message: string }[] = [];
+let logBufferTimer: NodeJS.Timeout | null = null;
 
 function formatArgs(args: unknown[]): string {
   return args
@@ -38,7 +53,7 @@ function formatArgs(args: unknown[]): string {
     .join(" ");
 }
 
-async function ensureChannel(): Promise<any | null> {
+async function ensureChannel(): Promise<ILoggerChannel | null> {
   if (!discordClient) return null;
   if (logChannel) return logChannel;
   if (resolvingChannel) return logChannel;
@@ -46,8 +61,9 @@ async function ensureChannel(): Promise<any | null> {
   resolvingChannel = true;
   try {
     const channel = await discordClient.channels.fetch(DISCORD_CONSOLE_LOG_CHANNEL_ID).catch(() => null);
-    if (channel && typeof (channel as any).send === "function") {
-      logChannel = channel;
+    const sendable = channel as { send?: unknown } | null;
+    if (channel && channel.isTextBased() && typeof sendable?.send === "function") {
+      logChannel = channel as ILoggerChannel;
     }
   } finally {
     resolvingChannel = false;
@@ -56,8 +72,82 @@ async function ensureChannel(): Promise<any | null> {
   return logChannel;
 }
 
+function buildConsoleMessageOptions(embed: EmbedBuilder): MessageCreateOptions {
+  embed.setImage(`attachment://${FORCE_WIDTH_IMAGE_NAME}`);
+  return {
+    embeds: [embed],
+    files: [new AttachmentBuilder(FORCE_WIDTH_IMAGE_PATH, { name: FORCE_WIDTH_IMAGE_NAME })],
+  };
+}
+
+async function sendEmbedToChannel(channel: ILoggerChannel, embed: EmbedBuilder): Promise<void> {
+  const options = buildConsoleMessageOptions(embed);
+  try {
+    await channel.send(options);
+  } catch {
+    // If image attachment fails, still send the log message.
+    await channel.send({ embeds: [embed] });
+  }
+}
+
+async function flushLogBuffer(): Promise<void> {
+  if (logBuffer.length === 0) return;
+
+  const logsToSend = [...logBuffer].sort((a, b) => a.time - b.time);
+  logBuffer = [];
+
+  const channel = await ensureChannel();
+  if (!channel) {
+    return;
+  }
+
+  try {
+    let currentDescription = "";
+    const embeds: EmbedBuilder[] = [];
+
+    for (const item of logsToSend) {
+      const line = item.message;
+      const nextLine = `${line}\n`;
+      if (currentDescription.length + nextLine.length > MAX_DESCRIPTION_LENGTH - 8) {
+        embeds.push(
+          new EmbedBuilder()
+            .setDescription(`\`\`\`\n${currentDescription}\`\`\``)
+            .setColor(LEVEL_COLORS.log)
+            .setTimestamp(new Date()),
+        );
+        currentDescription = "";
+      }
+
+      currentDescription += nextLine;
+    }
+
+    if (currentDescription.length > 0) {
+      embeds.push(
+        new EmbedBuilder()
+          .setDescription(`\`\`\`\n${currentDescription}\`\`\``)
+          .setColor(LEVEL_COLORS.log)
+          .setTimestamp(new Date()),
+      );
+    }
+
+    for (const embed of embeds) {
+      await sendEmbedToChannel(channel, embed);
+    }
+  } catch {
+    // Swallow to avoid recursive console logging on failures
+  }
+}
+
 async function sendToDiscord(level: ConsoleLevel, message: string): Promise<void> {
   try {
+    if (level === "log") {
+      logBuffer.push({ message, time: Date.now() });
+      if (!logBufferTimer) {
+        logBufferTimer = setInterval(() => void flushLogBuffer(), LOG_BATCH_INTERVAL_MS);
+      }
+      return;
+    }
+
     // Filter out noisy Discord client acknowledgement errors
     if (
       level === "error" &&
@@ -72,14 +162,16 @@ async function sendToDiscord(level: ConsoleLevel, message: string): Promise<void
 
     const prefix = `[${level.toUpperCase()}] `;
     const text = prefix + message;
-    const trimmed =
-      text.length > MAX_DESCRIPTION_LENGTH ? text.slice(0, MAX_DESCRIPTION_LENGTH - 3) + "..." : text;
+    const shouldWrapInCodeBlock = level === "error" || level === "warn";
+    const maxTextLength = shouldWrapInCodeBlock ? MAX_DESCRIPTION_LENGTH - 8 : MAX_DESCRIPTION_LENGTH;
+    const trimmed = text.length > maxTextLength ? text.slice(0, maxTextLength - 3) + "..." : text;
+    const description = shouldWrapInCodeBlock ? `\`\`\`\n${trimmed}\n\`\`\`` : trimmed;
     const embed = new EmbedBuilder()
-      .setDescription(trimmed)
+      .setDescription(description)
       .setColor(LEVEL_COLORS[level] ?? LEVEL_COLORS.log)
       .setTimestamp(new Date());
 
-    await (channel as any).send({ embeds: [embed] });
+    await sendEmbedToChannel(channel, embed);
   } catch {
     // Swallow to avoid recursive console logging on failures
   }
@@ -89,15 +181,15 @@ export function installConsoleLogging(): void {
   const levels: ConsoleLevel[] = ["log", "error", "warn", "info", "debug"];
 
   for (const level of levels) {
-    (console as any)[level] = (...args: unknown[]) => {
+    console[level] = (...args: unknown[]) => {
       const msg = formatArgs(args);
-      (originalConsole as any)[level](...args);
+      originalConsole[level](...args);
       void sendToDiscord(level, msg);
     };
   }
 }
 
-export function setConsoleLoggingClient(client: any): void {
+export function setConsoleLoggingClient(client: Client): void {
   discordClient = client;
 }
 

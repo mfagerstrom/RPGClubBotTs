@@ -25,6 +25,7 @@ type HelpTopicId =
   | "round"
   | "nextvote"
   | "hltb"
+  | "activity-emoji"
   | "now-playing"
   | "remindme"
   | "rss"
@@ -191,6 +192,17 @@ const HELP_TOPICS: HelpTopic[] = [
     notes: "Title autocompletes from GameDB and includes the release year.",
   },
   {
+    id: "activity-emoji",
+    label: "/activity-emoji",
+    summary: "Generate a server-ready emoji asset from Rich Presence activity icons.",
+    syntax:
+      "Syntax: /activity-emoji member:<user> [activity:<exact name>] " +
+      "[icon:<auto|large|small>] [size:<128|256>] [showinchat:<boolean>]",
+    notes:
+      "Best for game activities that include icon assets. Output is deterministic and includes " +
+      "duplicate detection based on source reference and final file bytes.",
+  },
+  {
     id: "mp-info",
     label: "/mp-info",
     summary:
@@ -350,7 +362,14 @@ const HELP_CATEGORIES: { id: string; name: string; topicIds: HelpTopicId[] }[] =
   {
     id: "utilities",
     name: "Utilities",
-    topicIds: ["hltb", "remindme", "suggestion", "giveaway", "avatar-history"],
+    topicIds: [
+      "hltb",
+      "activity-emoji",
+      "remindme",
+      "suggestion",
+      "giveaway",
+      "avatar-history",
+    ],
   },
   {
     id: "server-admin",
