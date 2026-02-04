@@ -47,6 +47,24 @@ Game metadata ingested from IGDB and stored for bot lookups. Schema created by
 | RELEASE_DATE | DATE | Yes | Release date for region/platform. |
 | NOTES | VARCHAR2(255) | Yes | Free-form notes. |
 
+## GAMEDB_RELEASE_ANNOUNCEMENTS
+
+- Primary/unique constraints: `RELEASE_ID` primary key and FK to `GAMEDB_RELEASES`.
+- Indexes/triggers: `IDX_GAMEDB_RELEASE_ANNOUNCE_PENDING` on
+  `(SENT_AT, SKIPPED_AT, ANNOUNCE_AT)`; `TRG_GAMEDB_RELEASE_ANNOUNCEMENTS_UPD`
+  refreshes `UPDATED_AT` on update.
+- Purpose: tracks one scheduled pre-release announcement per release event.
+
+| Column | Type | Nullable | Notes |
+| --- | --- | --- | --- |
+| RELEASE_ID | NUMBER | No | Release event id from `GAMEDB_RELEASES`. |
+| ANNOUNCE_AT | DATE | No | Scheduled send timestamp (`RELEASE_DATE - 7 days`). |
+| SENT_AT | TIMESTAMP | Yes | Set when the announcement is successfully posted. |
+| SKIPPED_AT | TIMESTAMP | Yes | Set when the release window has already passed. |
+| SKIP_REASON | VARCHAR2(80) | Yes | Deterministic skip reason code. |
+| CREATED_AT | TIMESTAMP | No | Defaults to `CURRENT_TIMESTAMP`. |
+| UPDATED_AT | TIMESTAMP | No | Auto-updated via trigger. |
+
 ## GAMEDB_GAME_PLATFORMS
 
 - Primary/unique constraints: composite primary key on `(GAME_ID, PLATFORM_ID)`.

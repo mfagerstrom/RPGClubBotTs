@@ -40,6 +40,14 @@ const DISALLOWED_TOP_LEVEL_COMPONENT_BUILDERS = new Set([
   "ThumbnailBuilder",
   "SeparatorBuilder",
 ]);
+const COMPONENTS_V2_ROOT_BUILDERS = new Set([
+  "ContainerBuilder",
+  ...DISALLOWED_TOP_LEVEL_COMPONENT_BUILDERS,
+]);
+const COMPONENTS_V2_PAYLOAD_FACTORY_NAMES = new Set([
+  "buildGameProfileMessagePayload",
+]);
+const MESSAGE_SEND_METHODS = new Set(["send"]);
 
 function isRelativeImportPath(value) {
   return typeof value === "string" && value.startsWith(".");
@@ -359,6 +367,21 @@ function getCalleePropertyName(node) {
     return node.property.name;
   }
   return null;
+}
+
+function getCalledFunctionName(node) {
+  if (!node) return null;
+  if (node.type === "Identifier") return node.name;
+  if (node.type === "MemberExpression" && node.property.type === "Identifier") {
+    return node.property.name;
+  }
+  return null;
+}
+
+function unwrapAwaitExpression(node) {
+  if (!node) return null;
+  if (node.type === "AwaitExpression") return node.argument;
+  return node;
 }
 
 export default {
@@ -962,6 +985,161 @@ export default {
               const arg = node.arguments[0];
               checkObject(arg);
             }
+          },
+        };
+      },
+    },
+    "require-components-v2-flag-with-v2-components": {
+      meta: {
+        type: "problem",
+        docs: {
+          description:
+            "Require Components v2 flags when sending payloads containing Components v2 builders.",
+        },
+        schema: [],
+        messages: {
+          missingFlag:
+            "Payloads with Components v2 builders must include Components v2 flags.",
+        },
+      },
+      create(context) {
+        const v2PayloadVariables = new Set();
+
+        const isComponentsV2Flag = (node) => {
+          if (!node) return false;
+          if (node.type === "Identifier" && node.name === "COMPONENTS_V2_FLAG") {
+            return true;
+          }
+          if (
+            node.type === "MemberExpression" &&
+            node.property.type === "Identifier" &&
+            node.property.name === "IS_COMPONENTS_V2"
+          ) {
+            return true;
+          }
+          return false;
+        };
+
+        const expressionIncludesComponentsV2 = (node) => {
+          if (!node) return false;
+          const nodes = [node];
+          while (nodes.length) {
+            const current = nodes.pop();
+            if (!current) continue;
+            if (isComponentsV2Flag(current)) return true;
+            if (
+              current.type === "CallExpression" &&
+              current.callee.type === "Identifier" &&
+              current.callee.name === "buildComponentsV2Flags"
+            ) {
+              return true;
+            }
+            for (const key of Object.keys(current)) {
+              const value = current[key];
+              if (!value) continue;
+              if (Array.isArray(value)) {
+                for (const item of value) {
+                  if (item && typeof item.type === "string") nodes.push(item);
+                }
+              } else if (value && typeof value.type === "string") {
+                nodes.push(value);
+              }
+            }
+          }
+          return false;
+        };
+
+        const expressionContainsV2Builders = (node) => {
+          if (!node) return false;
+          const nodes = [node];
+          while (nodes.length) {
+            const current = nodes.pop();
+            if (!current) continue;
+
+            if (current.type === "NewExpression" && current.callee.type === "Identifier") {
+              if (COMPONENTS_V2_ROOT_BUILDERS.has(current.callee.name)) {
+                return true;
+              }
+            }
+
+            if (current.type === "Identifier" && v2PayloadVariables.has(current.name)) {
+              return true;
+            }
+
+            if (
+              current.type === "MemberExpression" &&
+              current.object.type === "Identifier" &&
+              v2PayloadVariables.has(current.object.name)
+            ) {
+              return true;
+            }
+
+            for (const key of Object.keys(current)) {
+              const value = current[key];
+              if (!value) continue;
+              if (Array.isArray(value)) {
+                for (const item of value) {
+                  if (item && typeof item.type === "string") nodes.push(item);
+                }
+              } else if (value && typeof value.type === "string") {
+                nodes.push(value);
+              }
+            }
+          }
+          return false;
+        };
+
+        const markV2PayloadVariable = (node) => {
+          if (!node || node.type !== "VariableDeclarator" || node.id.type !== "Identifier") {
+            return;
+          }
+
+          const init = unwrapAwaitExpression(node.init);
+          if (!init) return;
+
+          if (init.type === "ObjectExpression") {
+            const componentsValue = getObjectPropertyValue(init, "components");
+            if (expressionContainsV2Builders(componentsValue)) {
+              v2PayloadVariables.add(node.id.name);
+            }
+            return;
+          }
+
+          if (init.type !== "CallExpression") return;
+          const calleeName = getCalledFunctionName(init.callee);
+          if (!calleeName) return;
+          if (COMPONENTS_V2_PAYLOAD_FACTORY_NAMES.has(calleeName)) {
+            v2PayloadVariables.add(node.id.name);
+          }
+        };
+
+        const checkSendPayload = (callNode, payloadNode) => {
+          if (!payloadNode || payloadNode.type !== "ObjectExpression") return;
+          const componentsValue = getObjectPropertyValue(payloadNode, "components");
+          if (!componentsValue) return;
+          if (!expressionContainsV2Builders(componentsValue)) return;
+          const flagsValue = getObjectPropertyValue(payloadNode, "flags");
+          if (flagsValue && expressionIncludesComponentsV2(flagsValue)) return;
+          context.report({ node: callNode, messageId: "missingFlag" });
+        };
+
+        return {
+          VariableDeclarator(node) {
+            markV2PayloadVariable(node);
+          },
+          CallExpression(node) {
+            const callee = node.callee;
+            if (callee.type === "Identifier" && INTERACTION_RESPONSE_HELPERS.has(callee.name)) {
+              checkSendPayload(node, node.arguments[0]);
+              return;
+            }
+            if (callee.type !== "MemberExpression") return;
+            const methodName = getCalleePropertyName(callee);
+            if (!methodName) return;
+            if (!INTERACTION_RESPONSE_METHODS.has(methodName) && !MESSAGE_SEND_METHODS.has(methodName)) {
+              return;
+            }
+            checkSendPayload(node, node.arguments[0]);
           },
         };
       },

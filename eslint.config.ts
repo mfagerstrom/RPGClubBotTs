@@ -89,6 +89,7 @@ export default [
       "local/stable-custom-id": "error",
       "local/components-v2-structure": "error",
       "local/no-components-v2-with-content": "error",
+      "local/require-components-v2-flag-with-v2-components": "error",
       "local/custom-id-has-matching-handler": "error",
     },
   },

@@ -134,6 +134,10 @@ type GameDbCsvParsedRow = {
   initialReleaseDate: Date | null;
 };
 
+type GameProfileRenderContext = {
+  guildId?: string;
+};
+
 function decodeSearchQuery(encoded: string): string {
   if (!encoded) return "";
   try {
@@ -2018,9 +2022,61 @@ export class GameDb {
     });
   }
 
+  public async buildGameProfileMessagePayload(
+    gameId: number,
+    options?: {
+      includeActions?: boolean;
+      guildId?: string;
+      prefaceText?: string;
+    },
+  ): Promise<{
+    components: Array<ContainerBuilder | ActionRowBuilder<ButtonBuilder>>;
+    files: AttachmentBuilder[];
+  } | null> {
+    const profile = await this.buildGameProfile(gameId, {
+      guildId: options?.guildId,
+    });
+    if (!profile) {
+      return null;
+    }
+
+    const includeActions = options?.includeActions ?? true;
+    const components = [...profile.components];
+    if (includeActions) {
+      components.push(
+        ...this.buildGameProfileActionRow(
+          gameId,
+          profile.hasThread,
+          profile.featuredVideoUrl,
+          profile.canMarkThumbnailBad,
+          profile.isThumbnailBad,
+          profile.isThumbnailApproved,
+        ),
+      );
+    }
+
+    const preface = options?.prefaceText?.trim();
+    if (preface) {
+      const prefaceContainer = new ContainerBuilder().addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(this.trimTextDisplayContent(preface)),
+      );
+      components.unshift(prefaceContainer);
+    }
+
+    return {
+      components,
+      files: profile.files,
+    };
+  }
+
   private async buildGameProfile(
     gameId: number,
-    interaction?: CommandInteraction | StringSelectMenuInteraction | ButtonInteraction | ModalSubmitInteraction,
+    interaction?:
+      | CommandInteraction
+      | StringSelectMenuInteraction
+      | ButtonInteraction
+      | ModalSubmitInteraction
+      | GameProfileRenderContext,
   ): Promise<{
     components: Array<ContainerBuilder | ActionRowBuilder<ButtonBuilder>>;
     files: AttachmentBuilder[];
