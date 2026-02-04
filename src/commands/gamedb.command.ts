@@ -2454,13 +2454,21 @@ export class GameDb {
       .setCustomId(`gamedb-action:nowplaying:${gameId}`)
       .setLabel("Add to Now Playing List")
       .setStyle(ButtonStyle.Primary);
+    const addCollection = new ButtonBuilder()
+      .setCustomId(`gamedb-action:collection:${gameId}`)
+      .setLabel("Add to Collection")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(true);
     const viewFeaturedVideo = new ButtonBuilder()
       .setCustomId(`gamedb-action:video:${gameId}`)
       .setLabel("View Featured Video")
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(disableVideo);
     const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-    const primaryRow = new ActionRowBuilder<ButtonBuilder>().addComponents(addNowPlaying);
+    const primaryRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      addNowPlaying,
+      addCollection,
+    );
     if (isReleased) {
       const addCompletion = new ButtonBuilder()
         .setCustomId(`gamedb-action:completion:${gameId}`)
@@ -2546,7 +2554,7 @@ export class GameDb {
     }).catch(() => {});
   }
 
-  @ButtonComponent({ id: /^gamedb-action:(nowplaying|completion|thread|video|hltb-import|bad-thumb|good-thumb):\d+$/ })
+  @ButtonComponent({ id: /^gamedb-action:(nowplaying|collection|completion|thread|video|hltb-import|bad-thumb|good-thumb):\d+$/ })
   async handleGameDbAction(interaction: ButtonInteraction): Promise<void> {
     const [, action, gameIdRaw] = interaction.customId.split(":");
     const gameId = Number(gameIdRaw);
@@ -2714,6 +2722,15 @@ export class GameDb {
         }
       }
       await this.refreshGameProfileMessage(interaction, gameId);
+      return;
+    }
+
+    if (action === "collection") {
+      await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+      await interaction.editReply(
+        "Add to Collection from /gamedb is temporarily disabled while we improve the flow. " +
+        "Use `/collection add` for now.",
+      ).catch(() => {});
       return;
     }
 

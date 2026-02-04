@@ -103,6 +103,12 @@ export interface ICompletedMember {
   finalPlaytimeHours: number | null;
 }
 
+export interface ICollectionOwnerMember {
+  userId: string;
+  username: string | null;
+  globalName: string | null;
+}
+
 const IGDB_REGION_MAP: Record<number, { code: string; name: string }> = {
   1: { code: "EU", name: "Europe" },
   2: { code: "NA", name: "North America" },
@@ -2320,6 +2326,40 @@ export default class Game {
               : null,
         finalPlaytimeHours:
           row.FINAL_PLAYTIME_HRS == null ? null : Number(row.FINAL_PLAYTIME_HRS),
+      }));
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async getGameCollectionOwners(gameId: number): Promise<ICollectionOwnerMember[]> {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+
+    try {
+      const res = await connection.execute<{
+        USER_ID: string;
+        USERNAME: string | null;
+        GLOBAL_NAME: string | null;
+      }>(
+        `
+        SELECT c.USER_ID,
+               u.USERNAME,
+               u.GLOBAL_NAME
+          FROM USER_GAME_COLLECTIONS c
+          LEFT JOIN RPG_CLUB_USERS u ON u.USER_ID = c.USER_ID
+         WHERE c.GAMEDB_GAME_ID = :gameId
+         GROUP BY c.USER_ID, u.USERNAME, u.GLOBAL_NAME
+         ORDER BY LOWER(NVL(u.GLOBAL_NAME, u.USERNAME, c.USER_ID))
+        `,
+        { gameId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      return (res.rows ?? []).map((row) => ({
+        userId: String(row.USER_ID),
+        username: row.USERNAME ?? null,
+        globalName: row.GLOBAL_NAME ?? null,
       }));
     } finally {
       await connection.close();

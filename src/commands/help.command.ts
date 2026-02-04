@@ -32,6 +32,7 @@ type HelpTopicId =
   | "mp-info"
   | "profile"
   | "game-completion"
+  | "collection"
   | "gamedb"
   | "avatar-history"
   | "publicreminder"
@@ -229,6 +230,21 @@ const HELP_TOPICS: HelpTopic[] = [
       "Use /game-completion help for subcommands: add, list, common, edit, delete, export, completionator-import.",
   },
   {
+    id: "collection",
+    label: "/collection",
+    summary:
+      "Track your owned games with platform and ownership metadata (public by default).",
+    syntax:
+      "Syntax: /collection add title:<game> platform:<platform> ownership_type:<type> " +
+      "[note:<string>] | /collection list [member:<user>] [filters...] | " +
+      "/collection edit entry:<selection> [fields...] | /collection remove entry:<selection> | " +
+      "/collection to-now-playing entry:<selection> [note_override:<string>] | " +
+      "/collection to-completion entry:<selection> completion_type:<type> [fields...]",
+    notes:
+      "Duplicate policy: same game on multiple platforms is supported. Exact duplicates " +
+      "(same game, platform, ownership type) are blocked.",
+  },
+  {
     id: "remindme",
     label: "/remindme",
     summary: "Set personal reminders with snooze buttons (delivered by DM).",
@@ -252,7 +268,8 @@ const HELP_TOPICS: HelpTopic[] = [
       "synonym-list, csv-import, help.",
     notes:
       "Imports pull titles/covers from IGDB. View shows GOTM/NR-GOTM wins, " +
-      "nominations, and related threads for the GameDB id. Audit is admin only.",
+      "nominations, and related threads for the GameDB id. Game view also includes " +
+      "a quick Add to Collection button. Audit is admin only.",
   },
   {
     id: "avatar-history",
@@ -357,7 +374,7 @@ const HELP_CATEGORIES: { id: string; name: string; topicIds: HelpTopicId[] }[] =
   {
     id: "gamedb",
     name: "GameDB",
-    topicIds: ["gamedb", "now-playing", "game-completion"],
+    topicIds: ["gamedb", "collection", "now-playing", "game-completion"],
   },
   {
     id: "utilities",
@@ -1095,6 +1112,7 @@ export function buildMainHelpResponse(): {
         `${formatCommandLine("mp-info", "Find who has shared multiplayer info.")}\n\n` +
         "**GameDB**\n" +
         `${formatCommandLine("gamedb", "Search for games and view their details.")}\n` +
+        `${formatCommandLine("collection", "Track owned games by platform and ownership.")}\n` +
         `${formatCommandLine("now-playing", "Show Now Playing lists and thread links.")}\n` +
         `${formatCommandLine("game-completion", "Log and manage your completed games.")}\n\n` +
         "**Utilities**\n" +
