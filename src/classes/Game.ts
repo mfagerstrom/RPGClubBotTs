@@ -136,6 +136,11 @@ const autocompleteSearchCache = new Map<
 >();
 const pendingAutocompleteSearches = new Map<string, Promise<IGameAutocompleteResult[]>>();
 
+function clearAutocompleteSearchCaches(): void {
+  autocompleteSearchCache.clear();
+  pendingAutocompleteSearches.clear();
+}
+
 // Helper functions for mapping rows
 function mapGameRow(row: any): IGame {
   return {
@@ -276,6 +281,7 @@ export default class Game {
       if (!newGame) {
           throw new Error("Failed to fetch newly created game.");
       }
+      clearAutocompleteSearchCaches();
       return newGame;
 
     } finally {
@@ -534,6 +540,7 @@ export default class Game {
   ): Promise<{ gameId: number; title: string }> {
     const existing = await Game.getGameByIgdbId(igdbId);
     if (existing) {
+      clearAutocompleteSearchCaches();
       return { gameId: existing.id, title: existing.title };
     }
 
@@ -593,6 +600,7 @@ export default class Game {
       throw err;
     }
     await Game.saveFullGameMetadata(newGame.id, details);
+    clearAutocompleteSearchCaches();
     return { gameId: newGame.id, title: details.name };
   }
 
@@ -2350,7 +2358,7 @@ export default class Game {
           LEFT JOIN RPG_CLUB_USERS u ON u.USER_ID = c.USER_ID
          WHERE c.GAMEDB_GAME_ID = :gameId
          GROUP BY c.USER_ID, u.USERNAME, u.GLOBAL_NAME
-         ORDER BY LOWER(NVL(u.GLOBAL_NAME, u.USERNAME, c.USER_ID))
+         ORDER BY LOWER(COALESCE(u.GLOBAL_NAME, u.USERNAME, c.USER_ID))
         `,
         { gameId },
         { outFormat: oracledb.OUT_FORMAT_OBJECT },

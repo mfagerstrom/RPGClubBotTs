@@ -2075,6 +2075,7 @@ export class GameDb {
       const regions = await Game.getAllRegions();
       const associations = await Game.getGameAssociations(gameId);
       const nowPlayingMembers = await Game.getNowPlayingMembers(gameId);
+      const collectionOwners = await Game.getGameCollectionOwners(gameId);
       const completions = await Game.getGameCompletions(gameId);
       const alternateVersions = await Game.getAlternateVersions(gameId);
       const linkedThreads = await getThreadsByGameId(gameId);
@@ -2171,6 +2172,21 @@ export class GameDb {
         }
 
         pushRpgClubSection("Now Playing", lines.join(", "));
+      }
+
+      if (collectionOwners.length) {
+        const MAX_OWNERS_DISPLAY = 12;
+        const lines = collectionOwners.slice(0, MAX_OWNERS_DISPLAY).map((member) => {
+          const name = member.globalName ?? member.username ?? member.userId;
+          return name;
+        });
+
+        if (collectionOwners.length > MAX_OWNERS_DISPLAY) {
+          const remaining = collectionOwners.length - MAX_OWNERS_DISPLAY;
+          lines.push(`…and ${remaining} more own this.`);
+        }
+
+        pushRpgClubSection("Owned By", lines.join(", "));
       }
 
       if (completions.length) {

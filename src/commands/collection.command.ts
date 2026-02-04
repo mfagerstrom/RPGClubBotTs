@@ -14,7 +14,7 @@ import UserGameCollection, {
 import Game from "../classes/Game.js";
 import Member from "../classes/Member.js";
 import {
-  autocompleteGameCompletionPlatform,
+  autocompleteGameCompletionPlatformStandardFirst,
   resolveGameCompletionPlatformId,
 } from "./game-completion/completion-autocomplete.utils.js";
 import {
@@ -29,9 +29,72 @@ import {
 } from "./profile.command.js";
 import { saveCompletion } from "../functions/CompletionHelpers.js";
 import { formatGameTitleWithYear } from "../functions/GameTitleAutocompleteUtils.js";
+import { igdbService, type IGDBGame } from "../services/IgdbService.js";
+import {
+  createIgdbSession,
+  type IgdbSelectOption,
+} from "../services/IgdbSelectService.js";
 
 const COLLECTION_ENTRY_VALUE_PREFIX = "collection";
 const COLLECTION_LIST_LIMIT = 50;
+
+type ResolvedCollectionGame =
+  | { kind: "resolved"; gameId: number; title: string }
+  | { kind: "choose"; titleQuery: string; options: IgdbSelectOption[] };
+
+function buildCollectionIgdbSelectOptions(results: IGDBGame[]): IgdbSelectOption[] {
+  return results.slice(0, 50).map((game) => {
+    const year = game.first_release_date
+      ? new Date(game.first_release_date * 1000).getFullYear()
+      : "TBD";
+    const summary = (game.summary ?? "No summary").replace(/\s+/g, " ").trim();
+    return {
+      id: game.id,
+      label: `${game.name} (${year})`.slice(0, 100),
+      description: summary.slice(0, 95),
+    };
+  });
+}
+
+async function resolveCollectionGameForAdd(
+  gameIdRaw: string,
+): Promise<ResolvedCollectionGame> {
+  const numericValue = Number(gameIdRaw);
+  if (Number.isInteger(numericValue) && numericValue > 0) {
+    const localGame = await Game.getGameById(numericValue);
+    if (localGame) {
+      return { kind: "resolved", gameId: localGame.id, title: localGame.title };
+    }
+
+    // Allow direct IGDB numeric ids when the title is not yet in GameDB.
+    const importedById = await Game.importGameFromIgdb(numericValue);
+    return { kind: "resolved", gameId: importedById.gameId, title: importedById.title };
+  }
+
+  const titleQuery = sanitizeUserInput(gameIdRaw, { preserveNewlines: false }).trim();
+  if (!titleQuery) {
+    throw new Error("Invalid game selection.");
+  }
+
+  const localResults = await Game.searchGames(titleQuery);
+  const exactLocal = localResults.find(
+    (game) => game.title.toLowerCase() === titleQuery.toLowerCase(),
+  );
+  if (exactLocal) {
+    return { kind: "resolved", gameId: exactLocal.id, title: exactLocal.title };
+  }
+
+  const igdbSearch = await igdbService.searchGames(titleQuery, 10);
+  if (!igdbSearch.results.length) {
+    throw new Error("Could not find that title in GameDB or IGDB.");
+  }
+
+  return {
+    kind: "choose",
+    titleQuery,
+    options: buildCollectionIgdbSelectOptions(igdbSearch.results),
+  };
+}
 
 function parseCollectionEntryAutocompleteValue(raw: string): number | null {
   const value = raw.trim();
@@ -131,7 +194,7 @@ export class CollectionCommand {
       description: "Owned platform",
       type: ApplicationCommandOptionType.String,
       required: true,
-      autocomplete: autocompleteGameCompletionPlatform,
+      autocomplete: autocompleteGameCompletionPlatformStandardFirst,
     })
     platformRaw: string,
     @SlashChoice(
@@ -158,18 +221,6 @@ export class CollectionCommand {
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
-    const gameId = Number(gameIdRaw);
-    if (!Number.isInteger(gameId) || gameId <= 0) {
-      await interaction.editReply("Invalid game selection.");
-      return;
-    }
-
-    const game = await Game.getGameById(gameId);
-    if (!game) {
-      await interaction.editReply("That game is not in GameDB.");
-      return;
-    }
-
     const platformId = await resolveGameCompletionPlatformId(platformRaw);
     if (!platformId) {
       await interaction.editReply("Invalid platform selection.");
@@ -180,10 +231,61 @@ export class CollectionCommand {
       ? sanitizeUserInput(note, { preserveNewlines: true, maxLength: 500 })
       : null;
 
+    let resolution: ResolvedCollectionGame;
+    try {
+      resolution = await resolveCollectionGameForAdd(gameIdRaw);
+    } catch (err: any) {
+      await interaction.editReply(err?.message ?? "Invalid game selection.");
+      return;
+    }
+
+    if (resolution.kind === "choose") {
+      const { components } = createIgdbSession(
+        interaction.user.id,
+        resolution.options,
+        async (selectionInteraction, igdbId) => {
+          await selectionInteraction.deferUpdate().catch(() => {});
+          try {
+            const imported = await Game.importGameFromIgdb(igdbId);
+            const created = await UserGameCollection.addEntry({
+              userId: interaction.user.id,
+              gameId: imported.gameId,
+              platformId,
+              ownershipType,
+              note: sanitizedNote,
+            });
+
+            const platformLabel = created.platformName ?? `Platform #${platformId}`;
+            await selectionInteraction.followUp({
+              content:
+                `Imported and added **${created.title}** (${platformLabel}, ` +
+                `${created.ownershipType}) to your collection.`,
+              flags: MessageFlags.Ephemeral,
+            }).catch(() => {});
+          } catch (err: any) {
+            await selectionInteraction.followUp({
+              content: err?.message ?? "Failed to import from IGDB and add collection entry.",
+              flags: MessageFlags.Ephemeral,
+            }).catch(() => {});
+          }
+        },
+      );
+
+      await interaction.editReply({
+        content:
+          `No exact GameDB match found for "${resolution.titleQuery}". ` +
+          "Select the correct IGDB game to import:",
+        components,
+      });
+      return;
+    }
+
+    const resolvedGame = resolution;
+
     try {
       const created = await UserGameCollection.addEntry({
         userId: interaction.user.id,
-        gameId,
+        gameId: resolvedGame.gameId,
         platformId,
         ownershipType,
         note: sanitizedNote,
@@ -289,7 +391,7 @@ export class CollectionCommand {
       description: "New platform",
       type: ApplicationCommandOptionType.String,
       required: false,
-      autocomplete: autocompleteGameCompletionPlatform,
+      autocomplete: autocompleteGameCompletionPlatformStandardFirst,
     })
     platformRaw: string | undefined,
     @SlashChoice(

@@ -6,6 +6,7 @@ import { formatGameTitleWithYear } from "../../functions/GameTitleAutocompleteUt
 import Game, { type IPlatformDef } from "../../classes/Game.js";
 import Member from "../../classes/Member.js";
 import { formatTableDate } from "../profile.command.js";
+import { STANDARD_PLATFORM_IDS } from "../../config/standardPlatforms.js";
 
 const PLATFORM_CACHE_TTL_MS = 5 * 60 * 1000;
 const COMPLETION_TITLE_VALUE_PREFIX = "completion";
@@ -33,6 +34,21 @@ function normalizePlatformSearchText(value: string): string {
 function buildPlatformAutocompleteLabel(platform: IPlatformDef): string {
   const detail = platform.abbreviation ? `${platform.name} (${platform.abbreviation})` : platform.name;
   return detail.slice(0, 100);
+}
+
+function sortPlatformsForAutocomplete(
+  platforms: IPlatformDef[],
+  standardFirstIds: number[] = [],
+): IPlatformDef[] {
+  const standardSet = new Set(standardFirstIds);
+  return [...platforms].sort((a, b) => {
+    const aStandard = standardSet.has(a.id);
+    const bStandard = standardSet.has(b.id);
+    if (aStandard !== bStandard) {
+      return aStandard ? -1 : 1;
+    }
+    return a.name.localeCompare(b.name, "en", { sensitivity: "base" });
+  });
 }
 
 export function buildKeepTypingOption(query: string): { name: string; value: string } {
@@ -109,6 +125,19 @@ export async function autocompleteUserCompletionTitle(
 export async function autocompleteGameCompletionPlatform(
   interaction: AutocompleteInteraction,
 ): Promise<void> {
+  await autocompleteGameCompletionPlatformWithOptions(interaction);
+}
+
+export async function autocompleteGameCompletionPlatformStandardFirst(
+  interaction: AutocompleteInteraction,
+): Promise<void> {
+  await autocompleteGameCompletionPlatformWithOptions(interaction, STANDARD_PLATFORM_IDS);
+}
+
+async function autocompleteGameCompletionPlatformWithOptions(
+  interaction: AutocompleteInteraction,
+  standardFirstIds: number[] = [],
+): Promise<void> {
   const focused = interaction.options.getFocused(true);
   const rawQuery = focused?.value ? String(focused.value) : "";
   const query = normalizePlatformSearchText(
@@ -125,8 +154,7 @@ export async function autocompleteGameCompletionPlatform(
     })
     : platforms;
 
-  const options = filtered
-    .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }))
+  const options = sortPlatformsForAutocomplete(filtered, standardFirstIds)
     .slice(0, 25)
     .map((platform) => ({
       name: buildPlatformAutocompleteLabel(platform),
