@@ -45,6 +45,14 @@ import {
   renderSelectionPage,
 } from "./game-completion/completion-list.service.js";
 import {
+  COMMON_COMPLETION_SORT_OPTIONS,
+  renderCommonCompletionPage,
+  handleCommonCompletionGameSelect,
+  handleCommonCompletionNav,
+  handleCommonCompletionBack,
+  type CommonCompletionSort,
+} from "./game-completion/completion-common.service.js";
+import {
   handleCompletionPageSelect,
   handleCompletionPaging,
   handleCompletionLeaderboardSelect,
@@ -335,6 +343,138 @@ export class GameCompletionCommands {
     );
   }
 
+  @Slash({ description: "Show shared completions between two members", name: "common" })
+  async completionCommon(
+    @SlashOption({
+      description: "First member. If omitted, defaults to you.",
+      name: "member_one",
+      required: false,
+      type: ApplicationCommandOptionType.User,
+    })
+    memberOne: User | undefined,
+    @SlashOption({
+      description: "Second member. If omitted, compares you with member_one.",
+      name: "member_two",
+      required: false,
+      type: ApplicationCommandOptionType.User,
+    })
+    memberTwo: User | undefined,
+    @SlashChoice(
+      ...COMMON_COMPLETION_SORT_OPTIONS.map((option) => ({
+        name: option.label,
+        value: option.value,
+      })),
+    )
+    @SlashOption({
+      description: "Sort order for shared completions.",
+      name: "sort",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    sort: CommonCompletionSort | undefined,
+    @SlashOption({
+      description: "Filter by completion year or 'unknown' (optional).",
+      name: "year",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    yearRaw: string | undefined,
+    @SlashOption({
+      description: "Filter by platform (optional).",
+      name: "platform",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+      autocomplete: autocompleteGameCompletionPlatform,
+    })
+    platformRaw: string | undefined,
+    @SlashOption({
+      description: "Filter by title (optional).",
+      name: "title",
+      required: false,
+      type: ApplicationCommandOptionType.String,
+    })
+    query: string | undefined,
+    @SlashOption({
+      description: "If true, show in channel instead of ephemerally.",
+      name: "showinchat",
+      required: false,
+      type: ApplicationCommandOptionType.Boolean,
+    })
+    showInChat: boolean | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    const ephemeral = !showInChat;
+    await safeDeferReply(interaction, { flags: ephemeral ? MessageFlags.Ephemeral : undefined });
+
+    let leftUserId = interaction.user.id;
+    let rightUserId: string | null = null;
+
+    if (memberOne && memberTwo) {
+      leftUserId = memberOne.id;
+      rightUserId = memberTwo.id;
+    } else if (memberOne) {
+      rightUserId = memberOne.id;
+    } else if (memberTwo) {
+      rightUserId = memberTwo.id;
+    }
+
+    if (!rightUserId) {
+      await interaction.editReply(
+        "Pick at least one member (`member_one` or `member_two`) to compare with.",
+      );
+      return;
+    }
+
+    const sanitizedQuery = query
+      ? sanitizeUserInput(query, { preserveNewlines: false })
+      : undefined;
+
+    const sanitizedYearRaw = yearRaw
+      ? sanitizeUserInput(yearRaw, { preserveNewlines: false })
+      : undefined;
+
+    let yearFilter: number | "unknown" | null = null;
+    if (sanitizedYearRaw) {
+      const trimmed = sanitizedYearRaw.trim().toLowerCase();
+      if (trimmed === "unknown") {
+        yearFilter = "unknown";
+      } else {
+        const parsed = Number(trimmed);
+        if (!Number.isInteger(parsed) || parsed <= 0) {
+          await interaction.editReply(
+            "Year must be a valid integer (e.g., 2024) or 'unknown'.",
+          );
+          return;
+        }
+        yearFilter = parsed;
+      }
+    }
+
+    const resolvedSort: CommonCompletionSort = sort ?? "date_desc";
+    let platformId: number | null = null;
+    if (platformRaw) {
+      platformId = await resolveGameCompletionPlatformId(platformRaw);
+      if (platformId == null) {
+        await interaction.editReply("Invalid platform selection.");
+        return;
+      }
+    }
+
+    await renderCommonCompletionPage(
+      interaction,
+      {
+        leftId: leftUserId,
+        rightId: rightUserId,
+        sort: resolvedSort,
+        year: yearFilter,
+        platformId,
+        query: sanitizedQuery,
+      },
+      0,
+      ephemeral,
+    );
+  }
+
   @Slash({ description: "Edit one of your completion records", name: "edit" })
   async completionEdit(
     @SlashOption({
@@ -503,6 +643,21 @@ export class GameCompletionCommands {
   @ButtonComponent({ id: /^comp-(list|edit|delete)-page:[^:]+:[^:]*:\d+:(prev|next)(?::.*)?$/ })
   async handleCompletionPaging(interaction: ButtonInteraction): Promise<void> {
     await handleCompletionPaging(interaction);
+  }
+
+  @SelectMenuComponent({ id: /^comp-common-view:[^:]+:[^:]+:[^:]+:[^:]+:[^:]+:\d+:[^:]+$/ })
+  async handleCommonCompletionGameSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    await handleCommonCompletionGameSelect(interaction);
+  }
+
+  @ButtonComponent({ id: /^comp-common-nav:[^:]+:[^:]+:[^:]+:[^:]+:[^:]+:\d+:(prev|next):[^:]+$/ })
+  async handleCommonCompletionNav(interaction: ButtonInteraction): Promise<void> {
+    await handleCommonCompletionNav(interaction);
+  }
+
+  @ButtonComponent({ id: /^comp-common-back:[^:]+:[^:]+:[^:]+:[^:]+:[^:]+:\d+:[^:]+$/ })
+  async handleCommonCompletionBack(interaction: ButtonInteraction): Promise<void> {
+    await handleCommonCompletionBack(interaction);
   }
 
   @SelectMenuComponent({ id: /^comp-leaderboard-select(?::.*)?$/ })

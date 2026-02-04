@@ -116,8 +116,10 @@ type ProfileHelpTopic = {
 type GameCompletionHelpTopicId =
   | "add"
   | "list"
+  | "common"
   | "edit"
   | "delete"
+  | "export"
   | "completionator-import";
 
 type GameCompletionHelpTopic = {
@@ -211,7 +213,8 @@ const HELP_TOPICS: HelpTopic[] = [
     id: "game-completion",
     label: "/game-completion",
     summary: "Log completed games (removes them from Now Playing if present).",
-    syntax: "Use /game-completion help for subcommands: add, list, edit, delete.",
+    syntax:
+      "Use /game-completion help for subcommands: add, list, common, edit, delete, export, completionator-import.",
   },
   {
     id: "remindme",
@@ -863,6 +866,15 @@ const GAME_COMPLETION_HELP_TOPICS: GameCompletionHelpTopic[] = [
       "Shows your completions, another member's completions (member), or a leaderboard of all members (all).",
   },
   {
+    id: "common",
+    label: "/game-completion common",
+    summary: "Compare shared completed games between two members.",
+    syntax:
+      "Syntax: /game-completion common [member_one:<user>] [member_two:<user>] [sort:<choice>] [year:<int|unknown>] [platform:<string>] [title:<string>] [showinchat:<bool>]",
+    notes:
+      "If only one member is provided, compares you against that member. If both are provided, compares those two members directly. Supports paging and filters for title/year/platform.",
+  },
+  {
     id: "edit",
     label: "/game-completion edit",
     summary: "Edit one of your completion records.",
@@ -876,6 +888,13 @@ const GAME_COMPLETION_HELP_TOPICS: GameCompletionHelpTopic[] = [
     summary: "Delete one of your completion records.",
     syntax: "Syntax: /game-completion delete",
     notes: "Interactive menu to pick a completion to delete.",
+  },
+  {
+    id: "export",
+    label: "/game-completion export",
+    summary: "Export your completions to CSV.",
+    syntax: "Syntax: /game-completion export",
+    notes: "Returns a CSV file with your completion records.",
   },
   {
     id: "completionator-import",
