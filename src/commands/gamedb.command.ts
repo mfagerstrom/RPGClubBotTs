@@ -53,6 +53,7 @@ import {
   sanitizeUserInput,
   stripModalInput,
 } from "../functions/InteractionUtils.js";
+import { formatGameTitleWithYear } from "../functions/GameTitleAutocompleteUtils.js";
 import {
   normalizeCsvHeader,
   normalizePlatformKey,
@@ -266,26 +267,6 @@ function buildComponentsV2Flags(isEphemeral: boolean): number {
   return (isEphemeral ? MessageFlags.Ephemeral : 0) | COMPONENTS_V2_FLAG;
 }
 
-function getReleaseYear(game: { initialReleaseDate?: Date | null }): number | null {
-  const releaseDate = game.initialReleaseDate;
-  if (!releaseDate) return null;
-  const date = releaseDate instanceof Date ? releaseDate : new Date(releaseDate);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.getFullYear();
-}
-
-function formatTitleWithYear(
-  game: { title: string; initialReleaseDate?: Date | null },
-  isDuplicate: boolean,
-): string {
-  if (!isDuplicate) {
-    return game.title;
-  }
-  const year = getReleaseYear(game);
-  const yearText = year ? ` (${year})` : " (Unknown Year)";
-  return `${game.title}${yearText}`;
-}
-
 function isHltbImportEligible(
   game: { initialReleaseDate?: Date | null },
   hasCache: boolean,
@@ -334,15 +315,8 @@ async function autocompleteGameDbViewTitle(
     return;
   }
   const results = await Game.searchGamesAutocomplete(query);
-  const titleCounts = new Map<string, number>();
-  results.forEach((game) => {
-    const title = String(game.title ?? "");
-    titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
-  });
   const resultOptions = results.slice(0, 24).map((game) => {
-    const title = String(game.title ?? "");
-    const isDuplicate = (titleCounts.get(title) ?? 0) > 1;
-    const label = formatTitleWithYear(game, isDuplicate);
+    const label = formatGameTitleWithYear(game);
     return {
       name: label.slice(0, 100),
       value: String(game.id),

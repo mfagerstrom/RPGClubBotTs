@@ -6,48 +6,11 @@ import { searchHltb, type HltbSearchResult } from "../scripts/SearchHltb.js";
 import Game from "../classes/Game.js";
 import { getHltbCacheByGameId, upsertHltbCache } from "../classes/HltbCache.js";
 import { safeDeferReply, safeReply, sanitizeUserInput } from "../functions/InteractionUtils.js";
-
-type TitleParseResult = {
-  title: string;
-  year: number | null;
-  hasYearSuffix: boolean;
-};
-
-function parseTitleWithYear(input: string): TitleParseResult {
-  const match = input.match(/^(.*)\s\((\d{4}|Unknown Year)\)$/);
-  if (match) {
-    const baseTitle = match[1].trim();
-    const yearToken = match[2];
-    if (yearToken === "Unknown Year") {
-      return { title: baseTitle, year: null, hasYearSuffix: true };
-    }
-    const parsedYear = Number(yearToken);
-    if (!Number.isNaN(parsedYear)) {
-      return { title: baseTitle, year: parsedYear, hasYearSuffix: true };
-    }
-  }
-  return { title: input, year: null, hasYearSuffix: false };
-}
-
-function getReleaseYear(game: { initialReleaseDate?: Date | null }): number | null {
-  const releaseDate = game.initialReleaseDate;
-  if (!releaseDate) return null;
-  const date = releaseDate instanceof Date ? releaseDate : new Date(releaseDate);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.getFullYear();
-}
-
-function formatGameTitleWithYear(
-  game: { title: string; initialReleaseDate?: Date | null },
-  isDuplicate: boolean,
-): string {
-  if (!isDuplicate) {
-    return game.title;
-  }
-  const year = getReleaseYear(game);
-  const yearText = year ? ` (${year})` : " (Unknown Year)";
-  return `${game.title}${yearText}`;
-}
+import {
+  formatGameTitleWithYear,
+  getReleaseYear,
+  parseTitleWithYear,
+} from "../functions/GameTitleAutocompleteUtils.js";
 
 function buildKeepTypingOption(query: string): { name: string; value: string } {
   const label = `Keep typing: "${query}"`;
@@ -68,15 +31,8 @@ async function autocompleteHltbTitle(
     return;
   }
   const results = await Game.searchGamesAutocomplete(query);
-  const titleCounts = new Map<string, number>();
-  results.forEach((game) => {
-    const title = String(game.title ?? "");
-    titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
-  });
   const resultOptions = results.slice(0, 24).map((game) => {
-    const title = String(game.title ?? "");
-    const isDuplicate = (titleCounts.get(title) ?? 0) > 1;
-    const label = formatGameTitleWithYear(game, isDuplicate);
+    const label = formatGameTitleWithYear(game);
     return {
       name: label.slice(0, 100),
       value: label,

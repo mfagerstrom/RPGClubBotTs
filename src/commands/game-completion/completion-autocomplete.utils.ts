@@ -2,6 +2,7 @@
 
 import type { AutocompleteInteraction } from "discord.js";
 import { sanitizeUserInput } from "../../functions/InteractionUtils.js";
+import { formatGameTitleWithYear } from "../../functions/GameTitleAutocompleteUtils.js";
 import Game, { type IPlatformDef } from "../../classes/Game.js";
 import Member from "../../classes/Member.js";
 import { formatTableDate } from "../profile.command.js";
@@ -54,7 +55,7 @@ export async function autocompleteGameCompletionTitle(
   }
   const results = await Game.searchGamesAutocomplete(query);
   const resultOptions = results.slice(0, 24).map((game) => ({
-    name: game.title.slice(0, 100),
+    name: formatGameTitleWithYear(game).slice(0, 100),
     value: game.title,
   }));
   const options = [buildKeepTypingOption(query), ...resultOptions];

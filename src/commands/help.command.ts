@@ -188,7 +188,7 @@ const HELP_TOPICS: HelpTopic[] = [
     summary: "Look up HowLongToBeat playtimes for a game.",
     syntax: "Syntax: /hltb title:<string> [showinchat:<boolean>]",
     parameters: "title (required) — game name and optional details. showinchat (optional) — set true to share in channel.",
-    notes: "Title autocompletes from GameDB. Duplicate titles include the release year.",
+    notes: "Title autocompletes from GameDB and includes the release year.",
   },
   {
     id: "mp-info",
@@ -854,7 +854,7 @@ const GAME_COMPLETION_HELP_TOPICS: GameCompletionHelpTopic[] = [
     syntax:
       "Syntax: /game-completion add title:<string> completion_type:<choice> platform:<string> [completion_date:<date>] [final_playtime_hours:<number>] [note:<string>] [announce:<boolean>]",
     notes:
-      "Completion type choices: Main Story, Main Story + Side Content, Completionist. Completion date defaults to today; playtime is optional (e.g., 42.5). Title autocompletes from GameDB. Platform is required and autocompletes from all GameDB platforms. If no exact title match, you can import from IGDB. Set announce:true to post to the completions channel.",
+      "Completion type choices: Main Story, Main Story + Side Content, Completionist. Completion date defaults to today; playtime is optional (e.g., 42.5). Title autocompletes from GameDB and includes the release year. Platform is required and autocompletes from all GameDB platforms. If no exact title match, you can import from IGDB. Set announce:true to post to the completions channel.",
   },
   {
     id: "list",
