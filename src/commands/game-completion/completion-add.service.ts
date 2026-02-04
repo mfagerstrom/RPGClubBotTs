@@ -345,11 +345,6 @@ export async function handleCompletionAddSelect(
     await processCompletionSelection(interaction, value, ctx);
   } finally {
     completionAddSessions.delete(sessionId);
-    try {
-      await interaction.editReply({ components: [] }).catch(() => {});
-    } catch {
-      // ignore
-    }
   }
 }
 
