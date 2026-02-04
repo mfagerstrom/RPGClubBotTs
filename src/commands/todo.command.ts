@@ -479,27 +479,7 @@ function sanitizeTodoText(value: string, preserveNewlines: boolean): string {
 }
 
 function sanitizeTodoRichText(value: string): string {
-  let sanitized = value ?? "";
-  try {
-    sanitized = sanitized.normalize("NFKC");
-  } catch {
-    // ignore normalization errors
-  }
-
-  sanitized = sanitized.replace(/\r\n/g, "\n");
-  sanitized = sanitized.replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, "");
-  sanitized = sanitized.replace(/<\s*script[^>]*>[\s\S]*?<\s*\/\s*script\s*>/gi, "");
-  sanitized = sanitized.replace(/<@!?(\d+)>/g, "");
-  sanitized = sanitized.replace(/<@&(\d+)>/g, "");
-  sanitized = sanitized.replace(/<#(\d+)>/g, "");
-  sanitized = sanitized.replace(/@(everyone|here)/gi, "");
-  sanitized = sanitized
-    .split("\n")
-    .map((line) => line.trimEnd())
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  return sanitized;
+  return (value ?? "").replace(/\r\n/g, "\n");
 }
 
 function extractImageUrlsFromHtml(text: string): string[] {
@@ -562,7 +542,7 @@ function renderTodoContent(rawValue: string, maxTextLength: number): {
   imageUrls: string[];
 } {
   const imageUrls = extractTodoImageUrls(rawValue);
-  const plainText = sanitizeTodoText(stripInlineImagesForText(rawValue), true)
+  const plainText = sanitizeTodoRichText(stripInlineImagesForText(rawValue))
     .slice(0, maxTextLength);
   return {
     text: plainText,
@@ -587,9 +567,7 @@ function buildIssueCommentsDisplay(comments: IGithubIssueComment[]): {
     imageUrls.push(...rendered.imageUrls);
     lines.push(`**${author}** ${createdAt}`);
     if (rendered.text) {
-      lines.push("```");
       lines.push(rendered.text);
-      lines.push("```");
     } else if (rendered.imageUrls.length) {
       lines.push("*Image-only comment.*");
     } else {
@@ -1959,7 +1937,7 @@ export class TodoCommand {
       // ignore
     }
 
-    const trimmedTitle = sanitizeTodoText(session.title, false);
+    const trimmedTitle = sanitizeTodoRichText(session.title).trim();
     if (!trimmedTitle) {
       await safeUpdate(interaction, {
         content: "Title cannot be empty.",
@@ -2056,7 +2034,7 @@ export class TodoCommand {
 
     const rawTitle = interaction.fields.getTextInputValue(TODO_CREATE_TITLE_ID);
     const rawBody = interaction.fields.getTextInputValue(TODO_CREATE_BODY_ID);
-    const trimmedTitle = sanitizeTodoText(rawTitle, false);
+    const trimmedTitle = sanitizeTodoRichText(rawTitle).trim();
     if (!trimmedTitle) {
       await safeReply(interaction, {
         content: "Title cannot be empty.",
@@ -2068,7 +2046,7 @@ export class TodoCommand {
     const trimmedBody = rawBody
       ? sanitizeTodoRichText(rawBody)
       : "";
-    if (!trimmedBody) {
+    if (!trimmedBody.trim()) {
       await safeReply(interaction, {
         content: "Description cannot be empty.",
         flags: MessageFlags.Ephemeral,
@@ -2117,7 +2095,7 @@ export class TodoCommand {
 
     const rawComment = interaction.fields.getTextInputValue(TODO_COMMENT_INPUT_ID);
     const finalCommentBody = sanitizeTodoRichText(rawComment);
-    if (!finalCommentBody) {
+    if (!finalCommentBody.trim()) {
       await safeReply(interaction, {
         content: "Comment cannot be empty.",
         flags: MessageFlags.Ephemeral,
@@ -2221,7 +2199,7 @@ export class TodoCommand {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const rawTitle = interaction.fields.getTextInputValue(TODO_EDIT_TITLE_INPUT_ID);
-    const trimmedTitle = sanitizeTodoText(rawTitle, false);
+    const trimmedTitle = sanitizeTodoRichText(rawTitle).trim();
     if (!trimmedTitle) {
       await safeReply(interaction, {
         content: "Title cannot be empty.",
@@ -2317,7 +2295,7 @@ export class TodoCommand {
 
     const rawBody = interaction.fields.getTextInputValue(TODO_EDIT_DESC_INPUT_ID);
     const trimmedBody = sanitizeTodoRichText(rawBody);
-    if (!trimmedBody) {
+    if (!trimmedBody.trim()) {
       await safeReply(interaction, {
         content: "Description cannot be empty.",
         flags: MessageFlags.Ephemeral,
