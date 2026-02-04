@@ -47,6 +47,7 @@ type BuildGotmSearchMessagesOptions = {
   queryLabel?: string;
   introText?: string;
   maxGamesPerContainer?: number;
+  maxContainersPerMessage?: number;
   guildId?: string;
 };
 
@@ -81,17 +82,13 @@ export async function buildGotmSearchMessages(
   options: BuildGotmSearchMessagesOptions,
 ): Promise<GotmSearchMessagePayload[]> {
   const maxGamesPerContainer = Math.max(1, options.maxGamesPerContainer ?? MAX_GAMES_PER_CONTAINER);
+  const maxContainersPerMessage = Math.max(1, options.maxContainersPerMessage ?? 2);
   const chunks = chunkCards(cards, maxGamesPerContainer);
 
   if (!chunks.length) {
     const container = new ContainerBuilder().addTextDisplayComponents(
       new TextDisplayBuilder().setContent(`## ${options.title}`),
     );
-    if (options.queryLabel) {
-      container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(`-# Query: "${options.queryLabel}"`),
-      );
-    }
     if (options.introText) {
       container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent(options.introText),
@@ -104,57 +101,70 @@ export async function buildGotmSearchMessages(
   }
 
   const payloads: GotmSearchMessagePayload[] = [];
-  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
-    const chunk = chunks[chunkIndex];
-    const container = new ContainerBuilder();
+  for (
+    let messageStartIndex = 0;
+    messageStartIndex < chunks.length;
+    messageStartIndex += maxContainersPerMessage
+  ) {
+    const messageChunks = chunks.slice(messageStartIndex, messageStartIndex + maxContainersPerMessage);
+    const components: ContainerBuilder[] = [];
     const files: AttachmentBuilder[] = [];
-    const title =
-      chunkIndex === 0
-        ? options.title
-        : (options.continuationTitle ?? `${options.title} (continued)`);
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${title}`));
-    if (chunkIndex === 0 && options.queryLabel) {
-      container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(`-# Query: "${options.queryLabel}"`),
-      );
-    }
-    if (chunkIndex === 0 && options.introText) {
-      container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(options.introText),
-      );
-    }
 
-    for (let itemIndex = 0; itemIndex < chunk.length; itemIndex += 1) {
-      const card = chunk[itemIndex];
-      const lines = [
-        `### ${card.title}`,
-        `-# ${card.kindLabel} | Round ${card.round} | ${card.monthYear}`,
-      ];
-      const detailsLine = buildDetailsLine(card, options.guildId);
-      if (detailsLine) {
-        lines.push(detailsLine);
+    for (let chunkOffset = 0; chunkOffset < messageChunks.length; chunkOffset += 1) {
+      const chunkIndex = messageStartIndex + chunkOffset;
+      const chunk = messageChunks[chunkOffset];
+      const container = new ContainerBuilder();
+      const title =
+        chunkIndex === 0
+          ? options.title
+          : (options.continuationTitle ?? `${options.title} (continued)`);
+      if (chunkOffset === 0) {
+        container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${title}`));
+      } else {
+        container.addTextDisplayComponents(
+          new TextDisplayBuilder().setContent("-# Continued results"),
+        );
       }
-      const section = new SectionBuilder().addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(lines.join("\n")),
-      );
-
-      const accessory = await resolveAccessoryThumbnail(
-        client,
-        card,
-        chunkIndex,
-        itemIndex,
-      );
-      if (accessory.thumbnailUrl) {
-        section.setThumbnailAccessory(new ThumbnailBuilder().setURL(accessory.thumbnailUrl));
-      }
-      if (accessory.file) {
-        files.push(accessory.file);
+      if (chunkIndex === 0 && options.introText) {
+        container.addTextDisplayComponents(
+          new TextDisplayBuilder().setContent(options.introText),
+        );
       }
 
-      container.addSectionComponents(section);
+      for (let itemIndex = 0; itemIndex < chunk.length; itemIndex += 1) {
+        const card = chunk[itemIndex];
+        const lines = [
+          `### ${card.title}`,
+          `-# ${card.kindLabel} | Round ${card.round} | ${card.monthYear}`,
+        ];
+        const detailsLine = buildDetailsLine(card, options.guildId);
+        if (detailsLine) {
+          lines.push(detailsLine);
+        }
+        const section = new SectionBuilder().addTextDisplayComponents(
+          new TextDisplayBuilder().setContent(lines.join("\n")),
+        );
+
+        const accessory = await resolveAccessoryThumbnail(
+          client,
+          card,
+          chunkIndex,
+          itemIndex,
+        );
+        if (accessory.thumbnailUrl) {
+          section.setThumbnailAccessory(new ThumbnailBuilder().setURL(accessory.thumbnailUrl));
+        }
+        if (accessory.file) {
+          files.push(accessory.file);
+        }
+
+        container.addSectionComponents(section);
+      }
+
+      components.push(container);
     }
 
-    payloads.push({ components: [container], files });
+    payloads.push({ components, files });
   }
 
   return payloads;

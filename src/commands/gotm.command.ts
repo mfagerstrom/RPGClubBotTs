@@ -185,7 +185,7 @@ export class GotmSearch {
           emptyMessage: "No GOTM games found for this query.",
           queryLabel: criteriaLabel,
           guildId: interaction.guildId ?? undefined,
-          maxGamesPerContainer: 10,
+          maxGamesPerContainer: 12,
         },
       );
       for (let i = 0; i < payloads.length; i += 1) {

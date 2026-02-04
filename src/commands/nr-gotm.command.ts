@@ -224,7 +224,7 @@ export class NrGotmSearch {
           queryLabel: criteriaLabel,
           introText,
           guildId: interaction.guildId ?? undefined,
-          maxGamesPerContainer: 10,
+          maxGamesPerContainer: 12,
         },
       );
       for (let i = 0; i < payloads.length; i += 1) {
