@@ -1,5 +1,6 @@
 # Commit snapshot (2026-02-04)
 
+4b95344 2026-02-04 issue-157: corrected a bug when entering completions and the dropdown for platform would disappear
 d1d376a 2026-02-03 fix: corrected buildProd script
 fd99e1d 2026-02-02 issue-153: Used a link for threads in nom UI
 d977ad9 2026-02-02 fix: corrected errors in gotm audit

@@ -16,6 +16,8 @@ import {
 import {
   ButtonBuilder as V2ButtonBuilder,
   ContainerBuilder,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
   SectionBuilder,
   TextDisplayBuilder,
 } from "@discordjs/builders";
@@ -72,6 +74,8 @@ type ListSort = (typeof LIST_SORTS)[number];
 type ListDirection = (typeof LIST_DIRECTIONS)[number];
 
 const MAX_ISSUE_BODY = 4000;
+const MAX_COMMENT_PREVIEW_LENGTH = 500;
+const MAX_TODO_IMAGES_PER_VIEW = 10;
 const DEFAULT_PAGE_SIZE = 9;
 const MAX_PAGE_SIZE = 9;
 const ISSUE_LIST_TITLE = "RPGClub GameDB GitHub Issues";
@@ -474,23 +478,146 @@ function sanitizeTodoText(value: string, preserveNewlines: boolean): string {
   return sanitizeUserInput(value, { preserveNewlines, allowUnderscore: true });
 }
 
-function buildIssueCommentsText(comments: IGithubIssueComment[]): string {
-  if (!comments.length) return "";
+function sanitizeTodoRichText(value: string): string {
+  let sanitized = value ?? "";
+  try {
+    sanitized = sanitized.normalize("NFKC");
+  } catch {
+    // ignore normalization errors
+  }
+
+  sanitized = sanitized.replace(/\r\n/g, "\n");
+  sanitized = sanitized.replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, "");
+  sanitized = sanitized.replace(/<\s*script[^>]*>[\s\S]*?<\s*\/\s*script\s*>/gi, "");
+  sanitized = sanitized.replace(/<@!?(\d+)>/g, "");
+  sanitized = sanitized.replace(/<@&(\d+)>/g, "");
+  sanitized = sanitized.replace(/<#(\d+)>/g, "");
+  sanitized = sanitized.replace(/@(everyone|here)/gi, "");
+  sanitized = sanitized
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return sanitized;
+}
+
+function extractImageUrlsFromHtml(text: string): string[] {
+  const urls: string[] = [];
+  const imageTagPattern = /<img\b[^>]*\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/gi;
+  let match: RegExpExecArray | null = imageTagPattern.exec(text);
+  while (match) {
+    const raw = match[1] ?? match[2] ?? match[3] ?? "";
+    const decoded = raw.replace(/&amp;/gi, "&").trim();
+    try {
+      const parsed = new URL(decoded);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        urls.push(parsed.toString());
+      }
+    } catch {
+      // ignore invalid image URLs
+    }
+    match = imageTagPattern.exec(text);
+  }
+  return urls;
+}
+
+function extractImageUrlsFromMarkdown(text: string): string[] {
+  const urls: string[] = [];
+  const markdownPattern = /!\[[^\]]*]\((https?:\/\/[^)\s]+(?:\s+"[^"]*")?)\)/gi;
+  let match: RegExpExecArray | null = markdownPattern.exec(text);
+  while (match) {
+    const value = match[1] ?? "";
+    const trimmed = value.split(" ")[0]?.trim() ?? "";
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        urls.push(parsed.toString());
+      }
+    } catch {
+      // ignore invalid image URLs
+    }
+    match = markdownPattern.exec(text);
+  }
+  return urls;
+}
+
+function extractTodoImageUrls(text: string): string[] {
+  const unique = new Set<string>();
+  [...extractImageUrlsFromHtml(text), ...extractImageUrlsFromMarkdown(text)]
+    .forEach((url) => unique.add(url));
+  return Array.from(unique);
+}
+
+function stripInlineImagesForText(value: string): string {
+  return value
+    .replace(/<img\b[^>]*>/gi, "")
+    .replace(/!\[[^\]]*]\((https?:\/\/[^)\s]+(?:\s+"[^"]*")?)\)/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function renderTodoContent(rawValue: string, maxTextLength: number): {
+  text: string;
+  imageUrls: string[];
+} {
+  const imageUrls = extractTodoImageUrls(rawValue);
+  const plainText = sanitizeTodoText(stripInlineImagesForText(rawValue), true)
+    .slice(0, maxTextLength);
+  return {
+    text: plainText,
+    imageUrls,
+  };
+}
+
+function buildIssueCommentsDisplay(comments: IGithubIssueComment[]): {
+  text: string;
+  imageUrls: string[];
+} {
+  if (!comments.length) {
+    return { text: "", imageUrls: [] };
+  }
+
   const lines: string[] = ["**Comments:**"];
+  const imageUrls: string[] = [];
   comments.forEach((comment) => {
     const author = comment.author ?? "Unknown";
     const createdAt = formatDiscordTimestamp(comment.createdAt);
-    const body = sanitizeTodoText(comment.body, true).slice(0, 500);
+    const rendered = renderTodoContent(comment.body, MAX_COMMENT_PREVIEW_LENGTH);
+    imageUrls.push(...rendered.imageUrls);
     lines.push(`**${author}** ${createdAt}`);
-    if (body) {
+    if (rendered.text) {
       lines.push("```");
-      lines.push(body);
+      lines.push(rendered.text);
       lines.push("```");
+    } else if (rendered.imageUrls.length) {
+      lines.push("*Image-only comment.*");
     } else {
       lines.push("*No comment content.*");
     }
   });
-  return lines.join("\n");
+
+  return {
+    text: lines.join("\n"),
+    imageUrls,
+  };
+}
+
+function addIssueImagesToContainer(container: ContainerBuilder, imageUrls: string[]): void {
+  const uniqueImages = Array.from(new Set(imageUrls)).slice(0, MAX_TODO_IMAGES_PER_VIEW);
+  if (!uniqueImages.length) return;
+
+  const galleryItems = uniqueImages.map((url, index) =>
+    new MediaGalleryItemBuilder()
+      .setURL(url)
+      .setDescription(`Issue image ${index + 1}`),
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent("### Images"),
+  );
+  container.addMediaGalleryComponents(
+    new MediaGalleryBuilder().addItems(galleryItems),
+  );
 }
 
 function buildTodoListCustomId(payloadToken: string, page: number): string {
@@ -1116,19 +1243,21 @@ function buildIssueViewComponents(
     : `## ${formatIssueTitle(issue)}`;
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(titleText));
 
-  const body = issue.body ? issue.body.slice(0, MAX_ISSUE_BODY) : "";
-  if (body) {
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(body));
+  const issueBody = issue.body ?? "";
+  const renderedBody = renderTodoContent(issueBody, MAX_ISSUE_BODY);
+  if (renderedBody.text) {
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(renderedBody.text));
   } else {
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent("*No description provided.*"),
     );
   }
 
-  const commentsText = buildIssueCommentsText(comments);
-  if (commentsText) {
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(commentsText));
+  const commentsDisplay = buildIssueCommentsDisplay(comments);
+  if (commentsDisplay.text) {
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(commentsDisplay.text));
   }
+  addIssueImagesToContainer(container, [...renderedBody.imageUrls, ...commentsDisplay.imageUrls]);
 
   const assignee = issue.assignee ?? "Unassigned";
   const footerLine = [
@@ -1840,7 +1969,7 @@ export class TodoCommand {
     }
 
     const trimmedBody = session.body
-      ? sanitizeTodoText(session.body, true)
+      ? sanitizeTodoRichText(session.body)
       : undefined;
     const baseBody = trimmedBody ?? "";
     const isOwner = interaction.guild?.ownerId === interaction.user.id;
@@ -1937,7 +2066,7 @@ export class TodoCommand {
     }
 
     const trimmedBody = rawBody
-      ? sanitizeTodoText(rawBody, true)
+      ? sanitizeTodoRichText(rawBody)
       : "";
     if (!trimmedBody) {
       await safeReply(interaction, {
@@ -1947,7 +2076,7 @@ export class TodoCommand {
       return;
     }
 
-    const baseBody = sanitizeTodoText(trimmedBody, true);
+    const baseBody = trimmedBody;
     const sessionId = createTodoCreateSession(
       interaction.user.id,
       parsed.payloadToken,
@@ -1987,8 +2116,8 @@ export class TodoCommand {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const rawComment = interaction.fields.getTextInputValue(TODO_COMMENT_INPUT_ID);
-    const trimmedComment = sanitizeTodoText(rawComment, true);
-    if (!trimmedComment) {
+    const finalCommentBody = sanitizeTodoRichText(rawComment);
+    if (!finalCommentBody) {
       await safeReply(interaction, {
         content: "Comment cannot be empty.",
         flags: MessageFlags.Ephemeral,
@@ -1996,7 +2125,7 @@ export class TodoCommand {
       return;
     }
 
-    const prefixedComment = `${interaction.user.username}: ${trimmedComment}`.slice(
+    const prefixedComment = `${interaction.user.username}: ${finalCommentBody}`.slice(
       0,
       MAX_ISSUE_BODY,
     );
@@ -2187,7 +2316,7 @@ export class TodoCommand {
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
 
     const rawBody = interaction.fields.getTextInputValue(TODO_EDIT_DESC_INPUT_ID);
-    const trimmedBody = sanitizeTodoText(rawBody, true);
+    const trimmedBody = sanitizeTodoRichText(rawBody);
     if (!trimmedBody) {
       await safeReply(interaction, {
         content: "Description cannot be empty.",

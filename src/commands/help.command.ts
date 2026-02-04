@@ -309,6 +309,8 @@ const HELP_TOPICS: HelpTopic[] = [
       "[labels:<New Feature,Improvement,Bug,Blocked>] " +
       "[sort:<created|updated>] [direction:<asc|desc>] [page:<int>] [per_page:<int>] " +
       "[showinchat:<boolean>]",
+    notes:
+      "Issue descriptions and comments support image links, including HTML <img src=\"...\">.",
   },
   {
     id: "suggestion",
