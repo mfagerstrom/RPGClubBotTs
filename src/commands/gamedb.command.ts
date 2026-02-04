@@ -62,7 +62,7 @@ import {
   stripTitleDateSuffix,
 } from "../functions/CsvUtils.js";
 import { shouldRenderPrevNextButtons } from "../functions/PaginationUtils.js";
-import Game, { type IGame } from "../classes/Game.js";
+import Game, { type IGame, type IRelease } from "../classes/Game.js";
 import { getHltbCacheByGameId, upsertHltbCache } from "../classes/HltbCache.js";
 import { getThreadsByGameId, setThreadGameLink, upsertThreadRecord } from "../classes/Thread.js";
 import axios from "axios"; // For downloading image attachments
@@ -1979,6 +1979,7 @@ export class GameDb {
           profile.canMarkThumbnailBad,
           profile.isThumbnailBad,
           profile.isThumbnailApproved,
+          profile.isReleased,
         ),
       );
     }
@@ -2012,6 +2013,7 @@ export class GameDb {
         profile.canMarkThumbnailBad,
         profile.isThumbnailBad,
         profile.isThumbnailApproved,
+        profile.isReleased,
       ),
     ];
     await safeReply(interaction, {
@@ -2051,6 +2053,7 @@ export class GameDb {
           profile.canMarkThumbnailBad,
           profile.isThumbnailBad,
           profile.isThumbnailApproved,
+          profile.isReleased,
         ),
       );
     }
@@ -2085,6 +2088,7 @@ export class GameDb {
     canMarkThumbnailBad: boolean;
     isThumbnailBad: boolean;
     isThumbnailApproved: boolean;
+    isReleased: boolean;
   } | null> {
     try {
       const game = await Game.getGameById(gameId);
@@ -2110,6 +2114,7 @@ export class GameDb {
       const files: AttachmentBuilder[] = [];
       const isThumbnailBad = Boolean(game.thumbnailBad);
       const isThumbnailApproved = Boolean(game.thumbnailApproved);
+      const isReleased = this.isGameReleased(game, releases);
       const primaryArt = isThumbnailBad ? game.imageData : (game.artData ?? game.imageData);
       if (primaryArt) {
         files.push(new AttachmentBuilder(primaryArt, { name: "game_image.png" }));
@@ -2407,6 +2412,7 @@ export class GameDb {
         canMarkThumbnailBad: Boolean(game.artData) && !isThumbnailApproved,
         isThumbnailBad,
         isThumbnailApproved,
+        isReleased,
       };
     } catch (error: any) {
       console.error("Failed to build game profile:", error);
@@ -2467,26 +2473,27 @@ export class GameDb {
     canMarkThumbnailBad: boolean,
     isThumbnailBad: boolean,
     isThumbnailApproved: boolean,
+    isReleased: boolean,
     disableVideo = false,
   ): ActionRowBuilder<ButtonBuilder>[] {
     const addNowPlaying = new ButtonBuilder()
       .setCustomId(`gamedb-action:nowplaying:${gameId}`)
       .setLabel("Add to Now Playing List")
       .setStyle(ButtonStyle.Primary);
-    const addCompletion = new ButtonBuilder()
-      .setCustomId(`gamedb-action:completion:${gameId}`)
-      .setLabel("Add Completion")
-      .setStyle(ButtonStyle.Success);
     const viewFeaturedVideo = new ButtonBuilder()
       .setCustomId(`gamedb-action:video:${gameId}`)
       .setLabel("View Featured Video")
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(disableVideo);
     const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-    const primaryRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      addNowPlaying,
-      addCompletion,
-    );
+    const primaryRow = new ActionRowBuilder<ButtonBuilder>().addComponents(addNowPlaying);
+    if (isReleased) {
+      const addCompletion = new ButtonBuilder()
+        .setCustomId(`gamedb-action:completion:${gameId}`)
+        .setLabel("Add Completion")
+        .setStyle(ButtonStyle.Success);
+      primaryRow.addComponents(addCompletion);
+    }
     if (featuredVideoUrl) {
       primaryRow.addComponents(viewFeaturedVideo);
     }
@@ -2516,6 +2523,30 @@ export class GameDb {
     return rows;
   }
 
+  private isGameReleased(game: IGame, releases: IRelease[]): boolean {
+    const releaseDates: Date[] = [];
+    for (const release of releases) {
+      if (release.releaseDate instanceof Date && !Number.isNaN(release.releaseDate.getTime())) {
+        releaseDates.push(release.releaseDate);
+      }
+    }
+    if (
+      game.initialReleaseDate instanceof Date &&
+      !Number.isNaN(game.initialReleaseDate.getTime())
+    ) {
+      releaseDates.push(game.initialReleaseDate);
+    }
+
+    if (!releaseDates.length) {
+      return true;
+    }
+
+    const earliestReleaseTimestamp = releaseDates
+      .map((releaseDate) => releaseDate.getTime())
+      .reduce((earliest, current) => (current < earliest ? current : earliest));
+    return earliestReleaseTimestamp <= Date.now();
+  }
+
   private async refreshGameProfileMessage(
     interaction: ButtonInteraction,
     gameId: number,
@@ -2529,6 +2560,7 @@ export class GameDb {
       profile.canMarkThumbnailBad,
       profile.isThumbnailBad,
       profile.isThumbnailApproved,
+      profile.isReleased,
     );
     const existingComponents = interaction.message?.components ?? [];
     const searchRows = getSearchRowsFromComponents(existingComponents);
@@ -2580,6 +2612,7 @@ export class GameDb {
           profile.canMarkThumbnailBad,
           profile.isThumbnailBad,
           profile.isThumbnailApproved,
+          profile.isReleased,
           true,
         );
         const existingComponents = interaction.message?.components ?? [];
@@ -3187,6 +3220,7 @@ export class GameDb {
       profile.canMarkThumbnailBad,
       profile.isThumbnailBad,
       profile.isThumbnailApproved,
+      profile.isReleased,
     );
     const searchRows = getSearchRowsFromComponents(message.components ?? []);
     await message.edit({
@@ -3352,6 +3386,7 @@ export class GameDb {
           profile.canMarkThumbnailBad,
           profile.isThumbnailBad,
           profile.isThumbnailApproved,
+          profile.isReleased,
         );
         const existingComponents = interaction.message?.components ?? [];
         const updatedComponents = existingComponents.length
@@ -3890,6 +3925,7 @@ export class GameDb {
       profile.canMarkThumbnailBad,
       profile.isThumbnailBad,
       profile.isThumbnailApproved,
+      profile.isReleased,
     );
 
     try {
