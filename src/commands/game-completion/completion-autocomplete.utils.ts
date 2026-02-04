@@ -130,3 +130,19 @@ export async function resolveGameCompletionPlatformId(
 
   return null;
 }
+
+export async function resolveGameCompletionPlatformLabel(
+  platformId: number | null | undefined,
+): Promise<string> {
+  if (platformId == null) {
+    return "No platform";
+  }
+
+  const platforms = await getCachedPlatforms();
+  const platform = platforms.find((entry) => entry.id === platformId);
+  if (!platform) {
+    return `Platform #${platformId}`;
+  }
+
+  return buildPlatformAutocompleteLabel(platform);
+}

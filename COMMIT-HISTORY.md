@@ -1,5 +1,12 @@
 # Commit snapshot (2026-02-04)
 
+483c18d 2026-02-04 issue-53: implemented search for game completions in common
+2e6f3ac 2026-02-04 issue-160: added a required platform param featuring an autocomplete to game completion slashcommands
+0afb087 2026-02-04 issue-159: gamedb view will not render an add completion button for unreleased games
+090d272 2026-02-04 issue-89: New release announcements implemented
+69ec8f9 2026-02-04 issue-154: gotm/nr-gotm search for year uses a single message now
+854979e 2026-02-04 issue-158: /todo will no longer strip discord markdown from content
+63bd69a 2026-02-04 issue-156: implemented image support for /todo view
 4b95344 2026-02-04 issue-157: corrected a bug when entering completions and the dropdown for platform would disappear
 d1d376a 2026-02-03 fix: corrected buildProd script
 fd99e1d 2026-02-02 issue-153: Used a link for threads in nom UI
@@ -43,14 +50,6 @@ f1e9904 2026-01-30 issue-136: Added more labels to /todo
 2ed554e 2026-01-30 issue-123: consolidated all USER_ID constants into one file
 d14a994 2026-01-30 issue-122: added paging to /gamedb view multi-match messages
 a1be8b1 2026-01-30 issue-111: /gamedb view: padded label width is now dynamic
-dd097a5 2026-01-30 issue-113: /suggestion review - implemented messaging for acceptance / rejection
-64f173f 2026-01-30 issue-110: implemented stable identifiers for interactions in /todo
-f1fd927 2026-01-30 issue-97: Updated Game Completion Wizard to no longer use a thread
-58419a0 2026-01-30 issue-108: /gamedb-view UI/UX pass
-cf89236 2026-01-29 tweaks for UI on /gamedb view
-271e7c7 2026-01-29 fixes
-14d9bd1 2026-01-29 issue-101: Localized all CHANNELID constants into one place
-85144f3 2026-01-29 issue-106-and-100: fixed them.
 
 # Commit snapshot (2026-02-03)
 

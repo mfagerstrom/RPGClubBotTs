@@ -16,9 +16,13 @@ import {
   formatPlaytimeHours,
   parseCompletionDateInput,
 } from "../profile.command.js";
-import { resolveGameCompletionPlatformId } from "./completion-autocomplete.utils.js";
+import {
+  resolveGameCompletionPlatformId,
+  resolveGameCompletionPlatformLabel,
+} from "./completion-autocomplete.utils.js";
 
 const MAX_NOTE_LENGTH = 500;
+type CompletionEditField = "type" | "date" | "platform" | "playtime" | "note";
 
 /**
  * Handles completion edit menu selection
@@ -211,8 +215,9 @@ export async function handleCompletionFieldEdit(interaction: ButtonInteraction):
     }
     const updated = await Member.getCompletion(completionId);
     if (updated) {
+      const notice = await buildCompletionEditSuccessNotice(updated, field as CompletionEditField);
       await interaction.message
-        .edit(buildCompletionEditPrompt(ownerId, completionId, updated))
+        .edit(buildCompletionEditPrompt(ownerId, completionId, updated, notice))
         .catch(() => {});
     }
   } catch (err: any) {
@@ -288,9 +293,51 @@ export async function handleCompletionTypeSelect(
     return;
   }
 
+  const notice = await buildCompletionEditSuccessNotice(updated, "type");
   await interaction
-    .update(buildCompletionEditPrompt(ownerId, completionId, updated))
+    .update(buildCompletionEditPrompt(ownerId, completionId, updated, notice))
     .catch(() => {});
+}
+
+async function buildCompletionEditSuccessNotice(
+  completion: Awaited<ReturnType<typeof Member.getCompletion>>,
+  field: CompletionEditField,
+): Promise<string> {
+  if (!completion) return "Saved update.";
+
+  const fieldLabel = getCompletionEditFieldLabel(field);
+  const valueLabel = await getCompletionEditValueLabel(completion, field);
+  return `Saved: **${completion.title}** - ${fieldLabel} updated to **${valueLabel}**.`;
+}
+
+function getCompletionEditFieldLabel(field: CompletionEditField): string {
+  if (field === "type") return "Completion Type";
+  if (field === "date") return "Completion Date";
+  if (field === "platform") return "Platform";
+  if (field === "playtime") return "Final Playtime";
+  return "Note";
+}
+
+async function getCompletionEditValueLabel(
+  completion: Awaited<ReturnType<typeof Member.getCompletion>>,
+  field: CompletionEditField,
+): Promise<string> {
+  if (!completion) return "Unknown";
+  if (field === "type") return completion.completionType;
+  if (field === "date") {
+    return completion.completedAt ? formatDiscordTimestamp(completion.completedAt) : "No date";
+  }
+  if (field === "platform") {
+    return await resolveGameCompletionPlatformLabel(completion.platformId);
+  }
+  if (field === "playtime") {
+    return completion.finalPlaytimeHours != null
+      ? (formatPlaytimeHours(completion.finalPlaytimeHours) ?? "No playtime")
+      : "No playtime";
+  }
+  if (!completion.note) return "No note";
+  const compact = completion.note.replace(/\s+/g, " ").trim();
+  return compact.length > 80 ? `${compact.slice(0, 77)}...` : compact;
 }
 
 /**
