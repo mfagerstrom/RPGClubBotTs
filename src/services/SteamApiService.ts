@@ -86,6 +86,7 @@ const STEAM_API_BASE = "https://api.steampowered.com";
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_ATTEMPTS = 4;
 const DEFAULT_MIN_INTERVAL_MS = 250;
+const APP_RELEASE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function getSteamApiKey(): string {
   return process.env.STEAM_WEB_API_KEY ?? process.env.STEAM_API_KEY ?? "";
@@ -199,6 +200,7 @@ function parseRetryAfter(headers: Headers): number | undefined {
 
 export class SteamApiService {
   private nextAllowedAtMs = 0;
+  private appReleaseYearCache = new Map<number, { expiresAt: number; year: number | null }>();
 
   private get apiKey(): string {
     const key = getSteamApiKey();
@@ -375,6 +377,59 @@ export class SteamApiService {
       gameCount,
       games,
     };
+  }
+
+  async getAppReleaseYear(appId: number): Promise<number | null> {
+    if (!Number.isInteger(appId) || appId <= 0) {
+      return null;
+    }
+
+    const cached = this.appReleaseYearCache.get(appId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.year;
+    }
+
+    try {
+      const response = await fetch(
+        `https://store.steampowered.com/api/appdetails?appids=${appId}&l=english`,
+        {
+          method: "GET",
+          headers: { "user-agent": "RPGClubBotTs/SteamImport" },
+          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+        },
+      );
+      if (!response.ok) {
+        this.appReleaseYearCache.set(appId, {
+          expiresAt: Date.now() + APP_RELEASE_CACHE_TTL_MS,
+          year: null,
+        });
+        return null;
+      }
+
+      const payload = await response.json() as Record<string, {
+        success?: boolean;
+        data?: {
+          release_date?: {
+            date?: string;
+          };
+        };
+      }>;
+      const appKey = String(appId);
+      const dateRaw = payload?.[appKey]?.data?.release_date?.date?.trim() ?? "";
+      const yearMatch = /\b(19|20)\d{2}\b/.exec(dateRaw);
+      const year = yearMatch ? Number(yearMatch[0]) : null;
+      this.appReleaseYearCache.set(appId, {
+        expiresAt: Date.now() + APP_RELEASE_CACHE_TTL_MS,
+        year,
+      });
+      return year;
+    } catch {
+      this.appReleaseYearCache.set(appId, {
+        expiresAt: Date.now() + APP_RELEASE_CACHE_TTL_MS,
+        year: null,
+      });
+      return null;
+    }
   }
 }
 

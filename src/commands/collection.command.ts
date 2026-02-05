@@ -339,6 +339,7 @@ function buildSteamImportItemMessage(params: {
   totalCount: number;
   steamAppName: string;
   steamAppId: number;
+  steamReleaseYear: number | null;
   candidates: SteamImportCandidate[];
 }): string {
   const guidance = params.candidates.length > 1
@@ -351,23 +352,41 @@ function buildSteamImportItemMessage(params: {
       `${index + 1}. #${entry.gameId} ${entry.title}`).join("\n")
     : "No GameDB matches found yet.";
 
+  const releaseText = params.steamReleaseYear ? ` | Release: ${params.steamReleaseYear}` : "";
   return (
     `## Steam Import #${params.importId}\n` +
     `Row ${params.rowIndex}/${params.totalCount}\n` +
-    `Steam: **${params.steamAppName}** (app ${params.steamAppId})\n\n` +
+    `Steam: **${params.steamAppName}** (app ${params.steamAppId}${releaseText})\n\n` +
     `### Match candidates\n${candidateLines}\n\n` +
     `${guidance}\n` +
     "Use **Select Match** or **Use First Option**, or choose **Remap**, **Skip**, or **Pause**."
   );
 }
 
-function buildSteamImportSelectRow(params: {
+async function buildSteamImportSelectRow(params: {
   ownerId: string;
   importId: number;
   itemId: number;
   candidates: SteamImportCandidate[];
-}): ActionRowBuilder<StringSelectMenuBuilder> | null {
+}): Promise<ActionRowBuilder<StringSelectMenuBuilder> | null> {
   if (!params.candidates.length) return null;
+
+  const gameIds = params.candidates.map((entry) => entry.gameId);
+  const games = await Game.getGamesByIds(gameIds);
+  const gamesWithPlatforms = await Game.attachPlatformsToGames(games);
+  const gameMeta = new Map<number, { year: string; platforms: string }>();
+  for (const game of gamesWithPlatforms) {
+    const year = game.initialReleaseDate
+      ? String(game.initialReleaseDate.getFullYear())
+      : "TBD";
+    const platformText = game.platforms.length
+      ? game.platforms
+        .map((platform) => platform.abbreviation ?? platform.name)
+        .slice(0, 3)
+        .join(", ")
+      : "No platforms";
+    gameMeta.set(game.id, { year, platforms: platformText });
+  }
 
   const select = new StringSelectMenuBuilder()
     .setCustomId(
@@ -382,9 +401,11 @@ function buildSteamImportSelectRow(params: {
     .setMaxValues(1)
     .addOptions(
       params.candidates.map((entry, index) => ({
-        label: entry.title.slice(0, 100),
+        label: `${entry.title} (${gameMeta.get(entry.gameId)?.year ?? "TBD"})`.slice(0, 100),
         value: `g:${entry.gameId}`,
-        description: `Candidate ${index + 1} | GameDB #${entry.gameId}`.slice(0, 100),
+        description:
+          `${index + 1}. #${entry.gameId} | ${gameMeta.get(entry.gameId)?.platforms ?? "No platforms"}`
+            .slice(0, 100),
         default: index === 0,
       })),
     );
@@ -1200,10 +1221,14 @@ export class CollectionCommand {
     importId: number,
     ownerId: string,
   ): Promise<void> {
+    const shouldUseInteractionUpdate = interaction.isButton() ||
+      interaction.isStringSelectMenu() ||
+      interaction.isModalSubmit();
+
     const session = await getSteamCollectionImportById(importId);
     if (!session || session.userId !== ownerId) {
       const payload = { content: "This Steam import session no longer exists.", components: [] };
-      if (interaction.isButton() || interaction.isStringSelectMenu()) {
+      if (shouldUseInteractionUpdate) {
         await safeUpdate(interaction, payload);
       } else {
         await interaction.editReply(payload);
@@ -1216,7 +1241,7 @@ export class CollectionCommand {
         content: `Steam import #${session.importId} is ${session.status.toLowerCase()}.`,
         components: [],
       };
-      if (interaction.isButton() || interaction.isStringSelectMenu()) {
+      if (shouldUseInteractionUpdate) {
         await safeUpdate(interaction, payload);
       } else {
         await interaction.editReply(payload);
@@ -1247,7 +1272,7 @@ export class CollectionCommand {
         `Failed: ${stats.failed}`,
         ...(reasonLines.length ? ["", `Reasons: ${reasonLines.join(" | ")}`] : []),
       ].join("\n");
-      if (interaction.isButton() || interaction.isStringSelectMenu()) {
+      if (shouldUseInteractionUpdate) {
         await safeUpdate(interaction, { content: done, components: [] });
       } else {
         await interaction.editReply({ content: done, components: [] });
@@ -1358,12 +1383,14 @@ export class CollectionCommand {
       }
     }
 
+    const steamReleaseYear = await steamApiService.getAppReleaseYear(nextItem.steamAppId);
     const content = buildSteamImportItemMessage({
       importId: session.importId,
       rowIndex: nextItem.rowIndex,
       totalCount: session.totalCount,
       steamAppName: nextItem.steamAppName,
       steamAppId: nextItem.steamAppId,
+      steamReleaseYear,
       candidates,
     });
     const row = buildSteamImportItemButtons({
@@ -1372,7 +1399,7 @@ export class CollectionCommand {
       itemId: nextItem.itemId,
       canUseFirstOption: candidates.length > 0,
     });
-    const selectRow = buildSteamImportSelectRow({
+    const selectRow = await buildSteamImportSelectRow({
       ownerId,
       importId: session.importId,
       itemId: nextItem.itemId,
@@ -1384,7 +1411,7 @@ export class CollectionCommand {
         ? [selectRow, row]
         : [row];
 
-    if (interaction.isButton() || interaction.isStringSelectMenu()) {
+    if (shouldUseInteractionUpdate) {
       await safeUpdate(interaction, { content, components });
       return;
     }
