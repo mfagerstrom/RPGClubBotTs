@@ -77,6 +77,7 @@ export default [
       }],
       "local/no-djs-button-in-v2-accessory": "error",
       "local/no-deprecated-interaction-options": "error",
+      "local/no-silent-interaction-update-catch": "error",
       "local/require-relative-import-js-extension": "error",
       "local/slash-options-required-first": "error",
       "local/no-unused-imports-vars-local": "error",

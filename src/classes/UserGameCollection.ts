@@ -319,11 +319,12 @@ export default class UserGameCollection {
       binds.ownershipType = normalizeOwnershipType(filters.ownershipType);
     }
 
-    const requestedLimit = Number(filters.limit ?? 50);
-    const limit = Number.isInteger(requestedLimit)
-      ? Math.max(1, Math.min(requestedLimit, 100))
-      : 50;
-    binds.limit = limit;
+    const requestedLimit = Number(filters.limit ?? 0);
+    const hasLimit = Number.isInteger(requestedLimit) && requestedLimit > 0;
+    if (hasLimit) {
+      binds.limit = Math.trunc(requestedLimit);
+    }
+    const fetchClause = hasLimit ? "FETCH FIRST :limit ROWS ONLY" : "";
 
     const connection = await getOraclePool().getConnection();
     try {
@@ -342,10 +343,10 @@ export default class UserGameCollection {
                 c.UPDATED_AT
            FROM USER_GAME_COLLECTIONS c
            JOIN GAMEDB_GAMES g ON g.GAME_ID = c.GAMEDB_GAME_ID
-           LEFT JOIN GAMEDB_PLATFORMS p ON p.PLATFORM_ID = c.PLATFORM_ID
+          LEFT JOIN GAMEDB_PLATFORMS p ON p.PLATFORM_ID = c.PLATFORM_ID
           WHERE ${where.join(" AND ")}
           ORDER BY LOWER(g.TITLE), LOWER(NVL(p.PLATFORM_NAME, '')), c.ENTRY_ID
-          FETCH FIRST :limit ROWS ONLY`,
+          ${fetchClause}`,
         binds,
         { outFormat: oracledb.OUT_FORMAT_OBJECT },
       );

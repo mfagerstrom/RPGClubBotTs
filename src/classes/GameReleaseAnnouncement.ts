@@ -26,6 +26,8 @@ type ReleaseAnnouncementRow = {
 const DEFAULT_BATCH_SIZE = 25;
 const MAX_BATCH_SIZE = 100;
 const MISSED_WINDOW_REASON = "release-window-missed";
+const PORT_ONLY_RELEASE_REASON = "port-only-release";
+const SAME_DAY_DUPLICATE_REASON = "same-day-platform-duplicate";
 
 function clampBatchSize(limit: number): number {
   const asNumber = Number(limit);
@@ -98,6 +100,85 @@ export default class GameReleaseAnnouncement {
         {},
         { autoCommit: true },
       );
+
+      await connection.execute(
+        `UPDATE GAMEDB_RELEASE_ANNOUNCEMENTS a
+            SET a.SKIPPED_AT = NULL,
+                a.SKIP_REASON = NULL,
+                a.UPDATED_AT = CURRENT_TIMESTAMP
+          WHERE a.SENT_AT IS NULL
+            AND a.SKIP_REASON IN (:portOnlyReason, :sameDayReason)
+            AND NOT EXISTS (
+              SELECT 1
+              FROM (
+                SELECT ranked.RELEASE_ID
+                FROM (
+                  SELECT r.RELEASE_ID,
+                         r.RELEASE_DATE,
+                         MIN(r.RELEASE_DATE) OVER (PARTITION BY r.GAME_ID) AS FIRST_RELEASE_DATE,
+                         ROW_NUMBER() OVER (
+                           PARTITION BY r.GAME_ID, r.RELEASE_DATE
+                           ORDER BY r.RELEASE_ID ASC
+                         ) AS SAME_DAY_RANK
+                  FROM GAMEDB_RELEASES r
+                  WHERE r.RELEASE_DATE IS NOT NULL
+                ) ranked
+                WHERE ranked.RELEASE_DATE > ranked.FIRST_RELEASE_DATE
+                   OR (ranked.RELEASE_DATE = ranked.FIRST_RELEASE_DATE AND ranked.SAME_DAY_RANK > 1)
+              ) non_canonical
+              WHERE non_canonical.RELEASE_ID = a.RELEASE_ID
+            )`,
+        {
+          portOnlyReason: PORT_ONLY_RELEASE_REASON,
+          sameDayReason: SAME_DAY_DUPLICATE_REASON,
+        },
+        { autoCommit: true },
+      );
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async markNonCanonicalAnnouncements(): Promise<number> {
+    const connection = await getOraclePool().getConnection();
+    try {
+      const result = await connection.execute(
+        `MERGE INTO GAMEDB_RELEASE_ANNOUNCEMENTS a
+         USING (
+           SELECT ranked.RELEASE_ID,
+                  CASE
+                    WHEN ranked.RELEASE_DATE > ranked.FIRST_RELEASE_DATE THEN :portOnlyReason
+                    ELSE :sameDayReason
+                  END AS SKIP_REASON
+           FROM (
+             SELECT r.RELEASE_ID,
+                    r.RELEASE_DATE,
+                    MIN(r.RELEASE_DATE) OVER (PARTITION BY r.GAME_ID) AS FIRST_RELEASE_DATE,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY r.GAME_ID, r.RELEASE_DATE
+                      ORDER BY r.RELEASE_ID ASC
+                    ) AS SAME_DAY_RANK
+             FROM GAMEDB_RELEASES r
+             WHERE r.RELEASE_DATE IS NOT NULL
+           ) ranked
+           WHERE ranked.RELEASE_DATE > ranked.FIRST_RELEASE_DATE
+              OR (ranked.RELEASE_DATE = ranked.FIRST_RELEASE_DATE AND ranked.SAME_DAY_RANK > 1)
+         ) src
+         ON (a.RELEASE_ID = src.RELEASE_ID)
+         WHEN MATCHED THEN
+           UPDATE SET
+             a.SKIPPED_AT = CURRENT_TIMESTAMP,
+             a.SKIP_REASON = src.SKIP_REASON,
+             a.UPDATED_AT = CURRENT_TIMESTAMP
+           WHERE a.SENT_AT IS NULL
+             AND a.SKIPPED_AT IS NULL`,
+        {
+          portOnlyReason: PORT_ONLY_RELEASE_REASON,
+          sameDayReason: SAME_DAY_DUPLICATE_REASON,
+        },
+        { autoCommit: true },
+      );
+      return Number(result.rowsAffected ?? 0);
     } finally {
       await connection.close();
     }
@@ -123,11 +204,27 @@ export default class GameReleaseAnnouncement {
            JOIN GAMEDB_RELEASES r ON r.RELEASE_ID = a.RELEASE_ID
            JOIN GAMEDB_GAMES g ON g.GAME_ID = r.GAME_ID
            LEFT JOIN GAMEDB_PLATFORMS p ON p.PLATFORM_ID = r.PLATFORM_ID
+           JOIN (
+             SELECT canonical.RELEASE_ID
+             FROM (
+               SELECT r.RELEASE_ID,
+                      r.RELEASE_DATE,
+                      MIN(r.RELEASE_DATE) OVER (PARTITION BY r.GAME_ID) AS FIRST_RELEASE_DATE,
+                      ROW_NUMBER() OVER (
+                        PARTITION BY r.GAME_ID, r.RELEASE_DATE
+                        ORDER BY r.RELEASE_ID ASC
+                      ) AS SAME_DAY_RANK
+               FROM GAMEDB_RELEASES r
+               WHERE r.RELEASE_DATE IS NOT NULL
+             ) canonical
+             WHERE canonical.RELEASE_DATE = canonical.FIRST_RELEASE_DATE
+               AND canonical.SAME_DAY_RANK = 1
+           ) c ON c.RELEASE_ID = a.RELEASE_ID
           WHERE a.SENT_AT IS NULL
             AND a.SKIPPED_AT IS NULL
             AND a.ANNOUNCE_AT <= :referenceTime
             AND r.RELEASE_DATE > :referenceTime
-          ORDER BY a.ANNOUNCE_AT ASC, r.RELEASE_DATE ASC, a.RELEASE_ID ASC
+          ORDER BY a.ANNOUNCE_AT ASC, r.RELEASE_DATE ASC, r.GAME_ID ASC, a.RELEASE_ID ASC
           FETCH FIRST :limit ROWS ONLY`,
         { referenceTime, limit: safeLimit },
         { outFormat: oracledb.OUT_FORMAT_OBJECT },

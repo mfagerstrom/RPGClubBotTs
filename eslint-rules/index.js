@@ -513,6 +513,54 @@ export default {
         };
       },
     },
+    "no-silent-interaction-update-catch": {
+      meta: {
+        type: "problem",
+        docs: {
+          description:
+            "Disallow silent catch handlers on interaction.update calls.",
+        },
+        schema: [],
+        messages: {
+          silentUpdateCatch:
+            "Do not silently catch interaction.update failures. Use safeUpdate(...) or add deferUpdate fallback.",
+        },
+      },
+      create(context) {
+        const isEmptyCatchHandler = (node) => {
+          if (!node) return true;
+          if (node.type === "ArrowFunctionExpression" || node.type === "FunctionExpression") {
+            if (node.body.type !== "BlockStatement") {
+              return false;
+            }
+            return node.body.body.length === 0;
+          }
+          return false;
+        };
+
+        const isUpdateCall = (node) => {
+          if (!node || node.type !== "CallExpression") return false;
+          return getCalleePropertyName(node.callee) === "update";
+        };
+
+        return {
+          CallExpression(node) {
+            if (
+              node.callee.type !== "MemberExpression" ||
+              node.callee.property.type !== "Identifier" ||
+              node.callee.property.name !== "catch"
+            ) {
+              return;
+            }
+
+            if (!isUpdateCall(node.callee.object)) return;
+            const [handler] = node.arguments;
+            if (!isEmptyCatchHandler(handler)) return;
+            context.report({ node, messageId: "silentUpdateCatch" });
+          },
+        };
+      },
+    },
     "require-relative-import-js-extension": {
       meta: {
         type: "problem",

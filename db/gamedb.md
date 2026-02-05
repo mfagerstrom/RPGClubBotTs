@@ -53,7 +53,8 @@ Game metadata ingested from IGDB and stored for bot lookups. Schema created by
 - Indexes/triggers: `IDX_GAMEDB_RELEASE_ANNOUNCE_PENDING` on
   `(SENT_AT, SKIPPED_AT, ANNOUNCE_AT)`; `TRG_GAMEDB_RELEASE_ANNOUNCEMENTS_UPD`
   refreshes `UPDATED_AT` on update.
-- Purpose: tracks one scheduled pre-release announcement per release event.
+- Purpose: tracks scheduled pre-release announcements, with deterministic skip
+  reasons to suppress port-only and same-day platform duplicate announcements.
 
 | Column | Type | Nullable | Notes |
 | --- | --- | --- | --- |

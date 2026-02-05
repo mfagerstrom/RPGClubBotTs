@@ -353,5 +353,11 @@ export async function safeUpdate(interaction: AnyRepliable, options: any): Promi
     }
   }
 
-  await safeReply(interaction, { ...normalizedOptions, flags: MessageFlags.Ephemeral });
+  if (normalizedOptions && typeof normalizedOptions === "object") {
+    const fallbackFlags = (normalizedOptions.flags ?? 0) | MessageFlags.Ephemeral;
+    await safeReply(interaction, { ...normalizedOptions, flags: fallbackFlags });
+    return;
+  }
+
+  await safeReply(interaction, { content: String(options ?? ""), flags: MessageFlags.Ephemeral });
 }

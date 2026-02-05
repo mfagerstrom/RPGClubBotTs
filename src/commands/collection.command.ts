@@ -1,12 +1,31 @@
 import {
   ApplicationCommandOptionType,
   AutocompleteInteraction,
+  ButtonStyle,
   CommandInteraction,
-  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonInteraction,
   MessageFlags,
+  StringSelectMenuBuilder,
+  StringSelectMenuInteraction,
   type User,
 } from "discord.js";
-import { Discord, Slash, SlashChoice, SlashGroup, SlashOption } from "discordx";
+import {
+  Discord,
+  Slash,
+  SlashChoice,
+  SlashGroup,
+  SlashOption,
+  ButtonComponent,
+  SelectMenuComponent,
+} from "discordx";
+import {
+  ContainerBuilder,
+  SectionBuilder,
+  TextDisplayBuilder,
+  ThumbnailBuilder,
+} from "@discordjs/builders";
 import UserGameCollection, {
   COLLECTION_OWNERSHIP_TYPES,
   type CollectionOwnershipType,
@@ -19,6 +38,7 @@ import {
 } from "./game-completion/completion-autocomplete.utils.js";
 import {
   safeDeferReply,
+  safeUpdate,
   sanitizeUserInput,
 } from "../functions/InteractionUtils.js";
 import {
@@ -34,9 +54,18 @@ import {
   createIgdbSession,
   type IgdbSelectOption,
 } from "../services/IgdbSelectService.js";
+import { COMPONENTS_V2_FLAG } from "../config/flags.js";
+import { GameDb } from "./gamedb.command.js";
 
 const COLLECTION_ENTRY_VALUE_PREFIX = "collection";
-const COLLECTION_LIST_LIMIT = 50;
+const COLLECTION_LIST_PAGE_SIZE = 5;
+const COLLECTION_LIST_NAV_PREFIX = "collection-list-nav-v2";
+const COLLECTION_LIST_DETAILS_PREFIX = "collection-list-details-v1";
+const COLLECTION_MAX_SECTIONS_PER_CONTAINER = 10;
+
+function buildComponentsV2Flags(isEphemeral: boolean): number {
+  return (isEphemeral ? MessageFlags.Ephemeral : 0) | COMPONENTS_V2_FLAG;
+}
 
 type ResolvedCollectionGame =
   | { kind: "resolved"; gameId: number; title: string }
@@ -159,20 +188,288 @@ async function autocompleteCollectionEntry(
   );
 }
 
-function formatCollectionLine(entry: {
-  title: string;
-  platformName: string | null;
-  ownershipType: string;
-  note: string | null;
-  createdAt: Date;
-  entryId: number;
+function packFilterValue(value: string | undefined): string {
+  if (!value) return "_";
+  const trimmed = value.trim();
+  if (!trimmed) return "_";
+  return Buffer.from(trimmed.slice(0, 8), "utf8").toString("base64url");
+}
+
+function unpackFilterValue(value: string): string | undefined {
+  if (!value || value === "_") return undefined;
+  try {
+    const decoded = Buffer.from(value, "base64url").toString("utf8").trim();
+    return decoded || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function ownershipTypeToCode(value: CollectionOwnershipType | undefined): string {
+  if (!value) return "_";
+  return value[0]?.toUpperCase() ?? "_";
+}
+
+function ownershipCodeToType(code: string): CollectionOwnershipType | undefined {
+  if (code === "D") return "Digital";
+  if (code === "P") return "Physical";
+  if (code === "S") return "Subscription";
+  if (code === "O") return "Other";
+  return undefined;
+}
+
+function buildCollectionListNavId(params: {
+  viewerUserId: string;
+  targetUserId: string;
+  page: number;
+  isEphemeral: boolean;
+  ownershipCode: string;
+  packedTitle: string;
+  packedPlatform: string;
+  direction: "prev" | "next";
 }): string {
-  const platform = entry.platformName ?? "Unknown platform";
-  const note = entry.note ? ` | Note: ${entry.note}` : "";
-  return (
-    `#${entry.entryId} **${entry.title}** | ${platform} | ${entry.ownershipType} | ` +
-    `Added ${formatTableDate(entry.createdAt)}${note}`
+  return [
+    COLLECTION_LIST_NAV_PREFIX,
+    params.viewerUserId,
+    params.targetUserId,
+    String(params.page),
+    params.isEphemeral ? "e" : "p",
+    params.ownershipCode,
+    params.packedTitle,
+    params.packedPlatform,
+    params.direction,
+  ].join(":");
+}
+
+function parseCollectionListNavId(customId: string): {
+  viewerUserId: string;
+  targetUserId: string;
+  page: number;
+  isEphemeral: boolean;
+  ownershipType: CollectionOwnershipType | undefined;
+  title: string | undefined;
+  platform: string | undefined;
+  direction: "prev" | "next";
+} | null {
+  const parts = customId.split(":");
+  if (parts.length !== 9) return null;
+  if (parts[0] !== COLLECTION_LIST_NAV_PREFIX) return null;
+
+  const viewerUserId = parts[1];
+  const targetUserId = parts[2];
+  const page = Number(parts[3]);
+  const visibility = parts[4];
+  const ownershipType = ownershipCodeToType(parts[5]);
+  const title = unpackFilterValue(parts[6]);
+  const platform = unpackFilterValue(parts[7]);
+  const direction = parts[8] as "prev" | "next";
+  if (!Number.isInteger(page) || page < 0) return null;
+  if (visibility !== "e" && visibility !== "p") return null;
+  if (direction !== "prev" && direction !== "next") return null;
+
+  return {
+    viewerUserId,
+    targetUserId,
+    page,
+    isEphemeral: visibility === "e",
+    ownershipType,
+    title,
+    platform,
+    direction,
+  };
+}
+
+function buildCollectionDetailsSelectId(viewerUserId: string): string {
+  return `${COLLECTION_LIST_DETAILS_PREFIX}:${viewerUserId}`;
+}
+
+function buildCollectionDetailsValue(entryId: number, gameId: number): string {
+  return `entry:${entryId}:game:${gameId}`;
+}
+
+function parseCollectionDetailsValue(value: string): { entryId: number; gameId: number } | null {
+  const match = /^entry:(\d+):game:(\d+)$/.exec(value.trim());
+  if (!match) return null;
+  const entryId = Number(match[1]);
+  const gameId = Number(match[2]);
+  if (!Number.isInteger(entryId) || entryId <= 0) return null;
+  if (!Number.isInteger(gameId) || gameId <= 0) return null;
+  return { entryId, gameId };
+}
+
+function parseCollectionDetailsSelectId(customId: string): { viewerUserId: string } | null {
+  const parts = customId.split(":");
+  if (parts.length !== 2) return null;
+  if (parts[0] !== COLLECTION_LIST_DETAILS_PREFIX) return null;
+  return { viewerUserId: parts[1] };
+}
+
+async function buildCollectionThumbnails(
+  entries: Array<{ gameId: number }>,
+): Promise<Map<number, string>> {
+  const thumbnailsByGameId = new Map<number, string>();
+  for (const entry of entries) {
+    if (thumbnailsByGameId.has(entry.gameId)) continue;
+    const game = await Game.getGameById(entry.gameId);
+    if (!game?.igdbId) continue;
+    try {
+      const details = await igdbService.getGameDetails(game.igdbId);
+      const imageId = details?.cover?.image_id ?? null;
+      if (!imageId) continue;
+      thumbnailsByGameId.set(
+        entry.gameId,
+        `https://images.igdb.com/igdb/image/upload/t_cover_big/${imageId}.jpg`,
+      );
+    } catch {
+      // ignore thumbnail failures and continue rendering text rows
+    }
+  }
+  return thumbnailsByGameId;
+}
+
+async function buildCollectionListResponse(params: {
+  viewerUserId: string;
+  targetUserId: string;
+  memberLabel: string;
+  title: string | undefined;
+  platform: string | undefined;
+  ownershipType: CollectionOwnershipType | undefined;
+  page: number;
+  isEphemeral: boolean;
+}): Promise<{
+  components: Array<ContainerBuilder | ActionRowBuilder<any>>;
+  content?: string;
+}> {
+  const entries = await UserGameCollection.searchEntries({
+    targetUserId: params.targetUserId,
+    title: params.title,
+    platform: params.platform,
+    ownershipType: params.ownershipType,
+  });
+
+  const total = entries.length;
+  if (!total) {
+    return {
+      content: params.targetUserId === params.viewerUserId
+        ? "No collection entries matched your filters."
+        : "No collection entries matched your filters for that member.",
+      components: [],
+    };
+  }
+
+  const pageCount = Math.max(1, Math.ceil(total / COLLECTION_LIST_PAGE_SIZE));
+  const safePage = Math.min(Math.max(params.page, 0), pageCount - 1);
+  const start = safePage * COLLECTION_LIST_PAGE_SIZE;
+  const pageEntries = entries.slice(start, start + COLLECTION_LIST_PAGE_SIZE);
+
+  const headerTitle = params.targetUserId === params.viewerUserId
+    ? (params.isEphemeral ? "Your game collection" : `${params.memberLabel}'s Game Collection`)
+    : (params.isEphemeral ? `${params.memberLabel} collection` : `${params.memberLabel}'s Game Collection`);
+  const filtersText = [
+    params.title ? `title~${params.title}` : null,
+    params.platform ? `platform~${params.platform}` : null,
+    params.ownershipType ? `ownership=${params.ownershipType}` : null,
+  ].filter(Boolean).join(" | ");
+  const thumbnailsByGameId = await buildCollectionThumbnails(pageEntries);
+  const components: Array<ContainerBuilder | ActionRowBuilder<any>> = [];
+
+  const headerContainer = new ContainerBuilder().addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(`## ${headerTitle}`),
   );
+  headerContainer.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(`-# Page ${safePage + 1}/${pageCount} • ${total} total entries`),
+  );
+  if (filtersText) {
+    headerContainer.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`**Filters**\n> ${filtersText}`),
+    );
+  }
+  components.push(headerContainer);
+
+  let contentContainer = new ContainerBuilder();
+  let sectionCount = 0;
+  for (const entry of pageEntries) {
+    if (sectionCount >= COLLECTION_MAX_SECTIONS_PER_CONTAINER) {
+      components.push(contentContainer);
+      contentContainer = new ContainerBuilder();
+      sectionCount = 0;
+    }
+
+    const platform = entry.platformName ?? "Unknown platform";
+    const noteLine = entry.note ? `\n> Note: ${entry.note}` : "";
+    const section = new SectionBuilder().addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `### ${entry.title}\n` +
+        `> Platform: ${platform}\n` +
+        `> Ownership: ${entry.ownershipType}\n` +
+        `> Added: ${formatTableDate(entry.createdAt)}${noteLine}`,
+      ),
+    );
+    const thumb = thumbnailsByGameId.get(entry.gameId);
+    if (thumb) {
+      section.setThumbnailAccessory(new ThumbnailBuilder().setURL(thumb));
+    }
+    contentContainer.addSectionComponents(section);
+    sectionCount += 1;
+  }
+  components.push(contentContainer);
+
+  const detailsSelect = new StringSelectMenuBuilder()
+    .setCustomId(buildCollectionDetailsSelectId(params.viewerUserId))
+    .setPlaceholder("View a game's details...")
+    .setMinValues(1)
+    .setMaxValues(1)
+    .addOptions(
+      pageEntries.map((entry) => ({
+        label: entry.title.slice(0, 100),
+        value: buildCollectionDetailsValue(entry.entryId, entry.gameId),
+        description: `${entry.platformName ?? "Unknown"} • ${entry.ownershipType}`.slice(0, 100),
+      })),
+    );
+  components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(detailsSelect));
+
+  if (pageCount > 1) {
+    const packedTitle = packFilterValue(params.title);
+    const packedPlatform = packFilterValue(params.platform);
+    const ownershipCode = ownershipTypeToCode(params.ownershipType);
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(
+          buildCollectionListNavId({
+            viewerUserId: params.viewerUserId,
+            targetUserId: params.targetUserId,
+            page: safePage,
+            isEphemeral: params.isEphemeral,
+            ownershipCode,
+            packedTitle,
+            packedPlatform,
+            direction: "prev",
+          }),
+        )
+        .setLabel("Previous")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(safePage <= 0),
+      new ButtonBuilder()
+        .setCustomId(
+          buildCollectionListNavId({
+            viewerUserId: params.viewerUserId,
+            targetUserId: params.targetUserId,
+            page: safePage,
+            isEphemeral: params.isEphemeral,
+            ownershipCode,
+            packedTitle,
+            packedPlatform,
+            direction: "next",
+          }),
+        )
+        .setLabel("Next")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(safePage >= pageCount - 1),
+    );
+    components.push(row);
+  }
+
+  return { components };
 }
 
 @Discord()
@@ -337,9 +634,17 @@ export class CollectionCommand {
       required: false,
     })
     ownershipType: CollectionOwnershipType | undefined,
+    @SlashOption({
+      name: "showinchat",
+      description: "If true, show results in channel instead of private response.",
+      type: ApplicationCommandOptionType.Boolean,
+      required: false,
+    })
+    showInChat: boolean | undefined,
     interaction: CommandInteraction,
   ): Promise<void> {
-    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+    const isEphemeral = !showInChat;
+    await safeDeferReply(interaction, { flags: buildComponentsV2Flags(isEphemeral) });
 
     const targetUserId = member?.id ?? interaction.user.id;
     const titleFilter = title
@@ -349,31 +654,108 @@ export class CollectionCommand {
       ? sanitizeUserInput(platform, { preserveNewlines: false })
       : undefined;
 
-    const entries = await UserGameCollection.searchEntries({
+    const memberLabel = member?.username ?? interaction.user.username;
+    const response = await buildCollectionListResponse({
+      viewerUserId: interaction.user.id,
       targetUserId,
+      memberLabel,
       title: titleFilter,
       platform: platformFilter,
       ownershipType,
-      limit: COLLECTION_LIST_LIMIT,
+      page: 0,
+      isEphemeral,
     });
 
-    const viewingOwnCollection = targetUserId === interaction.user.id;
-    if (!entries.length) {
-      const emptyMessage = viewingOwnCollection
-        ? "No collection entries matched your filters."
-        : "No collection entries matched your filters for that member.";
-      await interaction.editReply(emptyMessage);
+    if (response.content) {
+      await interaction.editReply(response.content);
+      return;
+    }
+    await interaction.editReply({
+      components: response.components,
+      flags: buildComponentsV2Flags(isEphemeral),
+    });
+  }
+
+  @ButtonComponent({
+    id: /^collection-list-nav-v2:[^:]+:[^:]+:\d+:[ep]:[^:]+:[^:]+:[^:]+:(prev|next)$/,
+  })
+  async onCollectionListNav(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseCollectionListNavId(interaction.customId);
+    if (!parsed) {
+      await interaction.reply({
+        content: "This collection view control is invalid.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
       return;
     }
 
-    const embed = new EmbedBuilder()
-      .setTitle(viewingOwnCollection ? "Your game collection" : `${member?.username ?? "Member"} collection`)
-      .setDescription(entries.map((entry) => formatCollectionLine(entry)).join("\n"))
-      .setFooter({
-        text: "Collections are public by default.",
-      });
+    if (interaction.user.id !== parsed.viewerUserId) {
+      await interaction.reply({
+        content: "This collection view is not for you.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
 
-    await interaction.editReply({ embeds: [embed] });
+    const nextPage = parsed.direction === "next"
+      ? parsed.page + 1
+      : Math.max(parsed.page - 1, 0);
+
+    const response = await buildCollectionListResponse({
+      viewerUserId: parsed.viewerUserId,
+      targetUserId: parsed.targetUserId,
+      memberLabel: "Member",
+      title: parsed.title,
+      platform: parsed.platform,
+      ownershipType: parsed.ownershipType,
+      page: nextPage,
+      isEphemeral: parsed.isEphemeral,
+    });
+
+    if (response.content) {
+      await safeUpdate(interaction, {
+        content: response.content,
+        components: [],
+      });
+      return;
+    }
+
+    await safeUpdate(interaction, {
+      components: response.components,
+      flags: buildComponentsV2Flags(parsed.isEphemeral),
+    });
+  }
+
+  @SelectMenuComponent({ id: /^collection-list-details-v1:[^:]+$/ })
+  async onCollectionDetailsSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const parsed = parseCollectionDetailsSelectId(interaction.customId);
+    if (!parsed) {
+      await interaction.reply({
+        content: "This collection details selector is invalid.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    if (interaction.user.id !== parsed.viewerUserId) {
+      await interaction.reply({
+        content: "This collection view is not for you.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    const parsedValue = parseCollectionDetailsValue(interaction.values?.[0] ?? "");
+    if (!parsedValue) {
+      await interaction.reply({
+        content: "Invalid GameDB id.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    const gameDb = new GameDb();
+    await gameDb.showGameProfileFromNomination(interaction, parsedValue.gameId);
   }
 
   @Slash({ name: "edit", description: "Edit one of your collection entries" })
