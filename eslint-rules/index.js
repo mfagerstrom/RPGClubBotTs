@@ -78,6 +78,19 @@ function getLiteralString(node) {
   return null;
 }
 
+function getNearestBlockScopeKey(node) {
+  let current = node?.parent ?? null;
+  while (current) {
+    if (current.type === "BlockStatement" || current.type === "Program") {
+      const start = current.range?.[0] ?? 0;
+      const end = current.range?.[1] ?? 0;
+      return `${start}:${end}`;
+    }
+    current = current.parent ?? null;
+  }
+  return "global";
+}
+
 function collectStaticStringConstants(program) {
   const map = new Map();
   for (const node of program.body) {
@@ -380,6 +393,55 @@ function getCalledFunctionName(node) {
   return null;
 }
 
+function getTypeReferenceName(node) {
+  if (!node || node.type !== "TSTypeReference") return null;
+  const typeName = node.typeName;
+  if (!typeName) return null;
+  if (typeName.type === "Identifier") return typeName.name;
+  if (typeName.type === "TSQualifiedName") {
+    if (typeName.right?.type === "Identifier") return typeName.right.name;
+  }
+  return null;
+}
+
+function getIdentifierNameFromParam(paramNode) {
+  if (!paramNode) return null;
+  if (paramNode.type === "Identifier") return paramNode.name;
+  if (paramNode.type === "AssignmentPattern" && paramNode.left.type === "Identifier") {
+    return paramNode.left.name;
+  }
+  return null;
+}
+
+function getTypeAnnotationNode(paramNode) {
+  if (!paramNode) return null;
+  if (paramNode.type === "Identifier") return paramNode.typeAnnotation?.typeAnnotation ?? null;
+  if (paramNode.type === "AssignmentPattern" && paramNode.left.type === "Identifier") {
+    return paramNode.left.typeAnnotation?.typeAnnotation ?? null;
+  }
+  return null;
+}
+
+function isModalSubmitUnionType(typeAnnotationNode) {
+  if (!typeAnnotationNode || typeAnnotationNode.type !== "TSUnionType") {
+    return false;
+  }
+
+  let hasModal = false;
+  let hasOther = false;
+
+  for (const typeNode of typeAnnotationNode.types ?? []) {
+    const refName = getTypeReferenceName(typeNode);
+    if (refName === "ModalSubmitInteraction") {
+      hasModal = true;
+      continue;
+    }
+    hasOther = true;
+  }
+
+  return hasModal && hasOther;
+}
+
 function unwrapAwaitExpression(node) {
   if (!node) return null;
   if (node.type === "AwaitExpression") return node.argument;
@@ -611,6 +673,64 @@ export default {
             const [handler] = node.arguments;
             if (!isEmptyCatchHandler(handler)) return;
             context.report({ node, messageId: "silentUpdateCatch" });
+          },
+        };
+      },
+    },
+    "no-edit-reply-on-modal-union": {
+      meta: {
+        type: "problem",
+        docs: {
+          description:
+            "Disallow direct editReply calls on union-typed interaction params that include ModalSubmitInteraction.",
+        },
+        schema: [],
+        messages: {
+          noEditReply:
+            "Do not call {{param}}.editReply directly when {{param}} is a union including ModalSubmitInteraction. Use safeUpdate/safeReply branching instead.",
+        },
+      },
+      create(context) {
+        const functionParamStack = [];
+
+        const enterFunction = (node) => {
+          const disallowedParams = new Set();
+          for (const param of node.params ?? []) {
+            const paramName = getIdentifierNameFromParam(param);
+            if (!paramName) continue;
+            const typeNode = getTypeAnnotationNode(param);
+            if (!isModalSubmitUnionType(typeNode)) continue;
+            disallowedParams.add(paramName);
+          }
+          functionParamStack.push(disallowedParams);
+        };
+
+        const exitFunction = () => {
+          functionParamStack.pop();
+        };
+
+        return {
+          FunctionDeclaration: enterFunction,
+          "FunctionDeclaration:exit": exitFunction,
+          FunctionExpression: enterFunction,
+          "FunctionExpression:exit": exitFunction,
+          ArrowFunctionExpression: enterFunction,
+          "ArrowFunctionExpression:exit": exitFunction,
+          CallExpression(node) {
+            const current = functionParamStack[functionParamStack.length - 1];
+            if (!current || current.size === 0) return;
+            if (!node.callee || node.callee.type !== "MemberExpression") return;
+            if (node.callee.object.type !== "Identifier") return;
+            if (node.callee.property.type !== "Identifier") return;
+            if (node.callee.property.name !== "editReply") return;
+            const objectName = node.callee.object.name;
+            if (!current.has(objectName)) return;
+
+            context.report({
+              node: node.callee.property,
+              messageId: "noEditReply",
+              data: { param: objectName },
+            });
           },
         };
       },
@@ -987,6 +1107,64 @@ export default {
         };
       },
     },
+    "no-duplicate-literal-custom-id-in-block": {
+      meta: {
+        type: "problem",
+        docs: {
+          description:
+            "Disallow duplicate literal setCustomId values within the same block.",
+        },
+        schema: [],
+        messages: {
+          duplicateCustomId:
+            "Duplicate literal custom id '{{customId}}' detected in this block.",
+        },
+      },
+      create(context) {
+        const seenByScope = new Map();
+
+        return {
+          CallExpression(node) {
+            const callee = node.callee;
+            if (
+              callee.type !== "MemberExpression" ||
+              callee.property.type !== "Identifier" ||
+              callee.property.name !== "setCustomId"
+            ) {
+              return;
+            }
+
+            const rootBuilderName = getBuilderRootName(callee.object);
+            if (!rootBuilderName || !CHECKED_SET_CUSTOM_ID_BUILDERS.has(rootBuilderName)) {
+              return;
+            }
+
+            const [customIdArg] = node.arguments;
+            const customId = getLiteralString(customIdArg);
+            if (!customId) return;
+
+            const scopeKey = getNearestBlockScopeKey(node);
+            let seenInScope = seenByScope.get(scopeKey);
+            if (!seenInScope) {
+              seenInScope = new Map();
+              seenByScope.set(scopeKey, seenInScope);
+            }
+
+            const firstSeenNode = seenInScope.get(customId);
+            if (firstSeenNode) {
+              context.report({
+                node: customIdArg,
+                messageId: "duplicateCustomId",
+                data: { customId },
+              });
+              return;
+            }
+
+            seenInScope.set(customId, customIdArg);
+          },
+        };
+      },
+    },
     "components-v2-structure": {
       meta: {
         type: "problem",
@@ -1063,14 +1241,20 @@ export default {
         type: "problem",
         docs: {
           description:
-            "Disallow content when MessageFlags.IS_COMPONENTS_V2 is used.",
+            "Enforce Components v2 content rules for reply/edit/update payloads.",
         },
         schema: [],
         messages: {
-          noContent: "Do not include content when using Components v2 flags.",
+          nonNullContent:
+            "Do not include non-null content when using Components v2 flags.",
+          requireNullContent:
+            "When editing with Components v2 flags, include explicit content: null.",
         },
       },
       create(context) {
+        const EDIT_METHODS = new Set(["editReply", "update", "safeUpdate"]);
+        const CREATE_METHODS = new Set(["reply"]);
+
         const isComponentsV2Flag = (node) => {
           if (!node) return false;
           if (node.type === "Identifier" && node.name === "COMPONENTS_V2_FLAG") {
@@ -1115,14 +1299,27 @@ export default {
           return false;
         };
 
-        const checkObject = (node) => {
+        const isNullLiteral = (node) =>
+          Boolean(node && node.type === "Literal" && node.value === null);
+
+        const checkObject = (node, methodName) => {
           if (!node || node.type !== "ObjectExpression") return;
-          const contentProp = getObjectPropertyValue(node, "content");
-          if (!contentProp) return;
           const flagsProp = getObjectPropertyValue(node, "flags");
           if (!flagsProp) return;
-          if (expressionIncludesComponentsV2(flagsProp)) {
-            context.report({ node: contentProp, messageId: "noContent" });
+          if (!expressionIncludesComponentsV2(flagsProp)) return;
+
+          const contentProp = getObjectPropertyValue(node, "content");
+          const isEditMethod = EDIT_METHODS.has(methodName);
+          const isCreateMethod = CREATE_METHODS.has(methodName);
+          if (!isEditMethod && !isCreateMethod) return;
+
+          if (isEditMethod && !contentProp) {
+            context.report({ node, messageId: "requireNullContent" });
+            return;
+          }
+
+          if (contentProp && !isNullLiteral(contentProp)) {
+            context.report({ node: contentProp, messageId: "nonNullContent" });
           }
         };
 
@@ -1131,15 +1328,17 @@ export default {
             const callee = node.callee;
             if (callee.type === "Identifier") {
               if (!INTERACTION_RESPONSE_HELPERS.has(callee.name)) return;
+              if (!EDIT_METHODS.has(callee.name) && !CREATE_METHODS.has(callee.name)) return;
               const arg = node.arguments[0];
-              checkObject(arg);
+              checkObject(arg, callee.name);
               return;
             }
             if (callee.type === "MemberExpression") {
               const methodName = getCalleePropertyName(callee);
               if (!methodName || !INTERACTION_RESPONSE_METHODS.has(methodName)) return;
+              if (!EDIT_METHODS.has(methodName) && !CREATE_METHODS.has(methodName)) return;
               const arg = node.arguments[0];
-              checkObject(arg);
+              checkObject(arg, methodName);
             }
           },
         };

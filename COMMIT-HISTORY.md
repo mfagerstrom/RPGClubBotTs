@@ -1,5 +1,7 @@
 # Commit snapshot (2026-02-05)
 
+dfa1fc9 2026-02-04 steam import tweaks
+580d114 2026-02-04 implemented a game collection import from steam.  Still needs UI/UX work
 d045635 2026-02-04 issue-169: improved UI of new game release announcements
 7e3f769 2026-02-04 more collection tweaks
 7f0fc96 2026-02-04 issue-168: improved /collection list UI/UX

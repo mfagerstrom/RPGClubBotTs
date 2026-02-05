@@ -246,8 +246,10 @@ const HELP_TOPICS: HelpTopic[] = [
       "(same game, platform, ownership type) are blocked. /collection list shows 10 entries per page " +
       "and includes a Filter Results button for title/platform/ownership filters. " +
       "Steam import now supports session start/status/pause/resume/cancel, plus per-item " +
-      "review with candidate dropdown selection plus Remap/Skip/Pause. " +
-      "Remap accepts GameDB id or candidate selector `c:<number>`.",
+      "review with per-candidate Choose buttons plus Search a different title/Enter GameDB ID/Skip/Pause. " +
+      "Single exact matches auto-accept. Search a different title re-runs matching using a title you enter. " +
+      "Enter GameDB ID accepts an existing GameDB ID or imports by IGDB numeric ID. " +
+      "For ambiguous matches, the candidate list can include titles chosen previously by other users.",
   },
   {
     id: "remindme",

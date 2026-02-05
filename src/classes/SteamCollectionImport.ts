@@ -750,3 +750,45 @@ export async function upsertSteamAppGameDbMap(params: {
     await connection.close();
   }
 }
+
+export async function getSteamAppHistoricalMappedGameIds(params: {
+  steamAppId: number;
+  excludeUserId?: string;
+  limit?: number;
+}): Promise<number[]> {
+  const limit = Number.isInteger(params.limit) && (params.limit ?? 0) > 0 ? Number(params.limit) : 5;
+  const connection = await getOraclePool().getConnection();
+  try {
+    const result = await connection.execute<{
+      GAMEDB_GAME_ID: number;
+    }>(
+      `SELECT t.GAMEDB_GAME_ID
+         FROM (
+           SELECT ii.GAMEDB_GAME_ID,
+                  COUNT(*) AS CNT,
+                  MAX(ii.ITEM_ID) AS LAST_ITEM_ID
+             FROM RPG_CLUB_STEAM_COLLECTION_IMPORT_ITEMS ii
+             JOIN RPG_CLUB_STEAM_COLLECTION_IMPORTS i
+               ON i.IMPORT_ID = ii.IMPORT_ID
+            WHERE ii.STEAM_APP_ID = :steamAppId
+              AND ii.GAMEDB_GAME_ID IS NOT NULL
+              AND ii.RESULT_REASON = 'MANUAL_REMAP'
+              AND (:excludeUserId IS NULL OR i.USER_ID <> :excludeUserId)
+            GROUP BY ii.GAMEDB_GAME_ID
+            ORDER BY CNT DESC, LAST_ITEM_ID DESC
+         ) t
+        WHERE ROWNUM <= :limit`,
+      {
+        steamAppId: params.steamAppId,
+        excludeUserId: params.excludeUserId ?? null,
+        limit,
+      },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+    );
+    return (result.rows ?? [])
+      .map((row) => Number(row.GAMEDB_GAME_ID))
+      .filter((value) => Number.isInteger(value) && value > 0);
+  } finally {
+    await connection.close();
+  }
+}

@@ -86,7 +86,7 @@ const STEAM_API_BASE = "https://api.steampowered.com";
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_ATTEMPTS = 4;
 const DEFAULT_MIN_INTERVAL_MS = 250;
-const APP_RELEASE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const APP_STORE_METADATA_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function getSteamApiKey(): string {
   return process.env.STEAM_WEB_API_KEY ?? process.env.STEAM_API_KEY ?? "";
@@ -198,9 +198,25 @@ function parseRetryAfter(headers: Headers): number | undefined {
   return undefined;
 }
 
+function normalizeHttpsUrl(raw: string | undefined): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value) return null;
+  if (value.length > 2048) return null;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:") return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
 export class SteamApiService {
   private nextAllowedAtMs = 0;
-  private appReleaseYearCache = new Map<number, { expiresAt: number; year: number | null }>();
+  private appStoreMetadataCache = new Map<
+    number,
+    { expiresAt: number; year: number | null; headerImageUrl: string | null }
+  >();
 
   private get apiKey(): string {
     const key = getSteamApiKey();
@@ -379,14 +395,20 @@ export class SteamApiService {
     };
   }
 
-  async getAppReleaseYear(appId: number): Promise<number | null> {
+  private async getAppStoreMetadata(appId: number): Promise<{
+    year: number | null;
+    headerImageUrl: string | null;
+  }> {
     if (!Number.isInteger(appId) || appId <= 0) {
-      return null;
+      return { year: null, headerImageUrl: null };
     }
 
-    const cached = this.appReleaseYearCache.get(appId);
+    const cached = this.appStoreMetadataCache.get(appId);
     if (cached && cached.expiresAt > Date.now()) {
-      return cached.year;
+      return {
+        year: cached.year,
+        headerImageUrl: cached.headerImageUrl,
+      };
     }
 
     try {
@@ -399,11 +421,12 @@ export class SteamApiService {
         },
       );
       if (!response.ok) {
-        this.appReleaseYearCache.set(appId, {
-          expiresAt: Date.now() + APP_RELEASE_CACHE_TTL_MS,
+        this.appStoreMetadataCache.set(appId, {
+          expiresAt: Date.now() + APP_STORE_METADATA_CACHE_TTL_MS,
           year: null,
+          headerImageUrl: null,
         });
-        return null;
+        return { year: null, headerImageUrl: null };
       }
 
       const payload = await response.json() as Record<string, {
@@ -412,24 +435,39 @@ export class SteamApiService {
           release_date?: {
             date?: string;
           };
+          header_image?: string;
         };
       }>;
       const appKey = String(appId);
-      const dateRaw = payload?.[appKey]?.data?.release_date?.date?.trim() ?? "";
+      const appData = payload?.[appKey]?.data;
+      const dateRaw = appData?.release_date?.date?.trim() ?? "";
       const yearMatch = /\b(19|20)\d{2}\b/.exec(dateRaw);
       const year = yearMatch ? Number(yearMatch[0]) : null;
-      this.appReleaseYearCache.set(appId, {
-        expiresAt: Date.now() + APP_RELEASE_CACHE_TTL_MS,
+      const headerImageUrl = normalizeHttpsUrl(appData?.header_image);
+      this.appStoreMetadataCache.set(appId, {
+        expiresAt: Date.now() + APP_STORE_METADATA_CACHE_TTL_MS,
         year,
+        headerImageUrl,
       });
-      return year;
+      return { year, headerImageUrl };
     } catch {
-      this.appReleaseYearCache.set(appId, {
-        expiresAt: Date.now() + APP_RELEASE_CACHE_TTL_MS,
+      this.appStoreMetadataCache.set(appId, {
+        expiresAt: Date.now() + APP_STORE_METADATA_CACHE_TTL_MS,
         year: null,
+        headerImageUrl: null,
       });
-      return null;
+      return { year: null, headerImageUrl: null };
     }
+  }
+
+  async getAppReleaseYear(appId: number): Promise<number | null> {
+    const metadata = await this.getAppStoreMetadata(appId);
+    return metadata.year;
+  }
+
+  async getAppHeaderImageUrl(appId: number): Promise<string | null> {
+    const metadata = await this.getAppStoreMetadata(appId);
+    return metadata.headerImageUrl;
   }
 }
 
