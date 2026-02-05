@@ -1,10 +1,14 @@
 # Commit snapshot (2026-02-05)
 
-ebc0557 2026-02-05 collection tweaks
-05d3980 2026-02-05 issue-22: implemented a basic collection system
-eb0a96a 2026-02-05 more changes
-e58df7c 2026-02-05 issue-155: bot will now store historical, deduped activity presence icons for user and can create emoji from them.  TO BE TESTED as no data is available right now.
-c91b542 2026-02-05 numerous improvements
+d045635 2026-02-04 issue-169: improved UI of new game release announcements
+7e3f769 2026-02-04 more collection tweaks
+7f0fc96 2026-02-04 issue-168: improved /collection list UI/UX
+5d9d699 2026-02-04 issue-165: implemented dedupe and filter of new release announcements
+ebc0557 2026-02-04 collection tweaks
+05d3980 2026-02-04 issue-22: implemented a basic collection system
+eb0a96a 2026-02-04 more changes
+e58df7c 2026-02-04 issue-155: bot will now store historical, deduped activity presence icons for user and can create emoji from them.  TO BE TESTED as no data is available right now.
+c91b542 2026-02-04 numerous improvements
 56b6db2 2026-02-04 issue-161: Added year to game title autocomplete fields
 7a3a9c7 2026-02-04 issue-162: redid the game completion edit command
 f400cba 2026-02-04 issue-162: added success message for game completion edits
@@ -55,3 +59,4 @@ f1e9904 2026-01-30 issue-136: Added more labels to /todo
 715d77a 2026-01-30 issue-8: Implement a synonym system to improve searches
 7884dcd 2026-01-30 issue-126: consolidated all message flag IDs into one file
 8bdb6d3 2026-01-30 issue-124: consolidated all tag ids into one file.
+2ed554e 2026-01-30 issue-123: consolidated all USER_ID constants into one file

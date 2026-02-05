@@ -239,11 +239,15 @@ const HELP_TOPICS: HelpTopic[] = [
       "[note:<string>] | /collection list [member:<user>] [filters...] | " +
       "/collection edit entry:<selection> [fields...] | /collection remove entry:<selection> | " +
       "/collection to-now-playing entry:<selection> [note_override:<string>] | " +
-      "/collection to-completion entry:<selection> completion_type:<type> [fields...]",
+      "/collection to-completion entry:<selection> completion_type:<type> [fields...] | " +
+      "/collection import-steam action:<start|resume|status|pause|cancel> [steam_profile:<id|url>]",
     notes:
       "Duplicate policy: same game on multiple platforms is supported. Exact duplicates " +
       "(same game, platform, ownership type) are blocked. /collection list shows 10 entries per page " +
-      "and includes a Filter Results button for title/platform/ownership filters.",
+      "and includes a Filter Results button for title/platform/ownership filters. " +
+      "Steam import now supports session start/status/pause/resume/cancel, plus per-item " +
+      "review with candidate dropdown selection plus Remap/Skip/Pause. " +
+      "Remap accepts GameDB id or candidate selector `c:<number>`.",
   },
   {
     id: "remindme",

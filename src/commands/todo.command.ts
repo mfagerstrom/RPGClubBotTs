@@ -76,6 +76,8 @@ type ListDirection = (typeof LIST_DIRECTIONS)[number];
 const MAX_ISSUE_BODY = 4000;
 const MAX_COMMENT_PREVIEW_LENGTH = 500;
 const MAX_TODO_IMAGES_PER_VIEW = 10;
+const MAX_TEXT_DISPLAY_CONTENT = 4000;
+const MAX_COMPONENT_DISPLAYABLE_TEXT_SIZE = 4000;
 const DEFAULT_PAGE_SIZE = 9;
 const MAX_PAGE_SIZE = 9;
 const ISSUE_LIST_TITLE = "RPGClub GameDB GitHub Issues";
@@ -550,6 +552,37 @@ function renderTodoContent(rawValue: string, maxTextLength: number): {
   };
 }
 
+function clampTextDisplayContent(value: string): string {
+  if (value.length <= MAX_TEXT_DISPLAY_CONTENT) {
+    return value;
+  }
+  return `${value.slice(0, MAX_TEXT_DISPLAY_CONTENT - 3)}...`;
+}
+
+function trimToBudget(value: string, maxLength: number): string {
+  if (maxLength <= 0) return "";
+  if (value.length <= maxLength) return value;
+  if (maxLength <= 3) return value.slice(0, maxLength);
+  return `${value.slice(0, maxLength - 3)}...`;
+}
+
+function addTextDisplayWithBudget(
+  container: ContainerBuilder,
+  budget: { remaining: number },
+  content: string,
+): void {
+  if (budget.remaining <= 0) {
+    return;
+  }
+  const normalized = clampTextDisplayContent(content);
+  const clipped = trimToBudget(normalized, budget.remaining);
+  if (!clipped.length) {
+    return;
+  }
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(clipped));
+  budget.remaining -= clipped.length;
+}
+
 function buildIssueCommentsDisplay(comments: IGithubIssueComment[]): {
   text: string;
   imageUrls: string[];
@@ -581,7 +614,11 @@ function buildIssueCommentsDisplay(comments: IGithubIssueComment[]): {
   };
 }
 
-function addIssueImagesToContainer(container: ContainerBuilder, imageUrls: string[]): void {
+function addIssueImagesToContainer(
+  container: ContainerBuilder,
+  imageUrls: string[],
+  budget?: { remaining: number },
+): void {
   const uniqueImages = Array.from(new Set(imageUrls)).slice(0, MAX_TODO_IMAGES_PER_VIEW);
   if (!uniqueImages.length) return;
 
@@ -590,9 +627,13 @@ function addIssueImagesToContainer(container: ContainerBuilder, imageUrls: strin
       .setURL(url)
       .setDescription(`Issue image ${index + 1}`),
   );
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent("### Images"),
-  );
+  if (budget) {
+    addTextDisplayWithBudget(container, budget, "### Images");
+  } else {
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent("### Images"),
+    );
+  }
   container.addMediaGalleryComponents(
     new MediaGalleryBuilder().addItems(galleryItems),
   );
@@ -1216,26 +1257,29 @@ function buildIssueViewComponents(
   payloadToken: string,
 ): { components: Array<ContainerBuilder | ActionRowBuilder<ButtonBuilder>> } {
   const container = new ContainerBuilder();
+  const textBudget = { remaining: MAX_COMPONENT_DISPLAYABLE_TEXT_SIZE };
   const titleText = issue.htmlUrl
     ? `## [${formatIssueTitle(issue)}](${issue.htmlUrl})`
     : `## ${formatIssueTitle(issue)}`;
-  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(titleText));
+  addTextDisplayWithBudget(container, textBudget, titleText);
 
   const issueBody = issue.body ?? "";
   const renderedBody = renderTodoContent(issueBody, MAX_ISSUE_BODY);
   if (renderedBody.text) {
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(renderedBody.text));
+    addTextDisplayWithBudget(container, textBudget, renderedBody.text);
   } else {
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent("*No description provided.*"),
-    );
+    addTextDisplayWithBudget(container, textBudget, "*No description provided.*");
   }
 
   const commentsDisplay = buildIssueCommentsDisplay(comments);
   if (commentsDisplay.text) {
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(commentsDisplay.text));
+    addTextDisplayWithBudget(container, textBudget, commentsDisplay.text);
   }
-  addIssueImagesToContainer(container, [...renderedBody.imageUrls, ...commentsDisplay.imageUrls]);
+  addIssueImagesToContainer(
+    container,
+    [...renderedBody.imageUrls, ...commentsDisplay.imageUrls],
+    textBudget,
+  );
 
   const assignee = issue.assignee ?? "Unassigned";
   const footerLine = [
@@ -1245,7 +1289,7 @@ function buildIssueViewComponents(
     `**Created:** ${formatDiscordTimestamp(issue.createdAt)}`,
     `**Updated:** ${formatDiscordTimestamp(issue.updatedAt)}`,
   ].join(" | ");
-  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(footerLine));
+  addTextDisplayWithBudget(container, textBudget, footerLine);
 
   const isOpen = issue.state === "open";
   const stateButton = isOpen
