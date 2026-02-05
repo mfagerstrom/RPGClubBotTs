@@ -641,14 +641,13 @@ async function buildCollectionListResponse(params: {
     }
     contentContainer.addSectionComponents(section);
   }
-  contentContainer.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(`-# Page ${safePage + 1}/${pageCount} • ${total} total entries`),
-  );
+  const footerParts = [`Page ${safePage + 1}/${pageCount}`, `${total} total entries`];
   if (filtersText) {
-    contentContainer.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`-# **Filters:** ${filtersText}`),
-    );
+    footerParts.push(`Filters: ${filtersText}`);
   }
+  contentContainer.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(`-# ${footerParts.join(" | ")}`),
+  );
   components.push(contentContainer);
 
   const row = new ActionRowBuilder<ButtonBuilder>();
