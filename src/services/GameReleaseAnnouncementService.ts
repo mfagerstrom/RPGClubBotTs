@@ -1,4 +1,5 @@
 import type { TextBasedChannel } from "discord.js";
+import { AttachmentBuilder } from "discord.js";
 import type { Client } from "discordx";
 import { DateTime } from "luxon";
 import GameReleaseAnnouncement, {
@@ -7,10 +8,12 @@ import GameReleaseAnnouncement, {
 import { GAME_NEWS_CHANNEL_ID } from "../config/channels.js";
 import { GameDb } from "../commands/gamedb.command.js";
 import { COMPONENTS_V2_FLAG } from "../config/flags.js";
+import { resolveAssetPath } from "../functions/AssetPath.js";
 
 const CHECK_INTERVAL_MS = 60_000;
 const BATCH_SIZE = 25;
 const RELEASE_SCHEDULING_ZONE = "UTC";
+const RELEASE_SPACER_IMAGE_PATH = resolveAssetPath("images", "force-message-width.png");
 const gameDbCommand = new GameDb();
 
 let gameReleaseTimer: NodeJS.Timeout | null = null;
@@ -27,17 +30,7 @@ function isSendableTextChannel(channel: TextBasedChannel | null): channel is Sen
 function buildAnnouncementPreface(candidate: IReleaseAnnouncementCandidate): string {
   const releaseTime = DateTime.fromJSDate(candidate.releaseDate).setZone(RELEASE_SCHEDULING_ZONE);
   const releaseUnix = Math.floor(releaseTime.toSeconds());
-
-  const lines: string[] = [
-    "🎮 **Upcoming release!**",
-    `Release: <t:${releaseUnix}:F> (<t:${releaseUnix}:R>)`,
-  ];
-
-  if (candidate.igdbUrl) {
-    lines.push(`Source: ${candidate.igdbUrl}`);
-  }
-
-  return lines.join("\n");
+  return `## Upcoming Game Release\n<t:${releaseUnix}:F> (<t:${releaseUnix}:R>)`;
 }
 
 async function fetchGameNewsChannel(client: Client): Promise<SendableTextChannel | null> {
@@ -77,7 +70,7 @@ async function checkAndSendReleaseAnnouncements(client: Client): Promise<void> {
   for (const candidate of due) {
     try {
       const payload = await gameDbCommand.buildGameProfileMessagePayload(candidate.gameId, {
-        includeActions: true,
+        includeActions: false,
         guildId: getGuildId(channel),
         prefaceText: buildAnnouncementPreface(candidate),
       });
@@ -88,7 +81,10 @@ async function checkAndSendReleaseAnnouncements(client: Client): Promise<void> {
         continue;
       }
       await channel.send({
-        files: payload.files,
+        files: [
+          ...payload.files,
+          new AttachmentBuilder(RELEASE_SPACER_IMAGE_PATH, { name: "force-message-width.png" }),
+        ],
         components: payload.components,
         flags: COMPONENTS_V2_FLAG,
       });

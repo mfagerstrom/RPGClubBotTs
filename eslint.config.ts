@@ -82,6 +82,7 @@ export default [
       "local/slash-options-required-first": "error",
       "local/no-unused-imports-vars-local": "error",
       "local/no-build-folder-edits": "error",
+      "local/attachment-builder-asset-path": "error",
       "local/no-emdash": "error",
       "local/channel-id-constants-in-channels-config": "error",
       "local/user-id-constants-in-users-config": "error",

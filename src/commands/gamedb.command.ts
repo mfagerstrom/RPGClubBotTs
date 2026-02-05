@@ -41,10 +41,12 @@ import {
 import {
   ContainerBuilder,
   SectionBuilder,
+  SeparatorBuilder,
   TextDisplayBuilder,
   ThumbnailBuilder,
   ButtonBuilder as V2ButtonBuilder,
 } from "@discordjs/builders";
+import { SeparatorSpacingSize } from "discord-api-types/v10";
 import {
   AnyRepliable,
   safeDeferReply,
@@ -137,6 +139,8 @@ type GameDbCsvParsedRow = {
 
 type GameProfileRenderContext = {
   guildId?: string;
+  includeInlineButtons?: boolean;
+  prefaceText?: string;
 };
 
 function decodeSearchQuery(encoded: string): string {
@@ -2009,14 +2013,16 @@ export class GameDb {
     components: Array<ContainerBuilder | ActionRowBuilder<ButtonBuilder>>;
     files: AttachmentBuilder[];
   } | null> {
+    const includeActions = options?.includeActions ?? true;
     const profile = await this.buildGameProfile(gameId, {
       guildId: options?.guildId,
+      includeInlineButtons: includeActions,
+      prefaceText: options?.prefaceText,
     });
     if (!profile) {
       return null;
     }
 
-    const includeActions = options?.includeActions ?? true;
     const components = [...profile.components];
     if (includeActions) {
       components.push(
@@ -2030,14 +2036,6 @@ export class GameDb {
           profile.isReleased,
         ),
       );
-    }
-
-    const preface = options?.prefaceText?.trim();
-    if (preface) {
-      const prefaceContainer = new ContainerBuilder().addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(this.trimTextDisplayContent(preface)),
-      );
-      components.unshift(prefaceContainer);
     }
 
     return {
@@ -2085,6 +2083,9 @@ export class GameDb {
 
       const description = game.description || "No description available.";
       const container = new ContainerBuilder();
+      const includeInlineButtons =
+        (interaction as GameProfileRenderContext | undefined)?.includeInlineButtons ?? true;
+      const prefaceText = (interaction as GameProfileRenderContext | undefined)?.prefaceText?.trim();
 
       const files: AttachmentBuilder[] = [];
       const isThumbnailBad = Boolean(game.thumbnailBad);
@@ -2310,7 +2311,7 @@ export class GameDb {
         if (hltbLines.length) {
           bodyParts.push({ content: `**HowLongToBeat™**\n${hltbLines.join("\n")}` });
         }
-      } else if (canImportHltb) {
+      } else if (canImportHltb && includeInlineButtons) {
         const importHltb = new V2ButtonBuilder()
           .setCustomId(`gamedb-action:hltb-import:${gameId}`)
           .setLabel("Import HLTB Data")
@@ -2354,6 +2355,15 @@ export class GameDb {
           accessory: block.accessory,
         }))
         .filter((block) => block.content.length > 0);
+
+      if (prefaceText) {
+        container.addTextDisplayComponents(
+          new TextDisplayBuilder().setContent(this.trimTextDisplayContent(prefaceText)),
+        );
+        container.addSeparatorComponents(
+          new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Large).setDivider(true),
+        );
+      }
 
       if (primaryArt) {
         if (headerBlock.length > 0) {

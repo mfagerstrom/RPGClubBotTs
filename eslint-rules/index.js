@@ -48,6 +48,8 @@ const COMPONENTS_V2_PAYLOAD_FACTORY_NAMES = new Set([
   "buildGameProfileMessagePayload",
 ]);
 const MESSAGE_SEND_METHODS = new Set(["send"]);
+const ASSET_PATH_HELPER_NAME = "resolveAssetPath";
+const ATTACHMENT_BUILDER_NAME = "AttachmentBuilder";
 
 function isRelativeImportPath(value) {
   return typeof value === "string" && value.startsWith(".");
@@ -384,6 +386,58 @@ function unwrapAwaitExpression(node) {
   return node;
 }
 
+function normalizePathText(text) {
+  if (typeof text !== "string") return "";
+  return text.replace(/\\/g, "/").toLowerCase();
+}
+
+function resolveAttachmentPathExpression(node, urlPathMap) {
+  if (!node) return null;
+  if (node.type === "Literal" && typeof node.value === "string") {
+    return node.value;
+  }
+  if (node.type === "TemplateLiteral" && node.expressions.length === 0) {
+    return node.quasis[0]?.value?.cooked ?? node.quasis[0]?.value?.raw ?? "";
+  }
+  if (node.type === "Identifier") {
+    return urlPathMap.get(node.name) ?? null;
+  }
+  if (
+    node.type === "CallExpression" &&
+    node.callee.type === "Identifier" &&
+    node.callee.name === "fileURLToPath"
+  ) {
+    const [firstArg] = node.arguments;
+    if (
+      firstArg &&
+      firstArg.type === "NewExpression" &&
+      firstArg.callee.type === "Identifier" &&
+      firstArg.callee.name === "URL"
+    ) {
+      const [urlArg] = firstArg.arguments;
+      if (urlArg && urlArg.type === "Literal" && typeof urlArg.value === "string") {
+        return urlArg.value;
+      }
+    }
+  }
+  return null;
+}
+
+function isResolveAssetPathCall(node) {
+  if (!node || node.type !== "CallExpression") return false;
+  if (node.callee.type === "Identifier" && node.callee.name === ASSET_PATH_HELPER_NAME) {
+    return true;
+  }
+  if (
+    node.callee.type === "MemberExpression" &&
+    node.callee.property.type === "Identifier" &&
+    node.callee.property.name === ASSET_PATH_HELPER_NAME
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export default {
   rules: {
     "no-djs-button-in-v2-accessory": {
@@ -695,6 +749,60 @@ export default {
             if (!filename || filename === "<input>") return;
             if (filename.includes("/build/") || filename.includes("\\\\build\\\\")) {
               context.report({ node, messageId: "buildFolder" });
+            }
+          },
+        };
+      },
+    },
+    "attachment-builder-asset-path": {
+      meta: {
+        type: "problem",
+        docs: {
+          description:
+            "Require filesystem paths passed to AttachmentBuilder to resolve from src/assets and never build.",
+        },
+        schema: [],
+        messages: {
+          buildPath:
+            "AttachmentBuilder file paths must not resolve from build/. Use resolveAssetPath(...) from src/assets.",
+          invalidPath:
+            "AttachmentBuilder file paths must resolve from src/assets. Use resolveAssetPath(...) helper.",
+        },
+      },
+      create(context) {
+        const urlPathMap = new Map();
+
+        return {
+          VariableDeclarator(node) {
+            if (!node.id || node.id.type !== "Identifier") return;
+            const resolved = resolveAttachmentPathExpression(node.init, urlPathMap);
+            if (typeof resolved === "string") {
+              urlPathMap.set(node.id.name, resolved);
+            }
+          },
+          NewExpression(node) {
+            if (node.callee.type !== "Identifier" || node.callee.name !== ATTACHMENT_BUILDER_NAME) {
+              return;
+            }
+
+            const [firstArg] = node.arguments;
+            if (!firstArg) return;
+
+            if (isResolveAssetPathCall(firstArg)) return;
+
+            const resolvedPath = resolveAttachmentPathExpression(firstArg, urlPathMap);
+            if (typeof resolvedPath !== "string") return;
+
+            const normalized = normalizePathText(resolvedPath);
+            if (!normalized) return;
+
+            if (normalized.includes("/build/") || normalized.startsWith("build/")) {
+              context.report({ node: firstArg, messageId: "buildPath" });
+              return;
+            }
+
+            if (!normalized.includes("src/assets/") && normalized !== "src/assets") {
+              context.report({ node: firstArg, messageId: "invalidPath" });
             }
           },
         };

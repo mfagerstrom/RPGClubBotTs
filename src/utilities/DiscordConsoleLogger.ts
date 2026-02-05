@@ -1,8 +1,8 @@
-import { join } from "node:path";
 import { AttachmentBuilder, EmbedBuilder, type MessageCreateOptions, type TextBasedChannel } from "discord.js";
 import type { Client } from "discordx";
 
 import { DISCORD_CONSOLE_LOG_CHANNEL_ID } from "../config/channels.js";
+import { resolveAssetPath } from "../functions/AssetPath.js";
 const MAX_DESCRIPTION_LENGTH = 3900;
 const LEVEL_COLORS: Record<string, number> = {
   log: 0x95a5a6,
@@ -13,13 +13,19 @@ const LEVEL_COLORS: Record<string, number> = {
 };
 const LOG_BATCH_INTERVAL_MS = 15 * 1000;
 const FORCE_WIDTH_IMAGE_NAME = "force-message-width.png";
-const FORCE_WIDTH_IMAGE_PATH = join(
-  process.cwd(),
-  "src",
-  "assets",
-  "images",
-  FORCE_WIDTH_IMAGE_NAME,
-);
+const FORCE_WIDTH_IMAGE_PATH = resolveAssetPath("images", FORCE_WIDTH_IMAGE_NAME);
+const STARTUP_COMPLETE_LOG = "Startup sequence completed.";
+const STARTUP_ALLOWED_LOG_PATTERNS: RegExp[] = [
+  /^bot >> connecting discord\.\.\.$/i,
+  /^RPGClub GameDB >> commands >> global$/,
+  /^>> adding\s+\d+\s+\[.*\]$/,
+  /^>> deleting\s+\d+\s+\[.*\]$/,
+  /^>> skipping\s+\d+\s+\[.*\]$/,
+  /^>> updating\s+\d+\s+\[.*\]$/,
+  /^\[ThreadSync\] Service started$/,
+  /^\[ThreadLinkPrompt\] Service started$/,
+  /^Startup sequence completed\.$/,
+];
 
 type ConsoleLevel = "log" | "error" | "warn" | "info" | "debug";
 
@@ -38,6 +44,7 @@ let logChannel: ILoggerChannel | null = null;
 let resolvingChannel = false;
 let logBuffer: { time: number; message: string }[] = [];
 let logBufferTimer: NodeJS.Timeout | null = null;
+let startupLogFilterEnabled = true;
 
 function formatArgs(args: unknown[]): string {
   return args
@@ -51,6 +58,28 @@ function formatArgs(args: unknown[]): string {
       }
     })
     .join(" ");
+}
+
+function isAllowedStartupLog(message: string): boolean {
+  const lines = message
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (!lines.length) return false;
+  return lines.every((line) =>
+    STARTUP_ALLOWED_LOG_PATTERNS.some((pattern) => pattern.test(line))
+  );
+}
+
+function shouldSendToDiscord(level: ConsoleLevel, message: string): boolean {
+  if (!startupLogFilterEnabled) return true;
+  if (level === "log" && isAllowedStartupLog(message)) {
+    if (message.includes(STARTUP_COMPLETE_LOG)) {
+      startupLogFilterEnabled = false;
+    }
+    return true;
+  }
+  return false;
 }
 
 async function ensureChannel(): Promise<ILoggerChannel | null> {
@@ -140,6 +169,10 @@ async function flushLogBuffer(): Promise<void> {
 
 async function sendToDiscord(level: ConsoleLevel, message: string): Promise<void> {
   try {
+    if (!shouldSendToDiscord(level, message)) {
+      return;
+    }
+
     if (level === "log") {
       logBuffer.push({ message, time: Date.now() });
       if (!logBufferTimer) {
