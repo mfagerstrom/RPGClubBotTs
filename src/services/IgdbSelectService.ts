@@ -12,6 +12,7 @@ type Session = {
   options: IgdbSelectOption[];
   onSelect: (interaction: StringSelectMenuInteraction, gameId: number) => Promise<void>;
   extraComponents?: ActionRowBuilder<any>[];
+  emptyMessage?: string;
 };
 
 // Leave room for prev/next navigation in the 25-option Discord limit.
@@ -42,6 +43,7 @@ export function createIgdbSession(
   options: IgdbSelectOption[],
   onSelect: Session["onSelect"],
   extraComponents?: ActionRowBuilder<any>[],
+  emptyMessage?: string,
 ): {
   sessionId: string;
   components: ActionRowBuilder<any>[];
@@ -52,7 +54,13 @@ export function createIgdbSession(
     if (lenDiff !== 0) return lenDiff;
     return a.label.localeCompare(b.label);
   });
-  getSessionStore().set(sessionId, { ownerId, options: sorted, onSelect, extraComponents });
+  getSessionStore().set(sessionId, {
+    ownerId,
+    options: sorted,
+    onSelect,
+    extraComponents,
+    emptyMessage,
+  });
   return {
     sessionId,
     components: buildIgdbComponents(sessionId, 0),
@@ -66,19 +74,26 @@ export function buildIgdbComponents(
   const session = getSessionStore().get(sessionId);
   if (!session) return [];
   const { pageOptions, totalPages } = chunkOptions(session.options, page);
+  const hasOptions = pageOptions.length > 0;
 
   const select = new StringSelectMenuBuilder()
     .setCustomId(`igdb-select:${sessionId}:${page}`)
     .setPlaceholder("Select a game from IGDB")
     .addOptions(
-      pageOptions.map((opt) => ({
-        label: opt.label.slice(0, 100),
-        value: String(opt.id),
-        description: opt.description?.slice(0, 100),
-      })),
+      hasOptions
+        ? pageOptions.map((opt) => ({
+          label: opt.label.slice(0, 100),
+          value: String(opt.id),
+          description: opt.description?.slice(0, 100),
+        }))
+        : [{
+          label: "No IGDB matches found",
+          value: "__igdb_none",
+          description: "Search a different title",
+        }],
     );
 
-  if (totalPages > 1) {
+  if (hasOptions && totalPages > 1) {
     if (page > 0) {
       select.addOptions({
         label: "Previous page",
@@ -139,6 +154,17 @@ export async function handleIgdbSelectInteraction(
   const value = interaction.values?.[0];
   if (!value) return true;
 
+  if (value === "__igdb_none") {
+    const message = session.emptyMessage ??
+      "No IGDB matches found. Try Search a different title.";
+    if (interaction.deferred || interaction.replied) {
+      await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
+    } else {
+      await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
+    }
+    return true;
+  }
+
   if (value === "__igdb_prev" || value === "__igdb_next") {
     const result = resolveIgdbSelection(sessionId, page, value);
     if (result && result.kind === "page") {
@@ -164,6 +190,9 @@ export async function handleIgdbSelectInteraction(
   }
 
   try {
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.deferUpdate().catch(() => {});
+    }
     await session.onSelect(interaction, selected.gameId);
   } finally {
     getSessionStore().delete(sessionId);

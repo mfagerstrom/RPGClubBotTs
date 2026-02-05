@@ -605,6 +605,12 @@ function buildSteamImportMessageContainer(content: string, thumbnailUrl: string 
   return container;
 }
 
+function buildSteamImportTextContainer(content: string): ContainerBuilder {
+  return new ContainerBuilder().addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(safeV2TextContent(content, 3500)),
+  );
+}
+
 function buildSteamImportIgdbContainer(params: {
   steamAppName: string;
   igdbRows: ActionRowBuilder<any>[];
@@ -1484,14 +1490,19 @@ export class CollectionCommand {
     importId: number,
     ownerId: string,
   ): Promise<void> {
-    const shouldUseInteractionUpdate = interaction.isButton() ||
-      interaction.isStringSelectMenu() ||
-      interaction.isModalSubmit();
+    const shouldUseInteractionUpdate = (interaction.isButton() || interaction.isStringSelectMenu()) &&
+      !interaction.deferred &&
+      !interaction.replied;
+    const shouldUseModalUpdate = interaction.isModalSubmit();
 
     const session = await getSteamCollectionImportById(importId);
     if (!session || session.userId !== ownerId) {
-      const payload = { content: "This Steam import session no longer exists.", components: [] };
-      if (shouldUseInteractionUpdate) {
+      const payload = {
+        content: null,
+        components: [buildSteamImportTextContainer("This Steam import session no longer exists.")],
+        flags: buildComponentsV2Flags(true),
+      };
+      if (shouldUseInteractionUpdate || shouldUseModalUpdate) {
         await safeUpdate(interaction, payload);
       } else {
         await interaction.editReply(payload);
@@ -1501,10 +1512,13 @@ export class CollectionCommand {
 
     if (session.status !== "ACTIVE") {
       const payload = {
-        content: `Steam import #${session.importId} is ${session.status.toLowerCase()}.`,
-        components: [],
+        content: null,
+        components: [buildSteamImportTextContainer(
+          `Steam import #${session.importId} is ${session.status.toLowerCase()}.`,
+        )],
+        flags: buildComponentsV2Flags(true),
       };
-      if (shouldUseInteractionUpdate) {
+      if (shouldUseInteractionUpdate || shouldUseModalUpdate) {
         await safeUpdate(interaction, payload);
       } else {
         await interaction.editReply(payload);
@@ -1535,10 +1549,15 @@ export class CollectionCommand {
         `Failed: ${stats.failed}`,
         ...(reasonLines.length ? ["", `Reasons: ${reasonLines.join(" | ")}`] : []),
       ].join("\n");
-      if (shouldUseInteractionUpdate) {
-        await safeUpdate(interaction, { content: done, components: [] });
+      const payload = {
+        content: null,
+        components: [buildSteamImportTextContainer(done)],
+        flags: buildComponentsV2Flags(true),
+      };
+      if (shouldUseInteractionUpdate || shouldUseModalUpdate) {
+        await safeUpdate(interaction, payload);
       } else {
-        await interaction.editReply({ content: done, components: [] });
+        await interaction.editReply(payload);
       }
       return;
     }
@@ -1546,6 +1565,7 @@ export class CollectionCommand {
     await updateSteamCollectionImportIndex(session.importId, nextItem.rowIndex);
     let candidates = parseSteamImportCandidates(nextItem.matchCandidateJson);
     let igdbComponents: ActionRowBuilder<any>[] | null = null;
+    let igdbHasResults = false;
     if (!candidates.length) {
       const mapped = await getSteamAppGameDbMapByAppId(nextItem.steamAppId);
       if (mapped?.status === "MAPPED" && mapped.gameDbGameId) {
@@ -1575,82 +1595,92 @@ export class CollectionCommand {
         matchConfidence,
         resultReason: !candidates.length && mapped?.status === "SKIPPED" ? "SKIP_MAPPED" : null,
       });
+    }
 
     try {
       const igdbSearchTitle = normalizeSteamTitleForSearch(nextItem.steamAppName);
       const igdbSearch = await igdbService.searchGames(igdbSearchTitle, 10);
-      if (igdbSearch.results.length) {
-        const options = await buildCollectionIgdbSelectOptions(igdbSearch.results);
-        const igdbSession = createIgdbSession(
-          ownerId,
-          options,
-          async (selectionInteraction, igdbId) => {
-            await selectionInteraction.deferUpdate().catch(() => {});
-            const currentSession = await getSteamCollectionImportById(session.importId);
-            if (!currentSession || currentSession.userId !== ownerId || currentSession.status !== "ACTIVE") {
-              await selectionInteraction.followUp({
-                content: "This Steam import session is no longer active.",
-                flags: MessageFlags.Ephemeral,
-              }).catch(() => {});
-              return;
-            }
+      igdbHasResults = igdbSearch.results.length > 0;
+      const options = igdbHasResults
+        ? await buildCollectionIgdbSelectOptions(igdbSearch.results)
+        : [];
+      const igdbSession = createIgdbSession(
+        ownerId,
+        options,
+        async (selectionInteraction, igdbId) => {
+          const currentSession = await getSteamCollectionImportById(session.importId);
+          if (!currentSession || currentSession.userId !== ownerId || currentSession.status !== "ACTIVE") {
+            await selectionInteraction.followUp({
+              content: "This Steam import session is no longer active.",
+              flags: MessageFlags.Ephemeral,
+            }).catch(() => {});
+            return;
+          }
 
-            const currentItem = await getSteamCollectionImportItemById(nextItem.itemId);
-            if (
-              !currentItem ||
-              currentItem.importId !== session.importId ||
-              currentItem.status !== "PENDING"
-            ) {
-              await selectionInteraction.followUp({
-                content: "This import row is no longer pending.",
-                flags: MessageFlags.Ephemeral,
-              }).catch(() => {});
-              return;
-            }
+          const currentItem = await getSteamCollectionImportItemById(nextItem.itemId);
+          if (
+            !currentItem ||
+            currentItem.importId !== session.importId ||
+            currentItem.status !== "PENDING"
+          ) {
+            await selectionInteraction.followUp({
+              content: "This import row is no longer pending.",
+              flags: MessageFlags.Ephemeral,
+            }).catch(() => {});
+            return;
+          }
 
-            try {
-              const imported = await Game.importGameFromIgdb(igdbId);
-              await updateSteamCollectionImportItem(currentItem.itemId, {
-                matchCandidateJson: JSON.stringify([{
-                  gameId: imported.gameId,
-                  title: imported.title,
-                } satisfies SteamImportCandidate]),
-                matchConfidence: "MANUAL",
-              });
-
-              await this.applySteamImportSelection({
-                ownerId,
+          try {
+            const imported = await Game.importGameFromIgdb(igdbId);
+            await updateSteamCollectionImportItem(currentItem.itemId, {
+              matchCandidateJson: JSON.stringify([{
                 gameId: imported.gameId,
-                itemId: currentItem.itemId,
-                steamAppId: currentItem.steamAppId,
-                reason: "MANUAL_REMAP",
-              });
-              logSteamImportEvent("item_igdb_imported", {
-                userId: ownerId,
-                importId: session.importId,
-                itemId: currentItem.itemId,
-                steamAppId: currentItem.steamAppId,
-                gameDbGameId: imported.gameId,
-              });
-            } catch (error: any) {
-              await updateSteamCollectionImportItem(currentItem.itemId, {
-                resultReason: "ADD_FAILED",
-                errorText: error?.message ?? "Failed to import title from IGDB.",
-              });
-            }
+                title: imported.title,
+              } satisfies SteamImportCandidate]),
+              matchConfidence: "MANUAL",
+            });
 
-            await this.renderNextSteamImportItem(
-              selectionInteraction,
-              session.importId,
+            await this.applySteamImportSelection({
               ownerId,
-            );
-          },
-        );
-        igdbComponents = igdbSession.components;
-      }
+              gameId: imported.gameId,
+              itemId: currentItem.itemId,
+              steamAppId: currentItem.steamAppId,
+              reason: "MANUAL_REMAP",
+            });
+            logSteamImportEvent("item_igdb_imported", {
+              userId: ownerId,
+              importId: session.importId,
+              itemId: currentItem.itemId,
+              steamAppId: currentItem.steamAppId,
+              gameDbGameId: imported.gameId,
+            });
+          } catch (error: any) {
+            await updateSteamCollectionImportItem(currentItem.itemId, {
+              resultReason: "ADD_FAILED",
+              errorText: error?.message ?? "Failed to import title from IGDB.",
+            });
+          }
+
+          await this.renderNextSteamImportItem(
+            selectionInteraction,
+            session.importId,
+            ownerId,
+          );
+        },
+        undefined,
+        `No IGDB matches found for "${nextItem.steamAppName}". Try Search a different title.`,
+      );
+      igdbComponents = igdbSession.components;
     } catch {
       // if IGDB lookup fails, continue with regular actions
-    }
+      const igdbSession = createIgdbSession(
+        ownerId,
+        [],
+        async () => {},
+        undefined,
+        `No IGDB matches found for "${nextItem.steamAppName}". Try Search a different title.`,
+      );
+      igdbComponents = igdbSession.components;
     }
 
     const [steamReleaseYear, steamHeaderImageUrl] = await Promise.all([
@@ -1711,7 +1741,7 @@ export class CollectionCommand {
     const igdbContainer = buildSteamImportIgdbContainer({
       steamAppName: nextItem.steamAppName,
       igdbRows: igdbComponents ?? [],
-      noResultsText: igdbComponents?.length
+      noResultsText: igdbHasResults
         ? null
         : "No IGDB matches found for this title. Try Search a different title.",
     });
@@ -1728,7 +1758,7 @@ export class CollectionCommand {
     });
 
     try {
-      if (shouldUseInteractionUpdate) {
+      if (shouldUseInteractionUpdate || shouldUseModalUpdate) {
         await safeUpdate(interaction, {
           content: null,
           components,
@@ -1989,21 +2019,26 @@ export class CollectionCommand {
     const session = await getSteamCollectionImportById(parsed.importId);
     if (!session || session.userId !== parsed.ownerId) {
       await safeUpdate(interaction, {
-        content: "This Steam import session no longer exists.",
-        components: [],
+        content: null,
+        components: [buildSteamImportTextContainer("This Steam import session no longer exists.")],
+        flags: buildComponentsV2Flags(true),
       });
       return;
     }
     if (session.status !== "ACTIVE") {
       await safeUpdate(interaction, {
-        content: `Steam import #${session.importId} is ${session.status.toLowerCase()}.`,
-        components: [],
+        content: null,
+        components: [buildSteamImportTextContainer(
+          `Steam import #${session.importId} is ${session.status.toLowerCase()}.`,
+        )],
+        flags: buildComponentsV2Flags(true),
       });
       return;
     }
 
     const item = await getNextPendingSteamCollectionImportItem(session.importId);
     if (!item || item.itemId !== parsed.itemId) {
+      await interaction.deferUpdate().catch(() => {});
       await this.renderNextSteamImportItem(interaction, session.importId, parsed.ownerId);
       return;
     }
@@ -2011,15 +2046,18 @@ export class CollectionCommand {
     if (parsed.action === "pause") {
       await setSteamCollectionImportStatus(session.importId, "PAUSED");
       await safeUpdate(interaction, {
-        content:
+        content: null,
+        components: [buildSteamImportTextContainer(
           `Steam import #${session.importId} paused. ` +
           "Use `/collection import-steam action:resume` to continue.",
-        components: [],
+        )],
+        flags: buildComponentsV2Flags(true),
       });
       return;
     }
 
     if (parsed.action === "skip") {
+      await interaction.deferUpdate().catch(() => {});
       await updateSteamCollectionImportItem(item.itemId, {
         status: "SKIPPED",
         resultReason: "MANUAL_SKIP",
@@ -2119,18 +2157,21 @@ export class CollectionCommand {
     const session = await getSteamCollectionImportById(parsed.importId);
     if (!session || session.userId !== parsed.ownerId || session.status !== "ACTIVE") {
       await safeUpdate(interaction, {
-        content: "This Steam import session is no longer active.",
-        components: [],
+        content: null,
+        components: [buildSteamImportTextContainer("This Steam import session is no longer active.")],
+        flags: buildComponentsV2Flags(true),
       });
       return;
     }
 
     const item = await getNextPendingSteamCollectionImportItem(session.importId);
     if (!item || item.itemId !== parsed.itemId) {
+      await interaction.deferUpdate().catch(() => {});
       await this.renderNextSteamImportItem(interaction, session.importId, parsed.ownerId);
       return;
     }
 
+    await interaction.deferUpdate().catch(() => {});
     await this.applySteamImportSelection({
       ownerId: parsed.ownerId,
       gameId: parsed.gameId,
@@ -2404,7 +2445,6 @@ export class CollectionCommand {
         interaction.user.id,
         resolution.options,
         async (selectionInteraction, igdbId) => {
-          await selectionInteraction.deferUpdate().catch(() => {});
           try {
             const imported = await Game.importGameFromIgdb(igdbId);
             const created = await UserGameCollection.addEntry({
