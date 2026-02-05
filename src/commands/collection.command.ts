@@ -6,9 +6,11 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonInteraction,
+  ModalBuilder,
+  ModalSubmitInteraction,
   MessageFlags,
-  StringSelectMenuBuilder,
-  StringSelectMenuInteraction,
+  TextInputBuilder,
+  TextInputStyle,
   type User,
 } from "discord.js";
 import {
@@ -18,7 +20,7 @@ import {
   SlashGroup,
   SlashOption,
   ButtonComponent,
-  SelectMenuComponent,
+  ModalComponent,
 } from "discordx";
 import {
   ContainerBuilder,
@@ -55,13 +57,15 @@ import {
   type IgdbSelectOption,
 } from "../services/IgdbSelectService.js";
 import { COMPONENTS_V2_FLAG } from "../config/flags.js";
-import { GameDb } from "./gamedb.command.js";
 
 const COLLECTION_ENTRY_VALUE_PREFIX = "collection";
-const COLLECTION_LIST_PAGE_SIZE = 5;
+const COLLECTION_LIST_PAGE_SIZE = 10;
 const COLLECTION_LIST_NAV_PREFIX = "collection-list-nav-v2";
-const COLLECTION_LIST_DETAILS_PREFIX = "collection-list-details-v1";
-const COLLECTION_MAX_SECTIONS_PER_CONTAINER = 10;
+const COLLECTION_LIST_FILTER_PREFIX = "collection-list-filter-v1";
+const COLLECTION_LIST_FILTER_PANEL_PREFIX = "clf1";
+const COLLECTION_LIST_FILTER_MODAL_PREFIX = "clfm1";
+const COLLECTION_FILTER_TITLE_INPUT_ID = "collection-filter-title";
+const COLLECTION_FILTER_PLATFORM_INPUT_ID = "collection-filter-platform";
 
 function buildComponentsV2Flags(isEphemeral: boolean): number {
   return (isEphemeral ? MessageFlags.Ephemeral : 0) | COMPONENTS_V2_FLAG;
@@ -188,23 +192,6 @@ async function autocompleteCollectionEntry(
   );
 }
 
-function packFilterValue(value: string | undefined): string {
-  if (!value) return "_";
-  const trimmed = value.trim();
-  if (!trimmed) return "_";
-  return Buffer.from(trimmed.slice(0, 8), "utf8").toString("base64url");
-}
-
-function unpackFilterValue(value: string): string | undefined {
-  if (!value || value === "_") return undefined;
-  try {
-    const decoded = Buffer.from(value, "base64url").toString("utf8").trim();
-    return decoded || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 function ownershipTypeToCode(value: CollectionOwnershipType | undefined): string {
   if (!value) return "_";
   return value[0]?.toUpperCase() ?? "_";
@@ -218,14 +205,21 @@ function ownershipCodeToType(code: string): CollectionOwnershipType | undefined 
   return undefined;
 }
 
+function nextOwnershipType(
+  ownershipType: CollectionOwnershipType | undefined,
+): CollectionOwnershipType | undefined {
+  if (!ownershipType) return "Digital";
+  if (ownershipType === "Digital") return "Physical";
+  if (ownershipType === "Physical") return "Subscription";
+  if (ownershipType === "Subscription") return "Other";
+  return undefined;
+}
+
 function buildCollectionListNavId(params: {
   viewerUserId: string;
   targetUserId: string;
   page: number;
   isEphemeral: boolean;
-  ownershipCode: string;
-  packedTitle: string;
-  packedPlatform: string;
   direction: "prev" | "next";
 }): string {
   return [
@@ -234,9 +228,6 @@ function buildCollectionListNavId(params: {
     params.targetUserId,
     String(params.page),
     params.isEphemeral ? "e" : "p",
-    params.ownershipCode,
-    params.packedTitle,
-    params.packedPlatform,
     params.direction,
   ].join(":");
 }
@@ -246,23 +237,17 @@ function parseCollectionListNavId(customId: string): {
   targetUserId: string;
   page: number;
   isEphemeral: boolean;
-  ownershipType: CollectionOwnershipType | undefined;
-  title: string | undefined;
-  platform: string | undefined;
   direction: "prev" | "next";
 } | null {
   const parts = customId.split(":");
-  if (parts.length !== 9) return null;
+  if (parts.length !== 6) return null;
   if (parts[0] !== COLLECTION_LIST_NAV_PREFIX) return null;
 
   const viewerUserId = parts[1];
   const targetUserId = parts[2];
   const page = Number(parts[3]);
   const visibility = parts[4];
-  const ownershipType = ownershipCodeToType(parts[5]);
-  const title = unpackFilterValue(parts[6]);
-  const platform = unpackFilterValue(parts[7]);
-  const direction = parts[8] as "prev" | "next";
+  const direction = parts[5] as "prev" | "next";
   if (!Number.isInteger(page) || page < 0) return null;
   if (visibility !== "e" && visibility !== "p") return null;
   if (direction !== "prev" && direction !== "next") return null;
@@ -272,36 +257,299 @@ function parseCollectionListNavId(customId: string): {
     targetUserId,
     page,
     isEphemeral: visibility === "e",
-    ownershipType,
-    title,
-    platform,
     direction,
   };
 }
 
-function buildCollectionDetailsSelectId(viewerUserId: string): string {
-  return `${COLLECTION_LIST_DETAILS_PREFIX}:${viewerUserId}`;
+function buildCollectionFilterActionId(params: {
+  viewerUserId: string;
+  targetUserId: string;
+  isEphemeral: boolean;
+  action: "open";
+}): string {
+  return [
+    COLLECTION_LIST_FILTER_PREFIX,
+    params.viewerUserId,
+    params.targetUserId,
+    params.isEphemeral ? "e" : "p",
+    params.action,
+  ].join(":");
 }
 
-function buildCollectionDetailsValue(entryId: number, gameId: number): string {
-  return `entry:${entryId}:game:${gameId}`;
-}
-
-function parseCollectionDetailsValue(value: string): { entryId: number; gameId: number } | null {
-  const match = /^entry:(\d+):game:(\d+)$/.exec(value.trim());
-  if (!match) return null;
-  const entryId = Number(match[1]);
-  const gameId = Number(match[2]);
-  if (!Number.isInteger(entryId) || entryId <= 0) return null;
-  if (!Number.isInteger(gameId) || gameId <= 0) return null;
-  return { entryId, gameId };
-}
-
-function parseCollectionDetailsSelectId(customId: string): { viewerUserId: string } | null {
+function parseCollectionFilterActionId(customId: string): {
+  viewerUserId: string;
+  targetUserId: string;
+  isEphemeral: boolean;
+  action: "open";
+} | null {
   const parts = customId.split(":");
-  if (parts.length !== 2) return null;
-  if (parts[0] !== COLLECTION_LIST_DETAILS_PREFIX) return null;
-  return { viewerUserId: parts[1] };
+  if (parts.length !== 5) return null;
+  if (parts[0] !== COLLECTION_LIST_FILTER_PREFIX) return null;
+  const visibility = parts[3];
+  const action = parts[4] as "open";
+  if (visibility !== "e" && visibility !== "p") return null;
+  if (action !== "open") return null;
+
+  return {
+    viewerUserId: parts[1],
+    targetUserId: parts[2],
+    isEphemeral: visibility === "e",
+    action,
+  };
+}
+
+function encodeFilterPanelAction(action: "text" | "ownership" | "apply" | "clear" | "cancel"): string {
+  if (action === "text") return "t";
+  if (action === "ownership") return "o";
+  if (action === "apply") return "a";
+  if (action === "clear") return "c";
+  return "x";
+}
+
+function decodeFilterPanelAction(code: string): "text" | "ownership" | "apply" | "clear" | "cancel" | null {
+  if (code === "t") return "text";
+  if (code === "o") return "ownership";
+  if (code === "a") return "apply";
+  if (code === "c") return "clear";
+  if (code === "x") return "cancel";
+  return null;
+}
+
+function buildCollectionFilterPanelActionId(params: {
+  viewerUserId: string;
+  targetUserId: string;
+  sourceMessageId: string;
+  isEphemeral: boolean;
+  action: "text" | "ownership" | "apply" | "clear" | "cancel";
+}): string {
+  return [
+    COLLECTION_LIST_FILTER_PANEL_PREFIX,
+    params.viewerUserId,
+    params.targetUserId,
+    params.sourceMessageId,
+    params.isEphemeral ? "e" : "p",
+    encodeFilterPanelAction(params.action),
+  ].join(":");
+}
+
+function parseCollectionFilterPanelActionId(customId: string): {
+  viewerUserId: string;
+  targetUserId: string;
+  sourceMessageId: string;
+  isEphemeral: boolean;
+  action: "text" | "ownership" | "apply" | "clear" | "cancel";
+} | null {
+  const parts = customId.split(":");
+  if (parts.length !== 6) return null;
+  if (parts[0] !== COLLECTION_LIST_FILTER_PANEL_PREFIX) return null;
+  const visibility = parts[4];
+  const action = decodeFilterPanelAction(parts[5]);
+  if (visibility !== "e" && visibility !== "p") return null;
+  if (!action) return null;
+
+  return {
+    viewerUserId: parts[1],
+    targetUserId: parts[2],
+    sourceMessageId: parts[3],
+    isEphemeral: visibility === "e",
+    action,
+  };
+}
+
+function buildCollectionFilterModalId(params: {
+  viewerUserId: string;
+  targetUserId: string;
+  sourceMessageId: string;
+  isEphemeral: boolean;
+  ownershipCode: string;
+}): string {
+  return [
+    COLLECTION_LIST_FILTER_MODAL_PREFIX,
+    params.viewerUserId,
+    params.targetUserId,
+    params.sourceMessageId,
+    params.isEphemeral ? "e" : "p",
+    params.ownershipCode,
+  ].join(":");
+}
+
+function parseCollectionFilterModalId(customId: string): {
+  viewerUserId: string;
+  targetUserId: string;
+  sourceMessageId: string;
+  isEphemeral: boolean;
+  ownershipType: CollectionOwnershipType | undefined;
+} | null {
+  const parts = customId.split(":");
+  if (parts.length !== 6) return null;
+  if (parts[0] !== COLLECTION_LIST_FILTER_MODAL_PREFIX) return null;
+  const visibility = parts[4];
+  if (visibility !== "e" && visibility !== "p") return null;
+  return {
+    viewerUserId: parts[1],
+    targetUserId: parts[2],
+    sourceMessageId: parts[3],
+    isEphemeral: visibility === "e",
+    ownershipType: ownershipCodeToType(parts[5]),
+  };
+}
+
+function buildCollectionFilterPanelContent(params: {
+  title: string | undefined;
+  platform: string | undefined;
+  ownershipType: CollectionOwnershipType | undefined;
+}): string {
+  const titleText = params.title ?? "(any)";
+  const platformText = params.platform ?? "(any)";
+  const ownershipText = params.ownershipType ?? "(any)";
+  return (
+    "### Filter collection results\n" +
+    `> Title: ${titleText}\n` +
+    `> Platform: ${platformText}\n` +
+    `> Ownership: ${ownershipText}\n\n` +
+    "Use **Edit Text** for title/platform, then **Apply**."
+  );
+}
+
+function buildCollectionFilterPanelComponents(params: {
+  viewerUserId: string;
+  targetUserId: string;
+  sourceMessageId: string;
+  isEphemeral: boolean;
+  ownershipType: CollectionOwnershipType | undefined;
+}): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(
+          buildCollectionFilterPanelActionId({
+            viewerUserId: params.viewerUserId,
+            targetUserId: params.targetUserId,
+            sourceMessageId: params.sourceMessageId,
+            isEphemeral: params.isEphemeral,
+            action: "text",
+          }),
+        )
+        .setLabel("Edit Text")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(
+          buildCollectionFilterPanelActionId({
+            viewerUserId: params.viewerUserId,
+            targetUserId: params.targetUserId,
+            sourceMessageId: params.sourceMessageId,
+            isEphemeral: params.isEphemeral,
+            action: "ownership",
+          }),
+        )
+        .setLabel(`Ownership: ${params.ownershipType ?? "Any"}`)
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(
+          buildCollectionFilterPanelActionId({
+            viewerUserId: params.viewerUserId,
+            targetUserId: params.targetUserId,
+            sourceMessageId: params.sourceMessageId,
+            isEphemeral: params.isEphemeral,
+            action: "apply",
+          }),
+        )
+        .setLabel("Apply")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(
+          buildCollectionFilterPanelActionId({
+            viewerUserId: params.viewerUserId,
+            targetUserId: params.targetUserId,
+            sourceMessageId: params.sourceMessageId,
+            isEphemeral: params.isEphemeral,
+            action: "clear",
+          }),
+        )
+        .setLabel("Clear")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(
+          buildCollectionFilterPanelActionId({
+            viewerUserId: params.viewerUserId,
+            targetUserId: params.targetUserId,
+            sourceMessageId: params.sourceMessageId,
+            isEphemeral: params.isEphemeral,
+            action: "cancel",
+          }),
+        )
+        .setLabel("Cancel")
+        .setStyle(ButtonStyle.Danger),
+    ),
+  ];
+}
+
+function parseCollectionFilterStateFromContent(content: string): {
+  title: string | undefined;
+  platform: string | undefined;
+  ownershipType: CollectionOwnershipType | undefined;
+} {
+  const getValue = (label: "Title" | "Platform" | "Ownership"): string | undefined => {
+    const match = content.match(new RegExp(`> ${label}:\\s*(.+)$`, "mi"));
+    const value = match?.[1]?.trim();
+    if (!value || value === "(any)") return undefined;
+    return value;
+  };
+
+  const ownershipRaw = getValue("Ownership");
+  const ownershipType = ownershipRaw === "Digital" ||
+      ownershipRaw === "Physical" ||
+      ownershipRaw === "Subscription" ||
+      ownershipRaw === "Other"
+    ? ownershipRaw
+    : undefined;
+
+  return {
+    title: getValue("Title"),
+    platform: getValue("Platform"),
+    ownershipType,
+  };
+}
+
+function collectTextDisplayContent(components: any[] | undefined, output: string[]): void {
+  if (!components?.length) return;
+  for (const component of components) {
+    if (component && typeof component.content === "string") {
+      output.push(component.content);
+    }
+    if (Array.isArray(component?.components)) {
+      collectTextDisplayContent(component.components, output);
+    }
+  }
+}
+
+function parseCollectionFiltersFromListMessage(message: any): {
+  title: string | undefined;
+  platform: string | undefined;
+  ownershipType: CollectionOwnershipType | undefined;
+} {
+  const textBlocks: string[] = [];
+  collectTextDisplayContent(message?.components, textBlocks);
+  const filterBlock = textBlocks.find((value) => value.includes("**Filters**"));
+  if (!filterBlock) {
+    return { title: undefined, platform: undefined, ownershipType: undefined };
+  }
+
+  const titleMatch = filterBlock.match(/title~([^|\n]+)/i);
+  const platformMatch = filterBlock.match(/platform~([^|\n]+)/i);
+  const ownershipMatch = filterBlock.match(/ownership=([A-Za-z]+)/i);
+  const ownershipType = ownershipMatch?.[1] === "Digital" ||
+      ownershipMatch?.[1] === "Physical" ||
+      ownershipMatch?.[1] === "Subscription" ||
+      ownershipMatch?.[1] === "Other"
+    ? (ownershipMatch[1] as CollectionOwnershipType)
+    : undefined;
+
+  return {
+    title: titleMatch?.[1]?.trim() || undefined,
+    platform: platformMatch?.[1]?.trim() || undefined,
+    ownershipType,
+  };
 }
 
 async function buildCollectionThumbnails(
@@ -373,28 +621,10 @@ async function buildCollectionListResponse(params: {
   const thumbnailsByGameId = await buildCollectionThumbnails(pageEntries);
   const components: Array<ContainerBuilder | ActionRowBuilder<any>> = [];
 
-  const headerContainer = new ContainerBuilder().addTextDisplayComponents(
+  const contentContainer = new ContainerBuilder().addTextDisplayComponents(
     new TextDisplayBuilder().setContent(`## ${headerTitle}`),
   );
-  headerContainer.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(`-# Page ${safePage + 1}/${pageCount} • ${total} total entries`),
-  );
-  if (filtersText) {
-    headerContainer.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`**Filters**\n> ${filtersText}`),
-    );
-  }
-  components.push(headerContainer);
-
-  let contentContainer = new ContainerBuilder();
-  let sectionCount = 0;
   for (const entry of pageEntries) {
-    if (sectionCount >= COLLECTION_MAX_SECTIONS_PER_CONTAINER) {
-      components.push(contentContainer);
-      contentContainer = new ContainerBuilder();
-      sectionCount = 0;
-    }
-
     const platform = entry.platformName ?? "Unknown platform";
     const noteLine = entry.note ? `\n> Note: ${entry.note}` : "";
     const section = new SectionBuilder().addTextDisplayComponents(
@@ -410,29 +640,20 @@ async function buildCollectionListResponse(params: {
       section.setThumbnailAccessory(new ThumbnailBuilder().setURL(thumb));
     }
     contentContainer.addSectionComponents(section);
-    sectionCount += 1;
+  }
+  contentContainer.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(`-# Page ${safePage + 1}/${pageCount} • ${total} total entries`),
+  );
+  if (filtersText) {
+    contentContainer.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`-# **Filters:** ${filtersText}`),
+    );
   }
   components.push(contentContainer);
 
-  const detailsSelect = new StringSelectMenuBuilder()
-    .setCustomId(buildCollectionDetailsSelectId(params.viewerUserId))
-    .setPlaceholder("View a game's details...")
-    .setMinValues(1)
-    .setMaxValues(1)
-    .addOptions(
-      pageEntries.map((entry) => ({
-        label: entry.title.slice(0, 100),
-        value: buildCollectionDetailsValue(entry.entryId, entry.gameId),
-        description: `${entry.platformName ?? "Unknown"} • ${entry.ownershipType}`.slice(0, 100),
-      })),
-    );
-  components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(detailsSelect));
-
+  const row = new ActionRowBuilder<ButtonBuilder>();
   if (pageCount > 1) {
-    const packedTitle = packFilterValue(params.title);
-    const packedPlatform = packFilterValue(params.platform);
-    const ownershipCode = ownershipTypeToCode(params.ownershipType);
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    row.addComponents(
       new ButtonBuilder()
         .setCustomId(
           buildCollectionListNavId({
@@ -440,9 +661,6 @@ async function buildCollectionListResponse(params: {
             targetUserId: params.targetUserId,
             page: safePage,
             isEphemeral: params.isEphemeral,
-            ownershipCode,
-            packedTitle,
-            packedPlatform,
             direction: "prev",
           }),
         )
@@ -456,9 +674,6 @@ async function buildCollectionListResponse(params: {
             targetUserId: params.targetUserId,
             page: safePage,
             isEphemeral: params.isEphemeral,
-            ownershipCode,
-            packedTitle,
-            packedPlatform,
             direction: "next",
           }),
         )
@@ -466,10 +681,78 @@ async function buildCollectionListResponse(params: {
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(safePage >= pageCount - 1),
     );
-    components.push(row);
   }
 
+  row.addComponents(
+    new ButtonBuilder()
+      .setCustomId(
+        buildCollectionFilterActionId({
+          viewerUserId: params.viewerUserId,
+          targetUserId: params.targetUserId,
+          isEphemeral: params.isEphemeral,
+          action: "open",
+        }),
+      )
+      .setLabel("Filter Results")
+      .setStyle(ButtonStyle.Primary),
+  );
+  components.push(row);
+
   return { components };
+}
+
+async function applyFiltersToSourceMessage(params: {
+  interaction: ButtonInteraction;
+  sourceMessageId: string;
+  viewerUserId: string;
+  targetUserId: string;
+  isEphemeral: boolean;
+  title: string | undefined;
+  platform: string | undefined;
+  ownershipType: CollectionOwnershipType | undefined;
+}): Promise<boolean> {
+  const channel = params.interaction.channel;
+  if (!channel || !("messages" in channel)) {
+    return false;
+  }
+
+  const memberLabel = params.targetUserId === params.viewerUserId
+    ? params.interaction.user.username
+    : "Member";
+  const response = await buildCollectionListResponse({
+    viewerUserId: params.viewerUserId,
+    targetUserId: params.targetUserId,
+    memberLabel,
+    title: params.title,
+    platform: params.platform,
+    ownershipType: params.ownershipType,
+    page: 0,
+    isEphemeral: params.isEphemeral,
+  });
+
+  const sourceMessage = await (channel as any).messages.fetch(params.sourceMessageId).catch(() => null);
+  if (!sourceMessage) {
+    return false;
+  }
+
+  if (response.content) {
+    await sourceMessage.edit({
+      content: response.content,
+      components: [],
+    });
+    return true;
+  }
+
+  await sourceMessage.edit({
+    content: null,
+    components: response.components,
+  });
+  return true;
+}
+
+async function closeFilterPanel(interaction: ButtonInteraction): Promise<void> {
+  await interaction.deferUpdate().catch(() => {});
+  await (interaction.message as any)?.delete?.().catch(() => {});
 }
 
 @Discord()
@@ -677,7 +960,7 @@ export class CollectionCommand {
   }
 
   @ButtonComponent({
-    id: /^collection-list-nav-v2:[^:]+:[^:]+:\d+:[ep]:[^:]+:[^:]+:[^:]+:(prev|next)$/,
+    id: /^collection-list-nav-v2:[^:]+:[^:]+:\d+:[ep]:(prev|next)$/,
   })
   async onCollectionListNav(interaction: ButtonInteraction): Promise<void> {
     const parsed = parseCollectionListNavId(interaction.customId);
@@ -700,14 +983,15 @@ export class CollectionCommand {
     const nextPage = parsed.direction === "next"
       ? parsed.page + 1
       : Math.max(parsed.page - 1, 0);
+    const currentFilters = parseCollectionFiltersFromListMessage(interaction.message);
 
     const response = await buildCollectionListResponse({
       viewerUserId: parsed.viewerUserId,
       targetUserId: parsed.targetUserId,
       memberLabel: "Member",
-      title: parsed.title,
-      platform: parsed.platform,
-      ownershipType: parsed.ownershipType,
+      title: currentFilters.title,
+      platform: currentFilters.platform,
+      ownershipType: currentFilters.ownershipType,
       page: nextPage,
       isEphemeral: parsed.isEphemeral,
     });
@@ -726,12 +1010,14 @@ export class CollectionCommand {
     });
   }
 
-  @SelectMenuComponent({ id: /^collection-list-details-v1:[^:]+$/ })
-  async onCollectionDetailsSelect(interaction: StringSelectMenuInteraction): Promise<void> {
-    const parsed = parseCollectionDetailsSelectId(interaction.customId);
-    if (!parsed) {
+  @ButtonComponent({
+    id: /^collection-list-filter-v1:[^:]+:[^:]+:[ep]:open$/,
+  })
+  async onCollectionFilterOpen(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseCollectionFilterActionId(interaction.customId);
+    if (!parsed || parsed.action !== "open") {
       await interaction.reply({
-        content: "This collection details selector is invalid.",
+        content: "This filter control is invalid.",
         flags: MessageFlags.Ephemeral,
       }).catch(() => {});
       return;
@@ -745,17 +1031,190 @@ export class CollectionCommand {
       return;
     }
 
-    const parsedValue = parseCollectionDetailsValue(interaction.values?.[0] ?? "");
-    if (!parsedValue) {
+    const currentFilters = parseCollectionFiltersFromListMessage(interaction.message);
+
+    await interaction.reply({
+      content: buildCollectionFilterPanelContent({
+        title: currentFilters.title,
+        platform: currentFilters.platform,
+        ownershipType: currentFilters.ownershipType,
+      }),
+      components: buildCollectionFilterPanelComponents({
+        viewerUserId: parsed.viewerUserId,
+        targetUserId: parsed.targetUserId,
+        sourceMessageId: interaction.message.id,
+        isEphemeral: parsed.isEphemeral,
+        ownershipType: currentFilters.ownershipType,
+      }),
+      flags: MessageFlags.Ephemeral,
+    }).catch(() => {});
+  }
+
+  @ButtonComponent({
+    id: /^clf1:[^:]+:[^:]+:[^:]+:[ep]:[toacx]$/,
+  })
+  async onCollectionFilterAction(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseCollectionFilterPanelActionId(interaction.customId);
+    if (!parsed) {
       await interaction.reply({
-        content: "Invalid GameDB id.",
+        content: "This filter control is invalid.",
         flags: MessageFlags.Ephemeral,
       }).catch(() => {});
       return;
     }
 
-    const gameDb = new GameDb();
-    await gameDb.showGameProfileFromNomination(interaction, parsedValue.gameId);
+    if (interaction.user.id !== parsed.viewerUserId) {
+      await interaction.reply({
+        content: "This filter control is not for you.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    if (parsed.action === "cancel") {
+      await closeFilterPanel(interaction);
+      return;
+    }
+
+    const currentState = parseCollectionFilterStateFromContent(interaction.message.content ?? "");
+
+    if (parsed.action === "text") {
+      const modal = new ModalBuilder()
+        .setCustomId(
+          buildCollectionFilterModalId({
+            viewerUserId: parsed.viewerUserId,
+            targetUserId: parsed.targetUserId,
+            sourceMessageId: parsed.sourceMessageId,
+            isEphemeral: parsed.isEphemeral,
+            ownershipCode: ownershipTypeToCode(currentState.ownershipType),
+          }),
+        )
+        .setTitle("Collection filters");
+
+      const titleInput = new TextInputBuilder()
+        .setCustomId(COLLECTION_FILTER_TITLE_INPUT_ID)
+        .setLabel("Title contains")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setMaxLength(100)
+        .setValue(currentState.title ?? "");
+      const platformInput = new TextInputBuilder()
+        .setCustomId(COLLECTION_FILTER_PLATFORM_INPUT_ID)
+        .setLabel("Platform contains")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setMaxLength(100)
+        .setValue(currentState.platform ?? "");
+
+      modal.addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(titleInput),
+        new ActionRowBuilder<TextInputBuilder>().addComponents(platformInput),
+      );
+      await interaction.showModal(modal).catch(() => {});
+      return;
+    }
+
+    const nextState = parsed.action === "clear"
+      ? {
+        title: undefined,
+        platform: undefined,
+        ownershipType: undefined,
+      }
+      : parsed.action === "ownership"
+        ? {
+          title: currentState.title,
+          platform: currentState.platform,
+          ownershipType: nextOwnershipType(currentState.ownershipType),
+        }
+        : {
+          title: currentState.title,
+          platform: currentState.platform,
+          ownershipType: currentState.ownershipType,
+        };
+
+    if (parsed.action === "apply") {
+      await interaction.deferUpdate().catch(() => {});
+      const applied = await applyFiltersToSourceMessage({
+        interaction,
+        sourceMessageId: parsed.sourceMessageId,
+        viewerUserId: parsed.viewerUserId,
+        targetUserId: parsed.targetUserId,
+        isEphemeral: parsed.isEphemeral,
+        title: nextState.title,
+        platform: nextState.platform,
+        ownershipType: nextState.ownershipType,
+      });
+      await (interaction.message as any)?.delete?.().catch(() => {});
+      if (!applied) {
+        await interaction.followUp({
+          content: "Could not update that collection message.",
+          flags: MessageFlags.Ephemeral,
+        }).catch(() => {});
+        return;
+      }
+      return;
+    }
+
+    await safeUpdate(interaction, {
+      content: buildCollectionFilterPanelContent(nextState),
+      components: buildCollectionFilterPanelComponents({
+        viewerUserId: parsed.viewerUserId,
+        targetUserId: parsed.targetUserId,
+        sourceMessageId: parsed.sourceMessageId,
+        isEphemeral: parsed.isEphemeral,
+        ownershipType: nextState.ownershipType,
+      }),
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  @ModalComponent({
+    id: /^clfm1:[^:]+:[^:]+:[^:]+:[ep]:[^:]+$/,
+  })
+  async onCollectionFilterTextModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const parsed = parseCollectionFilterModalId(interaction.customId);
+    if (!parsed) {
+      await interaction.reply({
+        content: "This filter modal is invalid.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    if (interaction.user.id !== parsed.viewerUserId) {
+      await interaction.reply({
+        content: "This filter modal is not for you.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    const titleInput = sanitizeUserInput(
+      interaction.fields.getTextInputValue(COLLECTION_FILTER_TITLE_INPUT_ID) ?? "",
+      { preserveNewlines: false, maxLength: 100 },
+    );
+    const platformInput = sanitizeUserInput(
+      interaction.fields.getTextInputValue(COLLECTION_FILTER_PLATFORM_INPUT_ID) ?? "",
+      { preserveNewlines: false, maxLength: 100 },
+    );
+
+    const nextState = {
+      title: titleInput || undefined,
+      platform: platformInput || undefined,
+      ownershipType: parsed.ownershipType,
+    };
+
+    await safeUpdate(interaction, {
+      content: buildCollectionFilterPanelContent(nextState),
+      components: buildCollectionFilterPanelComponents({
+        viewerUserId: parsed.viewerUserId,
+        targetUserId: parsed.targetUserId,
+        sourceMessageId: parsed.sourceMessageId,
+        isEphemeral: parsed.isEphemeral,
+        ownershipType: nextState.ownershipType,
+      }),
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   @Slash({ name: "edit", description: "Edit one of your collection entries" })

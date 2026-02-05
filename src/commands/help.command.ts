@@ -242,7 +242,8 @@ const HELP_TOPICS: HelpTopic[] = [
       "/collection to-completion entry:<selection> completion_type:<type> [fields...]",
     notes:
       "Duplicate policy: same game on multiple platforms is supported. Exact duplicates " +
-      "(same game, platform, ownership type) are blocked.",
+      "(same game, platform, ownership type) are blocked. /collection list shows 10 entries per page " +
+      "and includes a Filter Results button for title/platform/ownership filters.",
   },
   {
     id: "remindme",
