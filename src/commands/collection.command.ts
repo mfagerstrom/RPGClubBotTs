@@ -10,8 +10,10 @@ import {
   ModalSubmitInteraction,
   MessageFlags,
   StringSelectMenuInteraction,
+  StringSelectMenuBuilder,
   TextInputBuilder,
   TextInputStyle,
+  type GuildMember,
   type User,
   EmbedBuilder,
 } from "discord.js";
@@ -23,6 +25,7 @@ import {
   SlashOption,
   ButtonComponent,
   ModalComponent,
+  SelectMenuComponent,
 } from "discordx";
 import {
   ContainerBuilder,
@@ -34,6 +37,8 @@ import {
 import UserGameCollection, {
   COLLECTION_OWNERSHIP_TYPES,
   type CollectionOwnershipType,
+  type IUserGameCollectionOverviewEntry,
+  type IUserGameCollectionUserOverview,
 } from "../classes/UserGameCollection.js";
 import {
   type SteamCollectionMatchConfidence,
@@ -72,6 +77,7 @@ import {
 } from "./profile.command.js";
 import { saveCompletion } from "../functions/CompletionHelpers.js";
 import { formatGameTitleWithYear } from "../functions/GameTitleAutocompleteUtils.js";
+import { formatPlatformDisplayName } from "../functions/PlatformDisplay.js";
 import { igdbService, type IGDBGame } from "../services/IgdbService.js";
 import {
   createIgdbSession,
@@ -79,6 +85,7 @@ import {
 } from "../services/IgdbSelectService.js";
 import { SteamApiError, steamApiService } from "../services/SteamApiService.js";
 import { COMPONENTS_V2_FLAG } from "../config/flags.js";
+import { COLLECTION_OVERVIEW_EMOJIS } from "../config/emojis.js";
 
 const COLLECTION_ENTRY_VALUE_PREFIX = "collection";
 const COLLECTION_LIST_PAGE_SIZE = 10;
@@ -101,6 +108,56 @@ const COLLECTION_STEAM_REMAP_MODAL_PREFIX = "collection-steam-remap-v1";
 const COLLECTION_STEAM_REMAP_INPUT_ID = "collection-steam-remap-title";
 const COLLECTION_STEAM_GAME_ID_MODAL_PREFIX = "collection-steam-game-id-v1";
 const COLLECTION_STEAM_GAME_ID_INPUT_ID = "collection-steam-game-id";
+const COLLECTION_OVERVIEW_SELECT_PREFIX = "collection-overview-select-v1";
+const COLLECTION_OVERVIEW_SELECT_OVERVIEW = "overview";
+const COLLECTION_OVERVIEW_SELECT_ALL_GAMES = "all-games";
+const COLLECTION_OVERVIEW_SELECT_PLATFORM_PREFIX = "platform";
+const COLLECTION_OVERVIEW_UNKNOWN_PLATFORM = "Unknown platform";
+const COLLECTION_OVERVIEW_MAX_COMPONENTS = 35;
+const COLLECTION_OVERVIEW_PLATFORM_EMOJI_KEYS: Record<string, keyof typeof COLLECTION_OVERVIEW_EMOJIS> = {
+  "pc (microsoft windows)": "steam",
+  pc: "steam",
+  windows: "steam",
+  steam: "steam",
+  "steam deck": "steam",
+  playstation: "ps1",
+  "playstation 2": "ps2",
+  "playstation 3": "ps3",
+  "playstation 4": "ps4",
+  "playstation 5": "ps5",
+  ps1: "ps1",
+  ps2: "ps2",
+  ps3: "ps3",
+  ps4: "ps4",
+  ps5: "ps5",
+  xbox: "xone",
+  "xbox 360": "x360",
+  "xbox one": "xone",
+  "xbox series": "xsx",
+  "xbox series x": "xsx",
+  "xbox series s": "xsx",
+  "xbox series x|s": "xsx",
+  nintendo: "nsw",
+  "nintendo switch": "nsw",
+  "nintendo switch 2": "nsw2",
+  nsw: "nsw",
+  nsw2: "nsw2",
+  switch: "nsw",
+  wii: "wii",
+  "wii u": "wiiu",
+  "nintendo 3ds": "3ds",
+  "nintendo ds": "ds",
+  "game boy": "gb",
+  "game boy color": "gbc",
+  "game boy advance": "gba",
+  gamecube: "gc",
+  gc: "gc",
+  gba: "gba",
+  gb: "gb",
+  gbc: "gbc",
+  ds: "ds",
+  "3ds": "3ds",
+};
 
 type CollectionSteamImportAction = (typeof COLLECTION_STEAM_IMPORT_ACTIONS)[number];
 type CollectionSteamImportButtonAction = "skip" | "remap" | "game-id" | "pause";
@@ -722,6 +779,299 @@ function buildComponentsV2Flags(isEphemeral: boolean): number {
   return (isEphemeral ? MessageFlags.Ephemeral : 0) | COMPONENTS_V2_FLAG;
 }
 
+function buildComponentsV2EditFlags(): number {
+  return COMPONENTS_V2_FLAG;
+}
+
+function resolveMemberLabel(
+  member: User | GuildMember | undefined,
+  fallback: User,
+): string {
+  if (!member) return fallback.username;
+  if ("displayName" in member && member.displayName) {
+    return member.displayName;
+  }
+  if ("user" in member && member.user?.username) {
+    return member.user.username;
+  }
+  if ("username" in member) {
+    return member.username;
+  }
+  return fallback.username;
+}
+
+function resolveMemberLabelFromOverview(
+  overview: IUserGameCollectionUserOverview,
+): string {
+  return overview.globalName ?? overview.username ?? overview.userId;
+}
+
+function normalizePlatformEmojiKey(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const normalized = value.toLowerCase().trim();
+  return normalized.length ? normalized : null;
+}
+
+function resolveCollectionOverviewEmoji(params: {
+  platformName: string | null;
+  platformAbbreviation: string | null;
+}): string | null {
+  const nameKey = normalizePlatformEmojiKey(params.platformName);
+  const resolvedNameKey = nameKey
+    ? COLLECTION_OVERVIEW_PLATFORM_EMOJI_KEYS[nameKey]
+    : undefined;
+  if (resolvedNameKey) {
+    return COLLECTION_OVERVIEW_EMOJIS[resolvedNameKey] ?? null;
+  }
+  const abbrevKey = normalizePlatformEmojiKey(params.platformAbbreviation);
+  const resolvedAbbrevKey = abbrevKey
+    ? COLLECTION_OVERVIEW_PLATFORM_EMOJI_KEYS[abbrevKey]
+    : undefined;
+  if (resolvedAbbrevKey) {
+    return COLLECTION_OVERVIEW_EMOJIS[resolvedAbbrevKey] ?? null;
+  }
+  return null;
+}
+
+function formatCollectionOverviewPlatformLabel(
+  entry: IUserGameCollectionOverviewEntry,
+): string {
+  const rawName = entry.platformName ??
+    entry.platformAbbreviation ??
+    COLLECTION_OVERVIEW_UNKNOWN_PLATFORM;
+  const displayName = formatPlatformDisplayName(rawName) ?? rawName;
+  if (!entry.platformAbbreviation || entry.platformAbbreviation === displayName) {
+    return displayName;
+  }
+  return `${displayName} (${entry.platformAbbreviation})`;
+}
+
+function formatCollectionOverviewFixedLabel(label: string, width: number): string {
+  return `\`\` ${label.padEnd(width, " ")} \`\``;
+}
+
+function formatCollectionOverviewFixedTotal(total: number, width: number): string {
+  const formatted = total.toLocaleString("en-US");
+  return `\`\` ${formatted.padStart(width, " ")} \`\``;
+}
+
+function buildCollectionOverviewSelectId(params: {
+  viewerUserId: string;
+  targetUserId: string;
+  isEphemeral: boolean;
+}): string {
+  return [
+    COLLECTION_OVERVIEW_SELECT_PREFIX,
+    params.viewerUserId,
+    params.targetUserId,
+    params.isEphemeral ? "e" : "p",
+  ].join(":");
+}
+
+function parseCollectionOverviewSelectId(customId: string): {
+  viewerUserId: string;
+  targetUserId: string;
+  isEphemeral: boolean;
+} | null {
+  const parts = customId.split(":");
+  if (parts.length !== 4) return null;
+  if (parts[0] !== COLLECTION_OVERVIEW_SELECT_PREFIX) return null;
+  const visibility = parts[3];
+  if (visibility !== "e" && visibility !== "p") return null;
+
+  return {
+    viewerUserId: parts[1],
+    targetUserId: parts[2],
+    isEphemeral: visibility === "e",
+  };
+}
+
+function buildCollectionOverviewSelectValue(platformId: number): string {
+  return `${COLLECTION_OVERVIEW_SELECT_PLATFORM_PREFIX}:${platformId}`;
+}
+
+function parseCollectionOverviewSelectValue(
+  value: string,
+): { platformId: number } | "overview" | "all-games" | null {
+  if (value === COLLECTION_OVERVIEW_SELECT_OVERVIEW) return "overview";
+  if (value === COLLECTION_OVERVIEW_SELECT_ALL_GAMES) return "all-games";
+  const [prefix, idRaw] = value.split(":");
+  if (prefix !== COLLECTION_OVERVIEW_SELECT_PLATFORM_PREFIX) return null;
+  const platformId = Number(idRaw);
+  if (!Number.isInteger(platformId) || platformId <= 0) return null;
+  return { platformId };
+}
+
+function buildCollectionOverviewSelectOptions(
+  platformCounts: IUserGameCollectionOverviewEntry[],
+): Array<{ label: string; value: string; description: string }> {
+  const unique = new Map<number, IUserGameCollectionOverviewEntry>();
+  for (const entry of platformCounts) {
+    if (!entry.platformId) continue;
+    unique.set(entry.platformId, entry);
+  }
+  const ordered = Array.from(unique.values())
+    .map((entry) => ({
+      entry,
+      label: formatCollectionOverviewPlatformLabel(entry),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  const options = [{
+    label: "Overview",
+    value: COLLECTION_OVERVIEW_SELECT_OVERVIEW,
+    description: "Show the summary view",
+  }, {
+    label: "All games",
+    value: COLLECTION_OVERVIEW_SELECT_ALL_GAMES,
+    description: "View the full collection list",
+  }];
+
+  for (const { entry, label } of ordered) {
+    const totalText = entry.total === 1 ? "1 game" : `${entry.total} games`;
+    options.push({
+      label,
+      value: buildCollectionOverviewSelectValue(entry.platformId as number),
+      description: totalText,
+    });
+  }
+
+  return options;
+}
+
+async function buildCollectionOverviewResponse(params: {
+  viewerUserId: string;
+  targetUserId: string;
+  memberLabel: string;
+  isEphemeral: boolean;
+  titleOverride?: string;
+}): Promise<Array<ContainerBuilder | ActionRowBuilder<any>>> {
+  const isSelf = params.viewerUserId === params.targetUserId;
+  const overview = await UserGameCollection.getOverviewForUser(params.targetUserId);
+  const title = params.titleOverride ??
+    (params.isEphemeral
+      ? (isSelf ? "Your collection overview" : `${params.memberLabel} collection overview`)
+      : `${params.memberLabel}'s Game Collection`);
+
+  const container = buildCollectionOverviewContainer({
+    title,
+    totalCount: overview.totalCount,
+    platformCounts: overview.platformCounts,
+  });
+
+  const options = buildCollectionOverviewSelectOptions(overview.platformCounts);
+  if (options.length <= 2) {
+    return [container];
+  }
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(
+      buildCollectionOverviewSelectId({
+        viewerUserId: params.viewerUserId,
+        targetUserId: params.targetUserId,
+        isEphemeral: params.isEphemeral,
+      }),
+    )
+    .setPlaceholder("View collection by platform")
+    .addOptions(options);
+
+  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+  return [container, row];
+}
+
+function buildCollectionOverviewContainer(params: {
+  title: string;
+  totalCount: number;
+  platformCounts: IUserGameCollectionOverviewEntry[];
+}): ContainerBuilder {
+  const container = new ContainerBuilder().addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(`## ${params.title}`),
+  );
+
+  if (params.totalCount <= 0) {
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent("No collection entries yet."),
+    );
+    return container;
+  }
+
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      `Total games: **${params.totalCount.toLocaleString("en-US")}**`,
+    ),
+  );
+
+  const platformLabels = params.platformCounts.map((entry) =>
+    formatCollectionOverviewPlatformLabel(entry)
+  );
+  const totals = params.platformCounts.map((entry) => entry.total.toLocaleString("en-US"));
+  const labelWidth = platformLabels.length
+    ? Math.max(...platformLabels.map((label) => label.length), 8)
+    : 8;
+  const totalWidth = totals.length
+    ? Math.max(...totals.map((value) => value.length), 2)
+    : 2;
+
+  for (const entry of params.platformCounts) {
+    const emoji = resolveCollectionOverviewEmoji({
+      platformName: entry.platformName,
+      platformAbbreviation: entry.platformAbbreviation,
+    });
+    const label = formatCollectionOverviewPlatformLabel(entry);
+    const fixedLabel = formatCollectionOverviewFixedLabel(label, labelWidth);
+    const fixedTotal = formatCollectionOverviewFixedTotal(entry.total, totalWidth);
+    const prefix = emoji ? `${emoji} ` : "";
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`${prefix}**${fixedLabel}** ${fixedTotal}`),
+    );
+  }
+
+  return container;
+}
+
+async function buildAllCollectionsOverviewMessages(): Promise<
+  Array<{ components: Array<ContainerBuilder> }>
+> {
+  const overview = await UserGameCollection.getOverviewForAllUsers();
+  const containers: ContainerBuilder[] = [];
+
+  containers.push(buildCollectionOverviewContainer({
+    title: "All Game Collections",
+    totalCount: overview.totalCount,
+    platformCounts: overview.platformCounts,
+  }));
+
+  for (const user of overview.users) {
+    const memberLabel = resolveMemberLabelFromOverview(user);
+    containers.push(buildCollectionOverviewContainer({
+      title: `${memberLabel}'s Game Collection`,
+      totalCount: user.totalCount,
+      platformCounts: user.platformCounts,
+    }));
+  }
+
+  const messages: Array<{ components: Array<ContainerBuilder> }> = [];
+  for (let i = 0; i < containers.length; i += COLLECTION_OVERVIEW_MAX_COMPONENTS) {
+    messages.push({
+      components: containers.slice(i, i + COLLECTION_OVERVIEW_MAX_COMPONENTS),
+    });
+  }
+
+  if (!messages.length) {
+    messages.push({
+      components: [
+        buildCollectionOverviewContainer({
+          title: "All Game Collections",
+          totalCount: 0,
+          platformCounts: [],
+        }),
+      ],
+    });
+  }
+
+  return messages;
+}
+
 type ResolvedCollectionGame =
   | { kind: "resolved"; gameId: number; title: string }
   | { kind: "choose"; titleQuery: string; options: IgdbSelectOption[] };
@@ -1193,20 +1543,56 @@ function collectTextDisplayContent(components: any[] | undefined, output: string
   }
 }
 
+function extractOverviewTitleFromMessage(message: any): string | null {
+  const textBlocks: string[] = [];
+  collectTextDisplayContent(message?.components, textBlocks);
+  const headerBlock = textBlocks.find((value) => value.trim().startsWith("## "));
+  if (!headerBlock) return null;
+  const firstLine = headerBlock.split("\n")[0]?.trim();
+  if (!firstLine?.startsWith("## ")) return null;
+  return firstLine.replace(/^##\s*/, "").trim() || null;
+}
+
+function resolveMemberLabelFromOverviewTitle(title: string, fallback: string): string {
+  if (!title) return fallback;
+  if (title === "Your collection overview" || title === "Your game collection") {
+    return fallback;
+  }
+  const match = title.match(/^(.*)'s Game Collection$/);
+  if (match?.[1]?.trim()) {
+    return match[1].trim();
+  }
+  const overviewMatch = title.match(/^(.*) collection overview$/i);
+  if (overviewMatch?.[1]?.trim()) {
+    return overviewMatch[1].trim();
+  }
+  return fallback;
+}
+
 function parseCollectionFiltersFromListMessage(message: any): {
   title: string | undefined;
   platform: string | undefined;
+  platformId: number | undefined;
   ownershipType: CollectionOwnershipType | undefined;
 } {
   const textBlocks: string[] = [];
   collectTextDisplayContent(message?.components, textBlocks);
   const filterBlock = textBlocks.find((value) => value.includes("**Filters**"));
   if (!filterBlock) {
-    return { title: undefined, platform: undefined, ownershipType: undefined };
+    return {
+      title: undefined,
+      platform: undefined,
+      platformId: undefined,
+      ownershipType: undefined,
+    };
   }
 
   const titleMatch = filterBlock.match(/title~([^|\n]+)/i);
   const platformMatch = filterBlock.match(/platform~([^|\n]+)/i);
+  const platformIdMatch = filterBlock.match(/platform-id=(\d+)/i);
+  const platformId = platformIdMatch
+    ? Number(platformIdMatch[1])
+    : undefined;
   const ownershipMatch = filterBlock.match(/ownership=([A-Za-z]+)/i);
   const ownershipType = ownershipMatch?.[1] === "Digital" ||
       ownershipMatch?.[1] === "Physical" ||
@@ -1218,6 +1604,9 @@ function parseCollectionFiltersFromListMessage(message: any): {
   return {
     title: titleMatch?.[1]?.trim() || undefined,
     platform: platformMatch?.[1]?.trim() || undefined,
+    platformId: Number.isInteger(platformId) && (platformId as number) > 0
+      ? platformId
+      : undefined,
     ownershipType,
   };
 }
@@ -1251,6 +1640,8 @@ async function buildCollectionListResponse(params: {
   memberLabel: string;
   title: string | undefined;
   platform: string | undefined;
+  platformId: number | undefined;
+  platformLabel: string | undefined;
   ownershipType: CollectionOwnershipType | undefined;
   page: number;
   isEphemeral: boolean;
@@ -1262,6 +1653,7 @@ async function buildCollectionListResponse(params: {
     targetUserId: params.targetUserId,
     title: params.title,
     platform: params.platform,
+    platformId: params.platformId,
     ownershipType: params.ownershipType,
   });
 
@@ -1282,10 +1674,11 @@ async function buildCollectionListResponse(params: {
 
   const headerTitle = params.targetUserId === params.viewerUserId
     ? (params.isEphemeral ? "Your game collection" : `${params.memberLabel}'s Game Collection`)
-    : (params.isEphemeral ? `${params.memberLabel} collection` : `${params.memberLabel}'s Game Collection`);
+    : `${params.memberLabel}'s Game Collection`;
   const filtersText = [
     params.title ? `title~${params.title}` : null,
-    params.platform ? `platform~${params.platform}` : null,
+    params.platformLabel ? `platform~${params.platformLabel}` : null,
+    params.platformId ? `platform-id=${params.platformId}` : null,
     params.ownershipType ? `ownership=${params.ownershipType}` : null,
   ].filter(Boolean).join(" | ");
   const thumbnailsByGameId = await buildCollectionThumbnails(pageEntries);
@@ -1394,6 +1787,8 @@ async function applyFiltersToSourceMessage(params: {
     memberLabel,
     title: params.title,
     platform: params.platform,
+    platformId: undefined,
+    platformLabel: params.platform,
     ownershipType: params.ownershipType,
     page: 0,
     isEphemeral: params.isEphemeral,
@@ -2509,7 +2904,7 @@ export class CollectionCommand {
       type: ApplicationCommandOptionType.User,
       required: false,
     })
-    member: User | undefined,
+    member: User | GuildMember | undefined,
     @SlashOption({
       name: "title",
       description: "Filter by title",
@@ -2557,13 +2952,15 @@ export class CollectionCommand {
       ? sanitizeUserInput(platform, { preserveNewlines: false })
       : undefined;
 
-    const memberLabel = member?.username ?? interaction.user.username;
+    const memberLabel = resolveMemberLabel(member, interaction.user);
     const response = await buildCollectionListResponse({
       viewerUserId: interaction.user.id,
       targetUserId,
       memberLabel,
       title: titleFilter,
       platform: platformFilter,
+      platformId: undefined,
+      platformLabel: platformFilter,
       ownershipType,
       page: 0,
       isEphemeral,
@@ -2577,6 +2974,191 @@ export class CollectionCommand {
       components: response.components,
       flags: buildComponentsV2Flags(isEphemeral),
     });
+  }
+
+  @Slash({ name: "overview", description: "Show a summary of your collection by platform" })
+  async overview(
+    @SlashOption({
+      name: "member",
+      description: "Member whose collection to view",
+      type: ApplicationCommandOptionType.User,
+      required: false,
+    })
+    member: User | GuildMember | undefined,
+    @SlashOption({
+      name: "all",
+      description: "Show combined collection stats for all users.",
+      type: ApplicationCommandOptionType.Boolean,
+      required: false,
+    })
+    showAll: boolean | undefined,
+    @SlashOption({
+      name: "showinchat",
+      description: "If true, show results in channel instead of private response.",
+      type: ApplicationCommandOptionType.Boolean,
+      required: false,
+    })
+    showInChat: boolean | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    const isEphemeral = !showInChat;
+    await safeDeferReply(interaction, { flags: buildComponentsV2Flags(isEphemeral) });
+
+    if (showAll) {
+      const messages = await buildAllCollectionsOverviewMessages();
+      const [first, ...rest] = messages;
+      if (!first) {
+        await interaction.editReply("No collection entries yet.");
+        return;
+      }
+
+      await interaction.editReply({
+        components: first.components,
+        flags: buildComponentsV2Flags(isEphemeral),
+      });
+
+      for (const message of rest) {
+        await interaction.followUp({
+          components: message.components,
+          flags: buildComponentsV2Flags(isEphemeral),
+        });
+      }
+      return;
+    }
+
+    const targetUserId = member?.id ?? interaction.user.id;
+    const memberLabel = resolveMemberLabel(member, interaction.user);
+    const components = await buildCollectionOverviewResponse({
+      viewerUserId: interaction.user.id,
+      targetUserId,
+      memberLabel,
+      isEphemeral,
+      titleOverride: member ? `${memberLabel}'s Game Collection` : undefined,
+    });
+
+    await interaction.editReply({
+      components,
+      flags: buildComponentsV2Flags(isEphemeral),
+    });
+  }
+
+  @SelectMenuComponent({
+    id: /^collection-overview-select-v1:[^:]+:[^:]+:[ep]$/,
+  })
+  async onCollectionOverviewSelect(
+    interaction: StringSelectMenuInteraction,
+  ): Promise<void> {
+    const parsed = parseCollectionOverviewSelectId(interaction.customId);
+    if (!parsed) {
+      await interaction.reply({
+        content: "This collection overview control is invalid.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    if (interaction.user.id !== parsed.viewerUserId) {
+      await interaction.reply({
+        content: "This collection overview is not for you.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    const selection = parseCollectionOverviewSelectValue(interaction.values?.[0] ?? "");
+    if (!selection) {
+      await interaction.reply({
+        content: "That collection selection is invalid.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    const overviewTitle = extractOverviewTitleFromMessage(interaction.message);
+    const memberLabel = resolveMemberLabelFromOverviewTitle(
+      overviewTitle ?? "",
+      interaction.user.username,
+    );
+
+    await interaction.deferUpdate().catch(() => {});
+
+    if (selection === "overview") {
+      const components = await buildCollectionOverviewResponse({
+        viewerUserId: parsed.viewerUserId,
+        targetUserId: parsed.targetUserId,
+        memberLabel,
+        isEphemeral: parsed.isEphemeral,
+        titleOverride: overviewTitle ?? undefined,
+      });
+
+      await interaction.editReply({
+        components,
+        flags: buildComponentsV2EditFlags(),
+      }).catch(() => {});
+      return;
+    }
+
+    if (selection === "all-games") {
+      const response = await buildCollectionListResponse({
+        viewerUserId: parsed.viewerUserId,
+        targetUserId: parsed.targetUserId,
+        memberLabel,
+        title: undefined,
+        platform: undefined,
+        platformId: undefined,
+        platformLabel: undefined,
+        ownershipType: undefined,
+        page: 0,
+        isEphemeral: parsed.isEphemeral,
+      });
+
+      if (response.content) {
+        await interaction.editReply({
+          content: response.content,
+          components: [],
+        }).catch(() => {});
+        return;
+      }
+
+      await interaction.editReply({
+        components: response.components,
+        flags: buildComponentsV2EditFlags(),
+      }).catch(() => {});
+      return;
+    }
+
+    const overview = await UserGameCollection.getOverviewForUser(parsed.targetUserId);
+    const platformEntry = overview.platformCounts
+      .find((entry) => entry.platformId === selection.platformId) ?? null;
+    const platformLabel = platformEntry
+      ? formatCollectionOverviewPlatformLabel(platformEntry)
+      : `Platform #${selection.platformId}`;
+
+    const response = await buildCollectionListResponse({
+      viewerUserId: parsed.viewerUserId,
+      targetUserId: parsed.targetUserId,
+      memberLabel,
+      title: undefined,
+      platform: undefined,
+      platformId: selection.platformId,
+      platformLabel,
+      ownershipType: undefined,
+      page: 0,
+      isEphemeral: parsed.isEphemeral,
+    });
+
+    if (response.content) {
+      await interaction.editReply({
+        content: response.content,
+        components: [],
+      }).catch(() => {});
+      return;
+    }
+
+    await interaction.editReply({
+      components: response.components,
+      flags: buildComponentsV2EditFlags(),
+    }).catch(() => {});
   }
 
   @ButtonComponent({
@@ -2611,6 +3193,8 @@ export class CollectionCommand {
       memberLabel: "Member",
       title: currentFilters.title,
       platform: currentFilters.platform,
+      platformId: currentFilters.platformId,
+      platformLabel: currentFilters.platform,
       ownershipType: currentFilters.ownershipType,
       page: nextPage,
       isEphemeral: parsed.isEphemeral,

@@ -139,6 +139,10 @@ Game metadata ingested from IGDB and stored for bot lookups. Schema created by
 | PLATFORM_CODE | VARCHAR2(20) | No | Short code (e.g., `SWITCH`, `PS5`). |
 | PLATFORM_NAME | VARCHAR2(100) | No | Descriptive name. |
 | IGDB_PLATFORM_ID | NUMBER | Yes | Unique IGDB platform id. |
+| PLATFORM_ABBREVIATION | VARCHAR2(50) | Yes | Short display abbreviation from IGDB, when available. |
+| PLATFORM_SLUG | VARCHAR2(255) | Yes | IGDB platform slug. |
+| PLATFORM_CHECKSUM | VARCHAR2(64) | Yes | IGDB checksum for platform metadata. |
+| IGDB_UPDATED_AT | NUMBER | Yes | IGDB updated timestamp, epoch seconds. |
 
 ## GAMEDB_REGIONS
 
@@ -172,3 +176,5 @@ Game metadata ingested from IGDB and stored for bot lookups. Schema created by
   `AUS`/3 Australia, `NZ`/4 New Zealand, `CN`/6 China, `AS`/7 Asia.
 - Platforms: seeded with `SWITCH` (130), `PS5` (167), `PS4` (48), `PC` (6),
   `XBOX` (169). New platforms from IGDB are inserted automatically if missing.
+- Platform catalog snapshot: `db/gamedb_platforms.md` (as of 2026-02-05), including
+  storefront-specific PC entries like `PCSTEAM`, `PCEPIC`, `PCGOG`, and `PCLUNA`.

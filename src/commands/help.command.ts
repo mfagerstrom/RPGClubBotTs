@@ -236,7 +236,8 @@ const HELP_TOPICS: HelpTopic[] = [
       "Track your owned games with platform and ownership metadata (public by default).",
     syntax:
       "Syntax: /collection add title:<game> platform:<platform> ownership_type:<type> " +
-      "[note:<string>] | /collection list [member:<user>] [filters...] | " +
+      "[note:<string>] | /collection overview [member:<user>] [all:<bool>] [showinchat:<bool>] | " +
+      "/collection list [member:<user>] [filters...] | " +
       "/collection edit entry:<selection> [fields...] | /collection remove entry:<selection> | " +
       "/collection to-now-playing entry:<selection> [note_override:<string>] | " +
       "/collection to-completion entry:<selection> completion_type:<type> [fields...] | " +
@@ -245,6 +246,7 @@ const HELP_TOPICS: HelpTopic[] = [
       "Duplicate policy: same game on multiple platforms is supported. Exact duplicates " +
       "(same game, platform, ownership type) are blocked. /collection list shows 10 entries per page " +
       "and includes a Filter Results button for title/platform/ownership filters. " +
+      "/collection overview summarizes totals by platform and supports showinchat to share the summary. " +
       "Steam import now supports session start/status/pause/resume/cancel, plus per-item " +
       "review with per-candidate Choose buttons plus Search a different title/Enter GameDB ID/Skip/Pause. " +
       "Single exact matches auto-accept. Search a different title re-runs matching using a title you enter. " +

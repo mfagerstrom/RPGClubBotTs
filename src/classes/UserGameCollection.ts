@@ -33,6 +33,21 @@ export interface IUserGameCollectionAutocompleteEntry {
   ownershipType: CollectionOwnershipType;
 }
 
+export interface IUserGameCollectionOverviewEntry {
+  platformId: number | null;
+  platformName: string | null;
+  platformAbbreviation: string | null;
+  total: number;
+}
+
+export interface IUserGameCollectionUserOverview {
+  userId: string;
+  username: string | null;
+  globalName: string | null;
+  totalCount: number;
+  platformCounts: IUserGameCollectionOverviewEntry[];
+}
+
 type CollectionRow = {
   ENTRY_ID: number;
   USER_ID: string;
@@ -295,6 +310,7 @@ export default class UserGameCollection {
     targetUserId: string;
     title?: string;
     platform?: string;
+    platformId?: number | null;
     ownershipType?: string;
     limit?: number;
   }): Promise<IUserGameCollectionEntry[]> {
@@ -312,6 +328,17 @@ export default class UserGameCollection {
         "(LOWER(NVL(p.PLATFORM_NAME, '')) LIKE :platform OR LOWER(NVL(p.PLATFORM_CODE, '')) LIKE :platform OR LOWER(NVL(p.PLATFORM_ABBREVIATION, '')) LIKE :platform)",
       );
       binds.platform = `%${filters.platform.trim().toLowerCase()}%`;
+    }
+
+    if (filters.platformId !== undefined) {
+      if (filters.platformId == null) {
+        where.push("c.PLATFORM_ID IS NULL");
+      } else if (Number.isInteger(filters.platformId) && filters.platformId > 0) {
+        where.push("c.PLATFORM_ID = :platformId");
+        binds.platformId = Math.trunc(filters.platformId);
+      } else {
+        throw new Error("Invalid platform id.");
+      }
     }
 
     if (filters.ownershipType?.trim()) {
@@ -352,6 +379,173 @@ export default class UserGameCollection {
       );
 
       return (result.rows ?? []).map(mapEntry);
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async getOverviewForUser(userId: string): Promise<{
+    totalCount: number;
+    platformCounts: IUserGameCollectionOverviewEntry[];
+  }> {
+    if (!userId.trim()) {
+      throw new Error("Invalid user id.");
+    }
+
+    const connection = await getOraclePool().getConnection();
+    try {
+      const totalResult = await connection.execute<{ TOTAL_COUNT: number }>(
+        `SELECT COUNT(*) AS TOTAL_COUNT
+           FROM USER_GAME_COLLECTIONS
+          WHERE USER_ID = :userId`,
+        { userId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+      const totalCount = Number(totalResult.rows?.[0]?.TOTAL_COUNT ?? 0);
+
+      const result = await connection.execute<{
+        PLATFORM_ID: number | null;
+        PLATFORM_NAME: string | null;
+        PLATFORM_ABBREVIATION: string | null;
+        TOTAL_COUNT: number;
+      }>(
+        `SELECT c.PLATFORM_ID,
+                p.PLATFORM_NAME,
+                p.PLATFORM_ABBREVIATION,
+                COUNT(*) AS TOTAL_COUNT
+           FROM USER_GAME_COLLECTIONS c
+           LEFT JOIN GAMEDB_PLATFORMS p ON p.PLATFORM_ID = c.PLATFORM_ID
+          WHERE c.USER_ID = :userId
+          GROUP BY c.PLATFORM_ID, p.PLATFORM_NAME, p.PLATFORM_ABBREVIATION
+          ORDER BY COUNT(*) DESC,
+                   LOWER(NVL(p.PLATFORM_NAME, 'Unknown')),
+                   c.PLATFORM_ID`,
+        { userId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      const platformCounts = (result.rows ?? []).map((row) => ({
+        platformId: row.PLATFORM_ID == null ? null : Number(row.PLATFORM_ID),
+        platformName: row.PLATFORM_NAME ?? null,
+        platformAbbreviation: row.PLATFORM_ABBREVIATION ?? null,
+        total: Number(row.TOTAL_COUNT ?? 0),
+      }));
+
+      return { totalCount, platformCounts };
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async getOverviewForAllUsers(): Promise<{
+    totalCount: number;
+    platformCounts: IUserGameCollectionOverviewEntry[];
+    users: IUserGameCollectionUserOverview[];
+  }> {
+    const connection = await getOraclePool().getConnection();
+    try {
+      const totalResult = await connection.execute<{ TOTAL_COUNT: number }>(
+        `SELECT COUNT(*) AS TOTAL_COUNT
+           FROM USER_GAME_COLLECTIONS`,
+        {},
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+      const totalCount = Number(totalResult.rows?.[0]?.TOTAL_COUNT ?? 0);
+
+      const platformResult = await connection.execute<{
+        PLATFORM_ID: number | null;
+        PLATFORM_NAME: string | null;
+        PLATFORM_ABBREVIATION: string | null;
+        TOTAL_COUNT: number;
+      }>(
+        `SELECT c.PLATFORM_ID,
+                p.PLATFORM_NAME,
+                p.PLATFORM_ABBREVIATION,
+                COUNT(*) AS TOTAL_COUNT
+           FROM USER_GAME_COLLECTIONS c
+           LEFT JOIN GAMEDB_PLATFORMS p ON p.PLATFORM_ID = c.PLATFORM_ID
+          GROUP BY c.PLATFORM_ID, p.PLATFORM_NAME, p.PLATFORM_ABBREVIATION
+          ORDER BY COUNT(*) DESC,
+                   LOWER(NVL(p.PLATFORM_NAME, 'Unknown')),
+                   c.PLATFORM_ID`,
+        {},
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      const platformCounts = (platformResult.rows ?? []).map((row) => ({
+        platformId: row.PLATFORM_ID == null ? null : Number(row.PLATFORM_ID),
+        platformName: row.PLATFORM_NAME ?? null,
+        platformAbbreviation: row.PLATFORM_ABBREVIATION ?? null,
+        total: Number(row.TOTAL_COUNT ?? 0),
+      }));
+
+      const userResult = await connection.execute<{
+        USER_ID: string;
+        USERNAME: string | null;
+        GLOBAL_NAME: string | null;
+        PLATFORM_ID: number | null;
+        PLATFORM_NAME: string | null;
+        PLATFORM_ABBREVIATION: string | null;
+        TOTAL_COUNT: number;
+      }>(
+        `SELECT c.USER_ID,
+                u.USERNAME,
+                u.GLOBAL_NAME,
+                c.PLATFORM_ID,
+                p.PLATFORM_NAME,
+                p.PLATFORM_ABBREVIATION,
+                COUNT(*) AS TOTAL_COUNT
+           FROM USER_GAME_COLLECTIONS c
+           LEFT JOIN RPG_CLUB_USERS u ON u.USER_ID = c.USER_ID
+           LEFT JOIN GAMEDB_PLATFORMS p ON p.PLATFORM_ID = c.PLATFORM_ID
+          WHERE NVL(u.IS_BOT, 0) = 0
+          GROUP BY c.USER_ID,
+                   u.USERNAME,
+                   u.GLOBAL_NAME,
+                   c.PLATFORM_ID,
+                   p.PLATFORM_NAME,
+                   p.PLATFORM_ABBREVIATION
+          ORDER BY LOWER(COALESCE(u.GLOBAL_NAME, u.USERNAME, c.USER_ID)),
+                   c.USER_ID,
+                   COUNT(*) DESC,
+                   LOWER(NVL(p.PLATFORM_NAME, 'Unknown')),
+                   c.PLATFORM_ID`,
+        {},
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+
+      const usersById = new Map<string, IUserGameCollectionUserOverview>();
+      for (const row of userResult.rows ?? []) {
+        const userId = row.USER_ID;
+        const existing = usersById.get(userId);
+        const platformEntry: IUserGameCollectionOverviewEntry = {
+          platformId: row.PLATFORM_ID == null ? null : Number(row.PLATFORM_ID),
+          platformName: row.PLATFORM_NAME ?? null,
+          platformAbbreviation: row.PLATFORM_ABBREVIATION ?? null,
+          total: Number(row.TOTAL_COUNT ?? 0),
+        };
+
+        if (existing) {
+          existing.platformCounts.push(platformEntry);
+          existing.totalCount += platformEntry.total;
+        } else {
+          usersById.set(userId, {
+            userId,
+            username: row.USERNAME ?? null,
+            globalName: row.GLOBAL_NAME ?? null,
+            totalCount: platformEntry.total,
+            platformCounts: [platformEntry],
+          });
+        }
+      }
+
+      const users = Array.from(usersById.values()).sort((a, b) => {
+        const aName = (a.globalName ?? a.username ?? a.userId).toLowerCase();
+        const bName = (b.globalName ?? b.username ?? b.userId).toLowerCase();
+        return aName.localeCompare(bName);
+      });
+
+      return { totalCount, platformCounts, users };
     } finally {
       await connection.close();
     }
