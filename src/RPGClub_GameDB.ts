@@ -29,6 +29,7 @@ import { startThreadSyncService } from "./services/ThreadSyncService.js";
 import { startThreadLinkPromptService } from "./services/ThreadLinkPromptService.js";
 import { refreshGiveawayHubMessage } from "./services/GiveawayHubService.js";
 import { startGameReleaseAnnouncementService } from "./services/GameReleaseAnnouncementService.js";
+import { startIgdbScanService } from "./services/IgdbScanService.js";
 installConsoleLogging();
 
 const PRESENCE_CHECK_INTERVAL_MS: number = 30 * 60 * 1000;
@@ -187,6 +188,7 @@ bot.once("clientReady", async () => {
   startThreadSyncService(bot);
   startThreadLinkPromptService(bot);
   startGameReleaseAnnouncementService(bot);
+  startIgdbScanService();
   await joinAllTargetForumThreads(bot);
   startRssFeedService(bot);
   await refreshGiveawayHubMessage(bot);

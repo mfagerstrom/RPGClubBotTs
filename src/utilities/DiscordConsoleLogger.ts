@@ -11,7 +11,7 @@ const LEVEL_COLORS: Record<string, number> = {
   error: 0xe74c3c,
   debug: 0x9b59b6,
 };
-const LOG_BATCH_INTERVAL_MS = 15 * 1000;
+const LOG_BATCH_INTERVAL_MS = 5 * 1000;
 const LOG_BATCH_MAX_CHARS = 2600;
 const FORCE_WIDTH_IMAGE_NAME = "force-message-width.png";
 const FORCE_WIDTH_IMAGE_PATH = resolveAssetPath("images", FORCE_WIDTH_IMAGE_NAME);
@@ -29,7 +29,7 @@ const STARTUP_ALLOWED_LOG_PATTERNS: RegExp[] = [
 ];
 
 type ConsoleLevel = "log" | "error" | "warn" | "info" | "debug";
-type BufferedLevel = "log" | "info";
+type BufferedLevel = ConsoleLevel;
 type BufferedLogEntry = { time: number; message: string };
 
 const originalConsole = {
@@ -45,8 +45,20 @@ type ILoggerChannel = TextBasedChannel & { send: (options: MessageCreateOptions)
 let discordClient: Client | null = null;
 let logChannel: ILoggerChannel | null = null;
 let resolvingChannel = false;
-const logBuffer: Record<BufferedLevel, BufferedLogEntry[]> = { log: [], info: [] };
-const logBufferCharCount: Record<BufferedLevel, number> = { log: 0, info: 0 };
+const logBuffer: Record<BufferedLevel, BufferedLogEntry[]> = {
+  log: [],
+  info: [],
+  warn: [],
+  error: [],
+  debug: [],
+};
+const logBufferCharCount: Record<BufferedLevel, number> = {
+  log: 0,
+  info: 0,
+  warn: 0,
+  error: 0,
+  debug: 0,
+};
 let logBufferTimer: NodeJS.Timeout | null = null;
 let startupLogFilterEnabled = true;
 let shutdownHooksRegistered = false;
@@ -125,11 +137,11 @@ async function sendEmbedToChannel(channel: ILoggerChannel, embed: EmbedBuilder):
 }
 
 function getBufferedLine(level: BufferedLevel, message: string): string {
-  if (level === "info") {
-    return `[INFO] ${message}`;
+  if (level === "log") {
+    return message;
   }
 
-  return message;
+  return `[${level.toUpperCase()}] ${message}`;
 }
 
 function startLogBufferTimer(): void {
@@ -138,14 +150,24 @@ function startLogBufferTimer(): void {
 }
 
 function stopLogBufferTimerIfIdle(): void {
-  if (logBuffer.log.length > 0 || logBuffer.info.length > 0) return;
+  if (
+    logBuffer.log.length > 0 ||
+    logBuffer.info.length > 0 ||
+    logBuffer.warn.length > 0 ||
+    logBuffer.error.length > 0 ||
+    logBuffer.debug.length > 0
+  ) {
+    return;
+  }
   if (!logBufferTimer) return;
   clearInterval(logBufferTimer);
   logBufferTimer = null;
 }
 
 async function flushLogBuffer(targetLevel?: BufferedLevel): Promise<void> {
-  const levelsToFlush: BufferedLevel[] = targetLevel ? [targetLevel] : ["log", "info"];
+  const levelsToFlush: BufferedLevel[] = targetLevel
+    ? [targetLevel]
+    : ["log", "info", "warn", "error", "debug"];
   const hasLogs = levelsToFlush.some((level) => logBuffer[level].length > 0);
   if (!hasLogs) {
     stopLogBufferTimerIfIdle();
@@ -237,16 +259,6 @@ async function sendToDiscord(level: ConsoleLevel, message: string): Promise<void
       return;
     }
 
-    if (level === "log") {
-      bufferLog("log", message);
-      return;
-    }
-
-    if (level === "info") {
-      bufferLog("info", message);
-      return;
-    }
-
     // Filter out noisy Discord client acknowledgement errors
     if (
       level === "error" &&
@@ -256,25 +268,8 @@ async function sendToDiscord(level: ConsoleLevel, message: string): Promise<void
       return;
     }
 
-    if (level === "error") {
-      await flushLogBuffer();
-    }
-
-    const channel = await ensureChannel();
-    if (!channel) return;
-
-    const prefix = `[${level.toUpperCase()}] `;
-    const text = prefix + message;
-    const shouldWrapInCodeBlock = level === "error" || level === "warn";
-    const maxTextLength = shouldWrapInCodeBlock ? MAX_DESCRIPTION_LENGTH - 8 : MAX_DESCRIPTION_LENGTH;
-    const trimmed = text.length > maxTextLength ? text.slice(0, maxTextLength - 3) + "..." : text;
-    const description = shouldWrapInCodeBlock ? `\`\`\`\n${trimmed}\n\`\`\`` : trimmed;
-    const embed = new EmbedBuilder()
-      .setDescription(description)
-      .setColor(LEVEL_COLORS[level] ?? LEVEL_COLORS.log)
-      .setTimestamp(new Date());
-
-    await sendEmbedToChannel(channel, embed);
+    bufferLog(level, message);
+    return;
   } catch {
     // Swallow to avoid recursive console logging on failures
   }

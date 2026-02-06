@@ -2133,6 +2133,72 @@ export default class Game {
     }
   }
 
+  static async clearReleaseDates(
+    gameId: number,
+  ): Promise<{ releases: number; announcements: number }> {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+
+    try {
+      const announceResult = await connection.execute(
+        `DELETE FROM GAMEDB_RELEASE_ANNOUNCEMENTS
+          WHERE RELEASE_ID IN (
+            SELECT RELEASE_ID
+              FROM GAMEDB_RELEASES
+             WHERE GAME_ID = :gameId
+          )`,
+        { gameId },
+        { autoCommit: true },
+      );
+      const releaseResult = await connection.execute(
+        `DELETE FROM GAMEDB_RELEASES
+          WHERE GAME_ID = :gameId`,
+        { gameId },
+        { autoCommit: true },
+      );
+      await connection.execute(
+        `UPDATE GAMEDB_GAMES
+            SET INITIAL_RELEASE_DATE = NULL,
+                UPDATED_AT = SYSTIMESTAMP
+          WHERE GAME_ID = :gameId`,
+        { gameId },
+        { autoCommit: true },
+      );
+      return {
+        releases: Number(releaseResult.rowsAffected ?? 0),
+        announcements: Number(announceResult.rowsAffected ?? 0),
+      };
+    } finally {
+      await connection.close();
+    }
+  }
+
+  static async refreshReleaseDates(
+    gameId: number,
+    releases: NonNullable<IGDBGameDetails["release_dates"]>,
+  ): Promise<void> {
+    await Game.clearReleaseDates(gameId);
+    if (!releases.length) return;
+    await Game.saveReleaseDates(gameId, releases);
+  }
+
+  static async touchGameUpdatedAt(gameId: number): Promise<void> {
+    const pool = getOraclePool();
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.execute(
+        `UPDATE GAMEDB_GAMES
+            SET UPDATED_AT = SYSTIMESTAMP
+          WHERE GAME_ID = :gameId`,
+        { gameId },
+        { autoCommit: true },
+      );
+    } finally {
+      await connection.close();
+    }
+  }
+
   static async getGameAssociations(gameId: number): Promise<IGameAssociationSummary> {
     const pool = getOraclePool();
     const connection = await pool.getConnection();

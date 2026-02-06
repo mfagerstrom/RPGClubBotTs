@@ -334,3 +334,10 @@ f1e9904 2026-01-30 issue-136: Added more labels to /todo
 7884dcd 2026-01-30 issue-126: consolidated all message flag IDs into one file
 8bdb6d3 2026-01-30 issue-124: consolidated all tag ids into one file.
 2ed554e 2026-01-30 issue-123: consolidated all USER_ID constants into one file
+# Commit snapshot (2026-02-06)
+
+5b0664f 2026-02-06 issue-181: implemented log batching for [INFO] messages
+5d4433e 2026-02-06 issue-179: move new game release announcments to a new channel
+48e6ae5 2026-02-05 refactored steam import
+8360a76 2026-02-05 chore: updated readme
+4b45e5b 2026-02-05 chore: updated readme
