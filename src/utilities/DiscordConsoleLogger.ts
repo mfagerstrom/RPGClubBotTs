@@ -12,6 +12,7 @@ const LEVEL_COLORS: Record<string, number> = {
   debug: 0x9b59b6,
 };
 const LOG_BATCH_INTERVAL_MS = 15 * 1000;
+const LOG_BATCH_MAX_CHARS = 2600;
 const FORCE_WIDTH_IMAGE_NAME = "force-message-width.png";
 const FORCE_WIDTH_IMAGE_PATH = resolveAssetPath("images", FORCE_WIDTH_IMAGE_NAME);
 const STARTUP_COMPLETE_LOG = "Startup sequence completed.";
@@ -28,6 +29,8 @@ const STARTUP_ALLOWED_LOG_PATTERNS: RegExp[] = [
 ];
 
 type ConsoleLevel = "log" | "error" | "warn" | "info" | "debug";
+type BufferedLevel = "log" | "info";
+type BufferedLogEntry = { time: number; message: string };
 
 const originalConsole = {
   log: console.log.bind(console),
@@ -42,9 +45,11 @@ type ILoggerChannel = TextBasedChannel & { send: (options: MessageCreateOptions)
 let discordClient: Client | null = null;
 let logChannel: ILoggerChannel | null = null;
 let resolvingChannel = false;
-let logBuffer: { time: number; message: string }[] = [];
+const logBuffer: Record<BufferedLevel, BufferedLogEntry[]> = { log: [], info: [] };
+const logBufferCharCount: Record<BufferedLevel, number> = { log: 0, info: 0 };
 let logBufferTimer: NodeJS.Timeout | null = null;
 let startupLogFilterEnabled = true;
+let shutdownHooksRegistered = false;
 
 function formatArgs(args: unknown[]): string {
   return args
@@ -119,52 +124,111 @@ async function sendEmbedToChannel(channel: ILoggerChannel, embed: EmbedBuilder):
   }
 }
 
-async function flushLogBuffer(): Promise<void> {
-  if (logBuffer.length === 0) return;
+function getBufferedLine(level: BufferedLevel, message: string): string {
+  if (level === "info") {
+    return `[INFO] ${message}`;
+  }
 
-  const logsToSend = [...logBuffer].sort((a, b) => a.time - b.time);
-  logBuffer = [];
+  return message;
+}
+
+function startLogBufferTimer(): void {
+  if (logBufferTimer) return;
+  logBufferTimer = setInterval(() => void flushLogBuffer(), LOG_BATCH_INTERVAL_MS);
+}
+
+function stopLogBufferTimerIfIdle(): void {
+  if (logBuffer.log.length > 0 || logBuffer.info.length > 0) return;
+  if (!logBufferTimer) return;
+  clearInterval(logBufferTimer);
+  logBufferTimer = null;
+}
+
+async function flushLogBuffer(targetLevel?: BufferedLevel): Promise<void> {
+  const levelsToFlush: BufferedLevel[] = targetLevel ? [targetLevel] : ["log", "info"];
+  const hasLogs = levelsToFlush.some((level) => logBuffer[level].length > 0);
+  if (!hasLogs) {
+    stopLogBufferTimerIfIdle();
+    return;
+  }
 
   const channel = await ensureChannel();
   if (!channel) {
+    stopLogBufferTimerIfIdle();
     return;
   }
 
   try {
-    let currentDescription = "";
-    const embeds: EmbedBuilder[] = [];
+    for (const level of levelsToFlush) {
+      if (logBuffer[level].length === 0) continue;
+      const logsToSend = [...logBuffer[level]].sort((a, b) => a.time - b.time);
+      logBuffer[level] = [];
+      logBufferCharCount[level] = 0;
 
-    for (const item of logsToSend) {
-      const line = item.message;
-      const nextLine = `${line}\n`;
-      if (currentDescription.length + nextLine.length > MAX_DESCRIPTION_LENGTH - 8) {
+      let currentDescription = "";
+      const embeds: EmbedBuilder[] = [];
+
+      for (const item of logsToSend) {
+        const line = item.message;
+        const nextLine = `${line}\n`;
+        if (currentDescription.length + nextLine.length > MAX_DESCRIPTION_LENGTH - 8) {
+          embeds.push(
+            new EmbedBuilder()
+              .setDescription(`\`\`\`\n${currentDescription}\`\`\``)
+              .setColor(LEVEL_COLORS[level])
+              .setTimestamp(new Date()),
+          );
+          currentDescription = "";
+        }
+
+        currentDescription += nextLine;
+      }
+
+      if (currentDescription.length > 0) {
         embeds.push(
           new EmbedBuilder()
             .setDescription(`\`\`\`\n${currentDescription}\`\`\``)
-            .setColor(LEVEL_COLORS.log)
+            .setColor(LEVEL_COLORS[level])
             .setTimestamp(new Date()),
         );
-        currentDescription = "";
       }
 
-      currentDescription += nextLine;
-    }
-
-    if (currentDescription.length > 0) {
-      embeds.push(
-        new EmbedBuilder()
-          .setDescription(`\`\`\`\n${currentDescription}\`\`\``)
-          .setColor(LEVEL_COLORS.log)
-          .setTimestamp(new Date()),
-      );
-    }
-
-    for (const embed of embeds) {
-      await sendEmbedToChannel(channel, embed);
+      for (const embed of embeds) {
+        await sendEmbedToChannel(channel, embed);
+      }
     }
   } catch {
     // Swallow to avoid recursive console logging on failures
+  } finally {
+    stopLogBufferTimerIfIdle();
   }
+}
+
+function bufferLog(level: BufferedLevel, message: string): void {
+  const line = getBufferedLine(level, message);
+  logBuffer[level].push({ message: line, time: Date.now() });
+  logBufferCharCount[level] += line.length + 1;
+  startLogBufferTimer();
+
+  if (logBufferCharCount[level] >= LOG_BATCH_MAX_CHARS) {
+    void flushLogBuffer(level);
+  }
+}
+
+function registerLogBufferShutdownHooks(): void {
+  if (shutdownHooksRegistered) return;
+  shutdownHooksRegistered = true;
+
+  const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGBREAK"];
+  for (const signal of signals) {
+    process.once(signal, () => {
+      void flushLogBuffer();
+    });
+  }
+
+  process.once("beforeExit", () => {
+    void flushLogBuffer();
+  });
 }
 
 async function sendToDiscord(level: ConsoleLevel, message: string): Promise<void> {
@@ -174,10 +238,12 @@ async function sendToDiscord(level: ConsoleLevel, message: string): Promise<void
     }
 
     if (level === "log") {
-      logBuffer.push({ message, time: Date.now() });
-      if (!logBufferTimer) {
-        logBufferTimer = setInterval(() => void flushLogBuffer(), LOG_BATCH_INTERVAL_MS);
-      }
+      bufferLog("log", message);
+      return;
+    }
+
+    if (level === "info") {
+      bufferLog("info", message);
       return;
     }
 
@@ -188,6 +254,10 @@ async function sendToDiscord(level: ConsoleLevel, message: string): Promise<void
       (message.includes("DiscordAPIError[40060]") || message.includes("DiscordAPIError[10062]"))
     ) {
       return;
+    }
+
+    if (level === "error") {
+      await flushLogBuffer();
     }
 
     const channel = await ensureChannel();
@@ -212,6 +282,7 @@ async function sendToDiscord(level: ConsoleLevel, message: string): Promise<void
 
 export function installConsoleLogging(): void {
   const levels: ConsoleLevel[] = ["log", "error", "warn", "info", "debug"];
+  registerLogBufferShutdownHooks();
 
   for (const level of levels) {
     console[level] = (...args: unknown[]) => {
