@@ -5,7 +5,7 @@ import { DateTime } from "luxon";
 import GameReleaseAnnouncement, {
   type IReleaseAnnouncementCandidate,
 } from "../classes/GameReleaseAnnouncement.js";
-import { GAME_NEWS_CHANNEL_ID } from "../config/channels.js";
+import { NEW_GAME_ANNOUNCEMENT_CHANNEL_ID } from "../config/channels.js";
 import { GameDb } from "../commands/gamedb.command.js";
 import { COMPONENTS_V2_FLAG } from "../config/flags.js";
 import { resolveAssetPath } from "../functions/AssetPath.js";
@@ -34,7 +34,7 @@ function buildAnnouncementPreface(candidate: IReleaseAnnouncementCandidate): str
 }
 
 async function fetchGameNewsChannel(client: Client): Promise<SendableTextChannel | null> {
-  const channel = await client.channels.fetch(GAME_NEWS_CHANNEL_ID).catch(() => null);
+  const channel = await client.channels.fetch(NEW_GAME_ANNOUNCEMENT_CHANNEL_ID).catch(() => null);
   if (!channel || !channel.isTextBased()) {
     return null;
   }
@@ -62,7 +62,7 @@ async function checkAndSendReleaseAnnouncements(client: Client): Promise<void> {
   const channel = await fetchGameNewsChannel(client);
   if (!channel) {
     console.warn(
-      `[GameReleaseAnnouncementService] Game news channel ${GAME_NEWS_CHANNEL_ID} is unavailable.`,
+      `[GameReleaseAnnouncementService] Game news channel ${NEW_GAME_ANNOUNCEMENT_CHANNEL_ID} is unavailable.`,
     );
     return;
   }

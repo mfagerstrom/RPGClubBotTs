@@ -1,5 +1,13 @@
 # Commit snapshot (2026-02-06)
 
+48e6ae5 2026-02-05 refactored steam import
+8360a76 2026-02-05 chore: updated readme
+4b45e5b 2026-02-05 chore: updated readme
+1d7e2d3 2026-02-05 issue-180: implemented /collection overview
+38e890b 2026-02-05 steam import beta is complete
+
+# Commit snapshot (2026-02-06)
+
 4b45e5b 2026-02-05 chore: updated readme
 1d7e2d3 2026-02-05 issue-180: implemented /collection overview
 38e890b 2026-02-05 steam import beta is complete
