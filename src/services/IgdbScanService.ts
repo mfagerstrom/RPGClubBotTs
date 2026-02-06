@@ -18,8 +18,8 @@ type IgdbScanCandidate = {
   updatedAt: Date | null;
 };
 
-const DEFAULT_SCAN_INTERVAL_MINUTES = 15 * 60;
-const DEFAULT_SCAN_BATCH_SIZE = 100;
+const DEFAULT_SCAN_INTERVAL_MINUTES = 15;
+const DEFAULT_SCAN_BATCH_SIZE = 25;
 const DEFAULT_SCAN_MIN_AGE_DAYS = 30;
 const DEFAULT_SCAN_THROTTLE_MS = 300;
 
@@ -82,6 +82,23 @@ async function listScanCandidates(
   }));
 }
 
+async function countScanCandidates(
+  connection: oracledb.Connection,
+  cutoff: Date,
+): Promise<number> {
+  const result = await connection.execute<{ TOTAL: number }>(
+    `SELECT COUNT(*) AS TOTAL
+       FROM GAMEDB_GAMES
+      WHERE IGDB_ID IS NOT NULL
+        AND (UPDATED_AT IS NULL OR UPDATED_AT < :cutoff)`,
+    { cutoff },
+    { outFormat: oracledb.OUT_FORMAT_OBJECT },
+  );
+
+  const row = (result.rows ?? [])[0] as { TOTAL?: number } | undefined;
+  return Number(row?.TOTAL ?? 0);
+}
+
 export async function igdbScanTick(): Promise<void> {
   const config = getScanConfig();
   if (!config.enabled) return;
@@ -96,9 +113,16 @@ export async function igdbScanTick(): Promise<void> {
 
   try {
     connection = await pool.getConnection();
+    const totalEligible = await countScanCandidates(connection, cutoff);
     const candidates = await listScanCandidates(connection, cutoff, config.batchSize);
     if (!candidates.length) {
-      console.log("[IGDB Scan] No games queued for refresh.");
+      console.log(
+        "[IGDB Scan] No games queued for refresh.",
+        `Interval: ${(config.intervalMs / 60000).toFixed(1)}m,`,
+        `Batch: ${config.batchSize},`,
+        `Min age: ${config.minAgeDays}d,`,
+        `Remaining: ${totalEligible}.`,
+      );
       return;
     }
 
@@ -148,8 +172,14 @@ export async function igdbScanTick(): Promise<void> {
     }
 
     const elapsedMs = Date.now() - startedAt;
+    const remaining = Math.max(totalEligible - candidates.length, 0);
     console.log(
       "[IGDB Scan] Completed batch.",
+      `Interval: ${(config.intervalMs / 60000).toFixed(1)}m,`,
+      `Batch: ${config.batchSize},`,
+      `Min age: ${config.minAgeDays}d,`,
+      `Total eligible: ${totalEligible},`,
+      `Remaining: ${remaining},`,
       `Success: ${successCount}, Failed: ${failCount},`,
       `Descriptions: ${descriptionUpdated}, Releases: ${releaseUpdated},`,
       `Elapsed: ${(elapsedMs / 1000).toFixed(1)}s.`,
