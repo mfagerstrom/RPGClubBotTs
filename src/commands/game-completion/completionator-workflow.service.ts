@@ -4,6 +4,7 @@ import type {
   ModalSubmitInteraction,
   StringSelectMenuInteraction,
 } from "discord.js";
+import type { ContainerBuilder } from "@discordjs/builders";
 import Game from "../../classes/Game.js";
 import Member from "../../classes/Member.js";
 import type {
@@ -29,6 +30,7 @@ import { igdbService } from "../../services/IgdbService.js";
 import { importGameFromIgdb } from "./completionator-parser.service.js";
 import { searchGameDbWithFallback } from "./completionator-parser.service.js";
 import { runDockerVolumeBackup } from "../../services/DockerVolumeBackupService.js";
+import { buildImportTextContainer } from "../imports/import-scaffold.service.js";
 
 export class CompletionatorWorkflowService {
   private uiService: CompletionatorUiService;
@@ -52,10 +54,12 @@ export class CompletionatorWorkflowService {
       await this.uiService.respondToImportInteraction(
         interaction,
         {
-          components: this.uiService.buildCompletionatorComponents([
-            `## Completionator Import #${session.importId}`,
-            "Import completed.",
-          ]),
+          components: this.uiService.buildCompletionatorComponents({
+            headerLines: [
+              `## Completionator Import #${session.importId}`,
+              "Import completed.",
+            ],
+          }),
         },
         options?.ephemeral,
         options?.context,
@@ -101,13 +105,13 @@ export class CompletionatorWorkflowService {
   ): Promise<void> {
     const searchTitle = this.stripCompletionatorYear(item.gameTitle);
     const results = await searchGameDbWithFallback(searchTitle);
-    const baseLines = this.uiService.buildCompletionatorBaseLines(session, item);
-
     if (!results.length) {
-      const actionLines = this.uiService.buildCompletionatorActionLines(
+      const igdbContainer = await this.buildCompletionatorIgdbContainer(
+        interaction,
         session,
         item,
-        "Awaiting GameDB id",
+        searchTitle,
+        context,
       );
       const rows = this.uiService.buildCompletionatorNoMatchRows(
         interaction.user.id,
@@ -117,14 +121,14 @@ export class CompletionatorWorkflowService {
       await this.uiService.respondToImportInteraction(
         interaction,
         {
-          components: this.uiService.buildCompletionatorComponents(
-            [
-              ...actionLines,
-              "",
+          components: this.uiService.buildCompletionatorComponents({
+            session,
+            item,
+            extraContainers: igdbContainer ? [igdbContainer] : [],
+            actionText:
               `No GameDB matches found for "${item.gameTitle}". Choose an option below.`,
-            ],
-            rows,
-          ),
+            actionRows: rows,
+          }),
         },
         ephemeral,
         context,
@@ -149,7 +153,6 @@ export class CompletionatorWorkflowService {
       session,
       item,
       results,
-      baseLines,
       ephemeral,
       context,
     );
@@ -173,11 +176,6 @@ export class CompletionatorWorkflowService {
         gameDbGameId: null,
         errorText: `GameDB id ${gameId} not found.`,
       });
-      const actionLines = this.uiService.buildCompletionatorActionLines(
-        session,
-        item,
-        "Awaiting GameDB id",
-      );
       const rows = this.uiService.buildCompletionatorNoMatchRows(
         interaction.user.id,
         session.importId,
@@ -186,14 +184,13 @@ export class CompletionatorWorkflowService {
       await this.uiService.respondToImportInteraction(
         interaction,
         {
-          components: this.uiService.buildCompletionatorComponents(
-            [
-              ...actionLines,
-              "",
+          components: this.uiService.buildCompletionatorComponents({
+            session,
+            item,
+            actionText:
               `GameDB id ${gameId} was not found. Choose another option below.`,
-            ],
-            rows,
-          ),
+            actionRows: rows,
+          }),
         },
         ephemeral,
         context,
@@ -206,6 +203,27 @@ export class CompletionatorWorkflowService {
       await updateImportItem(item.itemId, {
         gameDbGameId: gameId,
       });
+      item.gameDbGameId = gameId;
+      const platforms = await Game.getPlatformsForGameWithStandard(
+        gameId,
+        STANDARD_PLATFORM_IDS,
+      );
+      const state = this.getOrCreateCompletionatorAddFormState(
+        session,
+        item,
+        gameId,
+        interaction.user.id,
+      );
+      this.resolveCompletionatorPlatformState(state, item, platforms);
+
+      if (this.canAutoAddCompletion(item, state)) {
+        await this.addCompletionFromImport(interaction, session, item, state);
+        await this.processNextCompletionatorItem(interaction, session, {
+          ephemeral,
+          context,
+        });
+        return;
+      }
 
       await this.renderCompletionatorAddForm(
         interaction,
@@ -236,7 +254,7 @@ export class CompletionatorWorkflowService {
 
     const shouldConfirmSame = this.shouldConfirmCompletionMatch(existing, item);
     if (shouldConfirmSame) {
-      const confirmLines = this.buildCompletionSameCheckLines(session, item, existing);
+      const confirmContent = this.buildCompletionSameCheckLines(session, item, existing);
       const mappedType =
         this.mapCompletionatorType(item.sourceType ?? undefined) ??
         item.completionType ??
@@ -257,11 +275,15 @@ export class CompletionatorWorkflowService {
       await this.uiService.respondToImportInteraction(
         interaction,
         {
-          components: this.uiService.buildCompletionatorComponents(
-            confirmLines,
-            [confirmButtons, existingPayload.changeRow],
-            [existingPayload.container],
-          ),
+          components: this.uiService.buildCompletionatorComponents({
+            headerLines: confirmContent.headerLines,
+            extraContainers: [
+              buildImportTextContainer(confirmContent.detailLines.join("\n").trim()),
+              existingPayload.container,
+            ],
+            actionText: confirmContent.actionText,
+            actionRows: [confirmButtons, existingPayload.changeRow],
+          }),
           files: existingPayload.files,
         },
         ephemeral,
@@ -292,7 +314,7 @@ export class CompletionatorWorkflowService {
     ephemeral?: boolean,
     context?: CompletionatorThreadContext,
   ): Promise<void> {
-    const updateLines = this.buildCompletionatorUpdateLines(session, item, existing);
+    const updateContent = this.buildCompletionatorUpdateLines(session, item, existing);
     const gameId = item.gameDbGameId ?? existing?.gameId ?? 0;
     const mappedType =
       this.mapCompletionatorType(item.sourceType ?? undefined) ??
@@ -328,15 +350,19 @@ export class CompletionatorWorkflowService {
       updateOptions,
     );
 
-    const extraContainers = existingPayload ? [existingPayload.container] : [];
+    const extraContainers = [
+      buildImportTextContainer(updateContent.detailLines.join("\n").trim()),
+      ...(existingPayload ? [existingPayload.container] : []),
+    ];
     await this.uiService.respondToImportInteraction(
       interaction,
       {
-        components: this.uiService.buildCompletionatorComponents(
-          updateLines,
-          [updateRow, buttonsRow, ...(existingPayload ? [existingPayload.changeRow] : [])],
+        components: this.uiService.buildCompletionatorComponents({
+          headerLines: updateContent.headerLines,
           extraContainers,
-        ),
+          actionText: updateContent.actionText,
+          actionRows: [updateRow, buttonsRow, ...(existingPayload ? [existingPayload.changeRow] : [])],
+        }),
         files: existingPayload?.files,
       },
       ephemeral,
@@ -379,30 +405,15 @@ export class CompletionatorWorkflowService {
   }> {
     const platforms = await Game.getPlatformsForGameWithStandard(gameId, STANDARD_PLATFORM_IDS);
     const state = this.getOrCreateCompletionatorAddFormState(session, item, gameId, ownerId);
+    this.resolveCompletionatorPlatformState(state, item, platforms);
 
-    if (!state.platformId && !state.otherPlatform && item.platformName) {
-      const matchingId = this.uiService.resolvePlatformId(item.platformName, platforms);
-      if (matchingId) {
-        state.platformId = matchingId;
-        state.otherPlatform = false;
-      }
-    }
-
-    const actionLines = this.uiService.buildCompletionatorActionLines(
-      session,
-      item,
-      "Complete the form below to add this completion.",
-    );
-    if (notice) {
-      actionLines.push("", notice);
-    }
     if (!platforms.length) {
       return {
-        components: this.uiService.buildCompletionatorComponents([
-          ...actionLines,
-          "",
-          "No platform release data is available for this game.",
-        ]),
+        components: this.uiService.buildCompletionatorComponents({
+          session,
+          item,
+          actionText: "No platform release data is available for this game.",
+        }),
         files: [],
       };
     }
@@ -420,12 +431,17 @@ export class CompletionatorWorkflowService {
         item,
       );
     const rows = this.uiService.buildCompletionatorAddFormRows(state, item, platforms);
+    const actionText = notice
+      ? `Complete the form below to add this completion.\n${notice}`
+      : "Complete the form below to add this completion.";
     return {
-      components: this.uiService.buildCompletionatorComponents(
-        actionLines,
-        [...rows, changeRow],
-        [container],
-      ),
+      components: this.uiService.buildCompletionatorComponents({
+        session,
+        item,
+        extraContainers: [container],
+        actionText,
+        actionRows: [...rows, changeRow],
+      }),
       files,
     };
   }
@@ -439,7 +455,6 @@ export class CompletionatorWorkflowService {
     session: ICompletionatorImport,
     item: ICompletionatorItem,
     results: Awaited<ReturnType<typeof Game.searchGames>>,
-    baseLines: string[],
     ephemeral?: boolean,
     context?: CompletionatorThreadContext,
   ): Promise<void> {
@@ -455,21 +470,41 @@ export class CompletionatorWorkflowService {
       return;
     }
 
-    const { selectRow, buttonsRow } = this.uiService.buildGameDbResultsComponents(
+    const guidance = results.length > 1
+      ? "Ambiguous match. Use Choose to select the right GameDB title."
+      : "Single match found. Use Choose to confirm import.";
+    const candidatesContainer = this.uiService.buildCompletionatorCandidatesContainer({
+      ownerId: interaction.user.id,
+      importId: session.importId,
+      itemId: item.itemId,
+      results,
+      guidanceText: guidance,
+    });
+    const igdbContainer = await this.buildCompletionatorIgdbContainer(
+      interaction,
+      session,
+      item,
+      this.stripCompletionatorYear(item.gameTitle),
+      context,
+    );
+    const actionRows = this.uiService.buildCompletionatorNoMatchRows(
       interaction.user.id,
       session.importId,
       item.itemId,
-      results,
     );
-
-    const actionLines = [...baseLines, "", "**Action:** Select the matching game."];
+    const actionText = "Use Choose, or search IGDB, enter a GameDB ID, skip, or pause.";
     await this.uiService.respondToImportInteraction(
       interaction,
       {
-        components: this.uiService.buildCompletionatorComponents(actionLines, [
-          selectRow,
-          buttonsRow,
-        ]),
+        components: this.uiService.buildCompletionatorComponents({
+          session,
+          item,
+          extraContainers: igdbContainer
+            ? [candidatesContainer, igdbContainer]
+            : [candidatesContainer],
+          actionText,
+          actionRows,
+        }),
       },
       ephemeral,
       context,
@@ -498,15 +533,14 @@ export class CompletionatorWorkflowService {
 
     const searchTerm = initialQuery?.trim() || item.gameTitle;
 
-    const searchingLines = [
-      ...this.uiService.buildCompletionatorBaseLines(session, item),
-      "",
-      `Searching IGDB for "${searchTerm}"...`,
-    ];
     await this.uiService.respondToImportInteraction(
       interaction,
       {
-        components: this.uiService.buildCompletionatorComponents(searchingLines),
+        components: this.uiService.buildCompletionatorComponents({
+          session,
+          item,
+          actionText: `Searching IGDB for "${searchTerm}"...`,
+        }),
       },
       this.uiService.isInteractionEphemeral(interaction),
       context,
@@ -526,11 +560,11 @@ export class CompletionatorWorkflowService {
           await this.uiService.respondToImportInteraction(
             sel,
             {
-              components: this.uiService.buildCompletionatorComponents([
-                ...this.uiService.buildCompletionatorBaseLines(session, item),
-                "",
-                "Importing game details from IGDB...",
-              ]),
+              components: this.uiService.buildCompletionatorComponents({
+                session,
+                item,
+                actionText: "Importing game details from IGDB...",
+              }),
             },
             this.uiService.isInteractionEphemeral(sel),
             context,
@@ -548,18 +582,15 @@ export class CompletionatorWorkflowService {
         },
       );
 
-      const selectLines = [
-        ...this.uiService.buildCompletionatorBaseLines(session, item),
-        "",
-        `Select an IGDB result to import for "${searchTerm}".`,
-      ];
       await this.uiService.respondToImportInteraction(
         interaction,
         {
-          components: this.uiService.buildCompletionatorComponents(selectLines, [
-            ...selectComponents,
-            ...extraRows,
-          ]),
+          components: this.uiService.buildCompletionatorComponents({
+            session,
+            item,
+            actionText: `Select an IGDB result to import for "${searchTerm}".`,
+            actionRows: [...selectComponents, ...extraRows],
+          }),
         },
         this.uiService.isInteractionEphemeral(interaction),
         context,
@@ -567,12 +598,6 @@ export class CompletionatorWorkflowService {
       return;
     }
 
-    const actionLines = [
-      ...this.uiService.buildCompletionatorBaseLines(session, item),
-      "",
-      `No IGDB matches found for "${searchTerm}".`,
-      "Use the buttons below to search again, skip, or pause.",
-    ];
     const retryRow = this.uiService.buildIgdbRetryButtons(
       interaction.user.id,
       session.importId,
@@ -582,15 +607,86 @@ export class CompletionatorWorkflowService {
     await this.uiService.respondToImportInteraction(
       interaction,
       {
-        components: this.uiService.buildCompletionatorComponents(actionLines, [retryRow]),
+        components: this.uiService.buildCompletionatorComponents({
+          session,
+          item,
+          actionText:
+            `No IGDB matches found for "${searchTerm}". ` +
+            "Use the buttons below to search again, skip, or pause.",
+          actionRows: [retryRow],
+        }),
       },
       this.uiService.isInteractionEphemeral(interaction),
       context,
     );
   }
 
+  private async buildCompletionatorIgdbContainer(
+    interaction:
+      | CommandInteraction
+      | ButtonInteraction
+      | StringSelectMenuInteraction
+      | ModalSubmitInteraction,
+    session: ICompletionatorImport,
+    item: ICompletionatorItem,
+    searchTitle: string,
+    context?: CompletionatorThreadContext,
+  ): Promise<ContainerBuilder | null> {
+    try {
+      const igdbSearch = await igdbService.searchGames(searchTitle, 10);
+      const igdbRows = igdbSearch.results.length
+        ? this.uiService.buildCompletionatorIgdbSelectRows(
+            interaction.user.id,
+            igdbSearch.results,
+          async (selectionInteraction, gameId) => {
+            if (!selectionInteraction.deferred && !selectionInteraction.replied) {
+              await selectionInteraction.deferUpdate().catch(() => {});
+            }
+            await this.uiService.respondToImportInteraction(
+              selectionInteraction,
+              {
+                components: this.uiService.buildCompletionatorWorkingComponents(),
+              },
+              this.uiService.isInteractionEphemeral(selectionInteraction),
+              context,
+            );
+
+              const imported = await importGameFromIgdb(gameId);
+              await this.handleCompletionatorMatch(
+                selectionInteraction,
+                session,
+                item,
+                imported.gameId,
+                this.uiService.isInteractionEphemeral(selectionInteraction),
+                context,
+              );
+            },
+          )
+        : [];
+      const noResultsText = igdbSearch.results.length
+        ? null
+        : `No IGDB matches found for "${searchTitle}". Try Search a different title.`;
+      return this.uiService.buildCompletionatorIgdbContainer({
+        searchTitle,
+        igdbRows,
+        noResultsText,
+      });
+    } catch {
+      return this.uiService.buildCompletionatorIgdbContainer({
+        searchTitle,
+        igdbRows: [],
+        noResultsText:
+          `No IGDB matches found for "${searchTitle}". Try Search a different title.`,
+      });
+    }
+  }
+
   async addCompletionFromImport(
-    interaction: ButtonInteraction,
+    interaction:
+      | CommandInteraction
+      | ButtonInteraction
+      | StringSelectMenuInteraction
+      | ModalSubmitInteraction,
     session: ICompletionatorImport,
     item: ICompletionatorItem,
     state: CompletionatorAddFormState,
@@ -629,6 +725,38 @@ export class CompletionatorWorkflowService {
       gameDbGameId: item.gameDbGameId,
       completionId,
     });
+  }
+
+  resolveCompletionatorPlatformState(
+    state: CompletionatorAddFormState,
+    item: ICompletionatorItem,
+    platforms: Array<{ id: number; name: string }>,
+  ): void {
+    if (state.platformId || state.otherPlatform) return;
+
+    if (item.platformName) {
+      const matchingId = this.uiService.resolvePlatformId(item.platformName, platforms);
+      if (matchingId) {
+        state.platformId = matchingId;
+        state.otherPlatform = false;
+        return;
+      }
+    }
+
+    if (platforms.length === 1) {
+      state.platformId = platforms[0].id;
+      state.otherPlatform = false;
+    }
+  }
+
+  canAutoAddCompletion(
+    item: ICompletionatorItem,
+    state: CompletionatorAddFormState,
+  ): boolean {
+    if (!state.platformId && !state.otherPlatform) return false;
+    if (state.dateChoice === "date") return false;
+    if (state.dateChoice === "csv" && !item.completedAt) return false;
+    return true;
   }
 
   getOrCreateCompletionatorAddFormState(
@@ -780,44 +908,48 @@ export class CompletionatorWorkflowService {
     session: ICompletionatorImport,
     item: ICompletionatorItem,
     existing: Awaited<ReturnType<typeof Member.getCompletionByGameId>>,
-  ): string[] {
+  ): { headerLines: string[]; detailLines: string[]; actionText: string } {
     const currentDate = existing?.completedAt ? formatTableDate(existing.completedAt) : "Unknown";
     const csvDate = item.completedAt ? formatTableDate(item.completedAt) : "Unknown";
-    return [
-      `## Completionator Import #${session.importId}`,
-      `Is this the same completion for "${item.gameTitle}"?`,
-      "",
-      `**Current:** ${existing?.completionType ?? "Unknown"} - ${currentDate} - ${
-        existing?.finalPlaytimeHours ?? "Unknown"
-      } hrs`,
-      `**CSV:** ${item.completionType ?? "Unknown"} - ${csvDate} - ${
-        item.playtimeHours ?? "Unknown"
-      } hrs`,
-      "",
-      "**Action:** Yes = update existing. No = add as new completion.",
-    ];
+    return {
+      headerLines: [
+        `## Completionator Import #${session.importId}`,
+        `Is this the same completion for "${item.gameTitle}"?`,
+      ],
+      detailLines: [
+        `**Current:** ${existing?.completionType ?? "Unknown"} - ${currentDate} - ${
+          existing?.finalPlaytimeHours ?? "Unknown"
+        } hrs`,
+        `**CSV:** ${item.completionType ?? "Unknown"} - ${csvDate} - ${
+          item.playtimeHours ?? "Unknown"
+        } hrs`,
+      ],
+      actionText: "Yes = update existing. No = add as new completion.",
+    };
   }
 
   buildCompletionatorUpdateLines(
     session: ICompletionatorImport,
     item: ICompletionatorItem,
     existing: Awaited<ReturnType<typeof Member.getCompletionByGameId>>,
-  ): string[] {
+  ): { headerLines: string[]; detailLines: string[]; actionText: string } {
     const currentDate = existing?.completedAt ? formatTableDate(existing.completedAt) : "Unknown";
     const csvDate = item.completedAt ? formatTableDate(item.completedAt) : "Unknown";
-    return [
-      `## Completionator Import #${session.importId}`,
-      `Update existing completion for "${item.gameTitle}"?`,
-      "",
-      `**Current:** ${existing?.completionType ?? "Unknown"} - ${currentDate} - ${
-        existing?.finalPlaytimeHours ?? "Unknown"
-      } hrs`,
-      `**CSV:** ${item.completionType ?? "Unknown"} - ${csvDate} - ${
-        item.playtimeHours ?? "Unknown"
-      } hrs`,
-      "",
-      "**Action:** Select fields to update.",
-    ];
+    return {
+      headerLines: [
+        `## Completionator Import #${session.importId}`,
+        `Update existing completion for "${item.gameTitle}"?`,
+      ],
+      detailLines: [
+        `**Current:** ${existing?.completionType ?? "Unknown"} - ${currentDate} - ${
+          existing?.finalPlaytimeHours ?? "Unknown"
+        } hrs`,
+        `**CSV:** ${item.completionType ?? "Unknown"} - ${csvDate} - ${
+          item.playtimeHours ?? "Unknown"
+        } hrs`,
+      ],
+      actionText: "Select fields to update.",
+    };
   }
 
   mapCompletionatorType(value: string | undefined): string | null {

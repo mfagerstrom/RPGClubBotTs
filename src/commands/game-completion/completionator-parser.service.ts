@@ -135,9 +135,32 @@ export function stripCompletionatorYear(title: string): string {
 export async function searchGameDbWithFallback(
   rawTitle: string,
 ): Promise<Awaited<ReturnType<typeof Game.searchGames>>> {
+  const normalizedTitle = normalizeTitleForSearch(rawTitle);
+  if (normalizedTitle) {
+    const normalizedResults = await Game.searchGames(normalizedTitle);
+    if (normalizedResults.length === 1) {
+      return normalizedResults;
+    }
+  }
+
   const primaryResults = await Game.searchGames(rawTitle);
   if (primaryResults.length) {
     return primaryResults;
+  }
+
+  if (normalizedTitle && normalizedTitle !== rawTitle) {
+    const normalizedResults = await Game.searchGames(normalizedTitle);
+    if (normalizedResults.length) {
+      return normalizedResults;
+    }
+  }
+
+  const variants = buildTitleVariants(rawTitle, normalizedTitle);
+  for (const variant of variants) {
+    const variantResults = await Game.searchGames(variant);
+    if (variantResults.length) {
+      return variantResults;
+    }
   }
 
   const tokens = rawTitle
@@ -161,5 +184,49 @@ export async function searchGameDbWithFallback(
 
   return Array.from(resultMap.values());
 }
+
+function normalizeTitleForSearch(title: string): string {
+  const normalized = title
+    .toLowerCase()
+    .replace(/[-–—]/g, " ")
+    .replace(/:/g, " ")
+    .replace(/^(the|a|an)\s+/i, "")
+    .replace(/\s+(the|a|an)\s+/gi, " ")
+    .replace(/[^\p{L}\p{N}'-]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized;
+}
+
+function buildTitleVariants(rawTitle: string, normalizedTitle: string): string[] {
+  const variants: string[] = [];
+  const trimmed = rawTitle.trim();
+  if (normalizedTitle && normalizedTitle !== trimmed) {
+    variants.push(normalizedTitle);
+  }
+
+  const colonIndex = trimmed.indexOf(":");
+  if (colonIndex > -1) {
+    const prefix = trimmed.slice(0, colonIndex).trim();
+    const suffix = trimmed.slice(colonIndex + 1).trim();
+    const loweredSuffix = suffix.toLowerCase();
+    if (!loweredSuffix.startsWith("the ")) {
+      variants.push(`${prefix}: The ${suffix}`);
+    } else {
+      variants.push(`${prefix}: ${suffix.replace(/^the\s+/i, "")}`);
+    }
+    variants.push(`${prefix} ${suffix}`);
+  } else {
+    const lowered = trimmed.toLowerCase();
+    if (!lowered.startsWith("the ")) {
+      variants.push(`The ${trimmed}`);
+    } else {
+      variants.push(trimmed.replace(/^the\s+/i, ""));
+    }
+  }
+
+  return Array.from(new Set(variants.filter((variant) => variant && variant !== trimmed)));
+}
+
 
 export { importGameFromIgdb } from "./completion-add.service.js";

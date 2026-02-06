@@ -42,7 +42,7 @@ export class CompletionatorThreadService {
         "Preparing import...",
       ];
       const wizardMessage: Message = await channel.send({
-        components: this.uiService.buildCompletionatorComponents(introLines),
+        components: this.uiService.buildCompletionatorComponents({ headerLines: introLines }),
         files: [],
         flags: buildComponentsV2Flags(false),
       });
@@ -67,7 +67,7 @@ export class CompletionatorThreadService {
         "Preparing import...",
       ];
       const wizardMessage: Message = await threadChannel.send({
-        components: this.uiService.buildCompletionatorComponents(introLines),
+        components: this.uiService.buildCompletionatorComponents({ headerLines: introLines }),
         files: [],
         flags: buildComponentsV2Flags(false),
       });
@@ -108,7 +108,7 @@ export class CompletionatorThreadService {
       "Preparing import...",
     ];
     const wizardMessage: Message = await thread.send({
-      components: this.uiService.buildCompletionatorComponents(introLines),
+      components: this.uiService.buildCompletionatorComponents({ headerLines: introLines }),
       files: [],
       flags: buildComponentsV2Flags(false),
     });

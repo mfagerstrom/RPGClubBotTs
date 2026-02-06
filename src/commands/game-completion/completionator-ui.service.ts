@@ -14,11 +14,13 @@ import {
   TextInputBuilder,
   TextInputStyle,
   MessageFlags,
+} from "discord.js";
+import {
   ContainerBuilder,
   SectionBuilder,
   TextDisplayBuilder,
-  ThumbnailBuilder,
-} from "discord.js";
+  ButtonBuilder as V2ButtonBuilder,
+} from "@discordjs/builders";
 import Game, { type IGameWithPlatforms, type IPlatformDef } from "../../classes/Game.js";
 import Member, { type ICompletionRecord } from "../../classes/Member.js";
 import type {
@@ -34,10 +36,16 @@ import { COMPLETION_TYPES } from "../profile.command.js";
 import { GAMEDB_CSV_PLATFORM_MAP } from "../../config/gamedbCsvPlatformMap.js";
 import { formatTableDate } from "../profile.command.js";
 import { formatPlatformDisplayName } from "../../functions/PlatformDisplay.js";
-import { COMPLETIONATOR_SKIP_SENTINEL, COMPLETIONATOR_MATCH_THUMBNAIL_NAME } from "./completion.types.js";
+import { COMPLETIONATOR_MATCH_THUMBNAIL_NAME } from "./completion.types.js";
 import { safeReply } from "../../functions/InteractionUtils.js";
 import { buildComponentsV2Flags } from "../../functions/NominationListComponents.js";
 import { createIgdbSession } from "../../services/IgdbSelectService.js";
+import {
+  buildImportMessageContainer,
+  buildImportTextContainer,
+  safeV2TextContent,
+} from "../imports/import-scaffold.service.js";
+import { buildCompletionatorChooseId } from "./completion-helpers.js";
 
 export class CompletionatorUiService {
   buildCompletionatorBaseLines(
@@ -48,7 +56,7 @@ export class CompletionatorUiService {
     const completedLabel = item.completedAt ? formatTableDate(item.completedAt) : "Unknown";
     return [
       `## Completionator Import #${session.importId}`,
-      `Row ${item.rowIndex} of ${session.totalCount}`,
+      `Row ${item.rowIndex}/${session.totalCount}`,
       "",
       `**Title:** ${item.gameTitle}`,
       `**Platform:** ${platformLabel}`,
@@ -59,38 +67,194 @@ export class CompletionatorUiService {
     ];
   }
 
-  buildCompletionatorActionLines(
+  buildCompletionatorHeaderContainer(
     session: ICompletionatorImport,
     item: ICompletionatorItem,
-    actionText: string,
-  ): string[] {
-    return [
-      ...this.buildCompletionatorBaseLines(session, item),
-      "",
-      `**Action:** ${actionText}`,
-    ];
+    thumbnailName?: string,
+  ): ContainerBuilder {
+    const content = this.buildCompletionatorBaseLines(session, item).join("\n").trim();
+    const thumbnailUrl = thumbnailName ? `attachment://${thumbnailName}` : null;
+    return buildImportMessageContainer({
+      content,
+      thumbnailUrl,
+      logPrefix: "Completionator",
+      logMeta: {
+        importId: session.importId,
+        itemId: item.itemId,
+        rowIndex: item.rowIndex,
+      },
+    });
   }
 
-  buildCompletionatorContainer(lines: string[], thumbnailName?: string): ContainerBuilder {
-    const content = lines.join("\n").trim();
-    const container = new ContainerBuilder();
-    if (thumbnailName) {
-      const section = new SectionBuilder()
-        .addTextDisplayComponents(new TextDisplayBuilder().setContent(content))
-        .setThumbnailAccessory(new ThumbnailBuilder().setURL(`attachment://${thumbnailName}`));
-      container.addSectionComponents(section);
-    } else {
-      container.addTextDisplayComponents(new TextDisplayBuilder().setContent(content));
-    }
+  buildCompletionatorActionsContainer(
+    helpText: string,
+    rows: ActionRowBuilder<any>[] = [],
+  ): ContainerBuilder {
+    const container = new ContainerBuilder().addTextDisplayComponents(
+      new TextDisplayBuilder().setContent("### Actions"),
+      new TextDisplayBuilder().setContent(safeV2TextContent(helpText, 900)),
+    );
+    rows.forEach((row) => {
+      container.addActionRowComponents(row.toJSON());
+    });
     return container;
   }
 
-  buildCompletionatorComponents(
-    lines: string[],
-    rows: ActionRowBuilder<any>[] = [],
-    extraContainers: ContainerBuilder[] = [],
-  ): Array<ContainerBuilder | ActionRowBuilder<any>> {
-    return [this.buildCompletionatorContainer(lines), ...extraContainers, ...rows];
+  buildCompletionatorCandidatesContainer(params: {
+    ownerId: string;
+    importId: number;
+    itemId: number;
+    results: Array<IGameWithPlatforms>;
+    guidanceText?: string | null;
+  }): ContainerBuilder {
+    const container = new ContainerBuilder().addTextDisplayComponents(
+      new TextDisplayBuilder().setContent("### GameDB Match Candidates"),
+      ...(params.guidanceText
+        ? [new TextDisplayBuilder().setContent(params.guidanceText)]
+        : []),
+    );
+
+    if (!params.results.length) {
+      container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent("No GameDB matches found yet."),
+      );
+      return container;
+    }
+
+    params.results.slice(0, 5).forEach((game) => {
+      const year = game.initialReleaseDate instanceof Date
+        ? String(game.initialReleaseDate.getFullYear())
+        : game.initialReleaseDate
+          ? String(new Date(game.initialReleaseDate).getFullYear())
+          : "TBD";
+      const platformNames = Array.from(
+        new Set(
+          (game.platforms ?? [])
+            .map((platform: IPlatformDef) => {
+              const formatted = formatPlatformDisplayName(platform.name) ?? platform.name;
+              return formatted;
+            })
+            .filter((name: string | null) => Boolean(name)),
+        ),
+      );
+      const platformsLabel = platformNames.length
+        ? platformNames
+          .sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }))
+          .join(", ")
+        : "Unknown platforms";
+      const sectionText = safeV2TextContent(
+        `**${game.title}**\n` +
+        `-# **Release Year:** ${year} | **Platforms:** ${platformsLabel} | ` +
+        `**GameDB ID:** ${game.id}`,
+        900,
+      );
+      const section = new SectionBuilder().addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(sectionText),
+      );
+      section.setButtonAccessory(
+        new V2ButtonBuilder()
+          .setCustomId(buildCompletionatorChooseId({
+            ownerId: params.ownerId,
+            importId: params.importId,
+            itemId: params.itemId,
+            gameId: game.id,
+          }))
+          .setLabel("Choose")
+          .setStyle(ButtonStyle.Primary),
+      );
+      container.addSectionComponents(section);
+    });
+
+    return container;
+  }
+
+  buildCompletionatorIgdbContainer(params: {
+    searchTitle: string;
+    igdbRows: ActionRowBuilder<any>[];
+    noResultsText: string | null;
+  }): ContainerBuilder {
+    const igdbSearchUrl = `https://www.igdb.com/search?utf8=%E2%9C%93&type=1&q=${
+      encodeURIComponent(params.searchTitle)
+    }`;
+    const igdbLink = `[Search IGDB for ${params.searchTitle}](${igdbSearchUrl})`;
+    const container = new ContainerBuilder().addTextDisplayComponents(
+      new TextDisplayBuilder().setContent("### Import Game From IGDB"),
+    );
+    for (const row of params.igdbRows) {
+      container.addActionRowComponents(row.toJSON());
+    }
+    if (params.noResultsText) {
+      container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(params.noResultsText),
+      );
+    }
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `Not seeing the right title? ${igdbLink}, find the **IGDB ID** and enter it below.`,
+      ),
+    );
+    return container;
+  }
+
+  buildCompletionatorIgdbSelectRows(
+    userId: string,
+    igdbResults: any[],
+    onSelect: (interaction: StringSelectMenuInteraction, gameId: number) => Promise<void>,
+  ): ActionRowBuilder<any>[] {
+    const opts: IgdbSelectOption[] = igdbResults.map((game) => {
+      const year = game.first_release_date
+        ? new Date(game.first_release_date * 1000).getFullYear()
+        : "TBD";
+      return {
+        id: game.id,
+        label: `${game.name} (${year})`,
+        description: (game.summary || "No summary").slice(0, 95),
+      };
+    });
+
+    const { components } = createIgdbSession(userId, opts, onSelect);
+    return components;
+  }
+
+  buildCompletionatorComponents(params: {
+    session?: ICompletionatorImport;
+    item?: ICompletionatorItem;
+    headerLines?: string[];
+    headerThumbnailName?: string;
+    actionText?: string;
+    actionRows?: ActionRowBuilder<any>[];
+    extraContainers?: ContainerBuilder[];
+  }): Array<ContainerBuilder | ActionRowBuilder<any>> {
+    const components: Array<ContainerBuilder | ActionRowBuilder<any>> = [];
+
+    if (params.session && params.item) {
+      components.push(this.buildCompletionatorHeaderContainer(
+        params.session,
+        params.item,
+        params.headerThumbnailName,
+      ));
+    } else if (params.headerLines?.length) {
+      components.push(buildImportTextContainer(params.headerLines.join("\n").trim()));
+    }
+
+    if (params.extraContainers?.length) {
+      components.push(...params.extraContainers);
+    }
+
+    if (params.actionText || params.actionRows?.length) {
+      components.push(
+        this.buildCompletionatorActionsContainer(
+          params.actionText ?? "Use the controls below to continue.",
+          params.actionRows ?? [],
+        ),
+      );
+    }
+
+    return components;
+  }
+
+  buildCompletionatorWorkingComponents(): Array<ContainerBuilder> {
+    return [buildImportTextContainer("Working...")];
   }
 
   async buildCompletionatorExistingCompletionsContainer(
@@ -166,7 +330,16 @@ export class CompletionatorUiService {
       }
     }
     const thumbnailName = files.length ? COMPLETIONATOR_MATCH_THUMBNAIL_NAME : undefined;
-    const container = this.buildCompletionatorContainer(lines, thumbnailName);
+    const container = buildImportMessageContainer({
+      content: lines.join("\n").trim(),
+      thumbnailUrl: thumbnailName ? `attachment://${thumbnailName}` : null,
+      logPrefix: "Completionator",
+      logMeta: {
+        importId: session.importId,
+        itemId: item.itemId,
+        rowIndex: item.rowIndex,
+      },
+    });
     const changeButton = new ButtonBuilder()
       .setCustomId(`comp-import-action:${userId}:${session.importId}:${item.itemId}:igdb`)
       .setLabel("Choose a Different Game")
@@ -320,89 +493,12 @@ export class CompletionatorUiService {
     };
   }
 
-  buildGameDbResultsComponents(
-    userId: string,
-    importId: number,
-    itemId: number,
-    results: Awaited<ReturnType<typeof Game.searchGames>>,
-  ): {
-    selectRow: ActionRowBuilder<StringSelectMenuBuilder>;
-    buttonsRow: ActionRowBuilder<ButtonBuilder>;
-  } {
-    const options = [
-      {
-        label: "Import another title from IGDB",
-        value: "import-igdb",
-        description: "Search IGDB and import a new GameDB entry",
-      },
-      ...results.slice(0, 23).map((game: IGameWithPlatforms) => {
-        const year =
-          game.initialReleaseDate instanceof Date
-            ? game.initialReleaseDate.getFullYear()
-            : game.initialReleaseDate
-              ? new Date(game.initialReleaseDate).getFullYear()
-              : null;
-        const platformNames = Array.from(
-          new Set(
-            (game.platforms ?? [])
-              .map((platform: IPlatformDef) => formatPlatformDisplayName(platform.name) ?? platform.name)
-              .filter((name: string | null) => Boolean(name)),
-          ),
-        );
-        const sortedPlatforms = [...platformNames].sort((a, b) =>
-          a.localeCompare(b, "en", { sensitivity: "base" }),
-        );
-        const platformsLabel = sortedPlatforms.length
-          ? sortedPlatforms.join(", ")
-          : "Unknown platforms";
-        const baseDescription = year ? `${year} - ${platformsLabel}` : platformsLabel;
-        const description =
-          baseDescription.length > 100
-            ? `${baseDescription.slice(0, 97)}...`
-            : baseDescription;
-        return {
-          label: game.title.slice(0, 100),
-          value: String(game.id),
-          description,
-        };
-      }),
-      {
-        label: `Skip (${COMPLETIONATOR_SKIP_SENTINEL})`,
-        value: COMPLETIONATOR_SKIP_SENTINEL,
-        description: "Skip this completion",
-      },
-    ];
-
-    const select = new StringSelectMenuBuilder()
-      .setCustomId(`comp-import-select:${userId}:${importId}:${itemId}`)
-      .setPlaceholder("Select the matching game")
-      .addOptions(options);
-
-    const pauseButton = new ButtonBuilder()
-      .setCustomId(`comp-import-action:${userId}:${importId}:${itemId}:pause`)
-      .setLabel("Pause Import")
-      .setStyle(ButtonStyle.Secondary);
-    const skipButton = new ButtonBuilder()
-      .setCustomId(`comp-import-action:${userId}:${importId}:${itemId}:skip`)
-      .setLabel("Skip")
-      .setStyle(ButtonStyle.Secondary);
-
-    return {
-      selectRow: new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select),
-      buttonsRow: new ActionRowBuilder<ButtonBuilder>().addComponents(pauseButton, skipButton),
-    };
-  }
-
   buildCompletionatorNoMatchRows(
     userId: string,
     importId: number,
     itemId: number,
   ): ActionRowBuilder<ButtonBuilder>[] {
     const primaryRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`comp-import-action:${userId}:${importId}:${itemId}:igdb`)
-        .setLabel("Import from IGDB")
-        .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId(`comp-import-action:${userId}:${importId}:${itemId}:igdb-manual`)
         .setLabel("Enter IGDB ID")
@@ -411,12 +507,12 @@ export class CompletionatorUiService {
         .setCustomId(`comp-import-action:${userId}:${importId}:${itemId}:query`)
         .setLabel("Query GameDB")
         .setStyle(ButtonStyle.Primary),
-    );
-    const secondaryRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`comp-import-action:${userId}:${importId}:${itemId}:manual`)
         .setLabel("Enter GameDB ID")
         .setStyle(ButtonStyle.Primary),
+    );
+    const secondaryRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`comp-import-action:${userId}:${importId}:${itemId}:skip`)
         .setLabel("Skip")

@@ -8,7 +8,11 @@ import Member from "../../classes/Member.js";
 import Game from "../../classes/Game.js";
 import type { CompletionatorModalKind, CompletionatorDateChoice } from "./completion.types.js";
 import { completionatorAddFormStates, completionatorThreadContexts } from "./completion.types.js";
-import { getCompletionatorThreadKey, getCompletionatorFormKey } from "./completion-helpers.js";
+import {
+  getCompletionatorThreadKey,
+  getCompletionatorFormKey,
+  parseCompletionatorChooseId,
+} from "./completion-helpers.js";
 import {  getImportById,
   updateImportItem,
   getImportItemById,
@@ -22,6 +26,7 @@ import { COMPLETIONATOR_SKIP_SENTINEL } from "./completion.types.js";
 import { parseCompletionDateInput } from "../profile.command.js";
 import { buildComponentsV2Flags } from "../../functions/NominationListComponents.js";
 import { searchGameDbWithFallback, importGameFromIgdb } from "./completionator-parser.service.js";
+
 
 export class CompletionatorHandlersService {
   private workflowService: CompletionatorWorkflowService;
@@ -61,6 +66,9 @@ export class CompletionatorHandlersService {
       });
       return;
     }
+    const context = completionatorThreadContexts.get(
+      getCompletionatorThreadKey(interaction.user.id, session.importId),
+    );
 
     const choice = interaction.values?.[0];
     if (!choice) {
@@ -109,11 +117,77 @@ export class CompletionatorHandlersService {
       return;
     }
 
+    await this.uiService.respondToImportInteraction(
+      interaction,
+      {
+        components: this.uiService.buildCompletionatorWorkingComponents(),
+      },
+      ephemeral,
+      context,
+    );
     await this.workflowService.handleCompletionatorMatch(
       interaction,
       session,
       item,
       gameId,
+      this.uiService.isInteractionEphemeral(interaction),
+    );
+  }
+
+  async handleCompletionatorChoose(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseCompletionatorChooseId(interaction.customId);
+    if (!parsed) {
+      await interaction.reply({
+        content: "Invalid completionator selection.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (interaction.user.id !== parsed.ownerId) {
+      await interaction.reply({
+        content: "This import prompt isn't for you.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await interaction.deferUpdate().catch(() => {});
+
+    const session = await getImportById(parsed.importId);
+    if (!session) {
+      await interaction.followUp({
+        content: "Import session not found.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    const item = await getImportItemById(parsed.itemId);
+    if (!item) {
+      await interaction.followUp({
+        content: "Import item not found.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    const context = completionatorThreadContexts.get(
+      getCompletionatorThreadKey(parsed.ownerId, parsed.importId),
+    );
+    await this.uiService.respondToImportInteraction(
+      interaction,
+      {
+        components: this.uiService.buildCompletionatorWorkingComponents(),
+      },
+      this.uiService.isInteractionEphemeral(interaction),
+      context,
+    );
+    await this.workflowService.handleCompletionatorMatch(
+      interaction,
+      session,
+      item,
+      parsed.gameId,
       this.uiService.isInteractionEphemeral(interaction),
     );
   }
@@ -297,6 +371,17 @@ export class CompletionatorHandlersService {
         return;
       }
 
+      const context = completionatorThreadContexts.get(
+        getCompletionatorThreadKey(interaction.user.id, session.importId),
+      );
+      await this.uiService.respondToImportInteraction(
+        interaction,
+        {
+          components: this.uiService.buildCompletionatorWorkingComponents(),
+        },
+        this.uiService.isInteractionEphemeral(interaction),
+        context,
+      );
       await this.workflowService.addCompletionFromImport(interaction, session, item, state);
       await this.workflowService.processNextCompletionatorItem(interaction, session);
       return;
@@ -749,12 +834,6 @@ export class CompletionatorHandlersService {
       const normalized = this.workflowService.stripCompletionatorYear(rawValue);
       const results = await searchGameDbWithFallback(normalized);
       if (!results.length) {
-        const actionLines = [
-          ...this.uiService.buildCompletionatorBaseLines(session, item),
-          "",
-          `No GameDB matches found for "${rawValue}".`,
-          "Use the buttons below to search again, skip, or pause.",
-        ];
         const rows = this.uiService.buildCompletionatorNoMatchRows(
           ownerId,
           session.importId,
@@ -763,7 +842,14 @@ export class CompletionatorHandlersService {
         await this.uiService.respondToImportInteraction(
           interaction,
           {
-            components: this.uiService.buildCompletionatorComponents(actionLines, rows),
+            components: this.uiService.buildCompletionatorComponents({
+              session,
+              item,
+              actionText:
+                `No GameDB matches found for "${rawValue}". ` +
+                "Use the buttons below to search again, skip, or pause.",
+              actionRows: rows,
+            }),
           },
           false,
           context,
@@ -771,13 +857,31 @@ export class CompletionatorHandlersService {
         return;
       }
 
-      const baseLines = this.uiService.buildCompletionatorBaseLines(session, item);
+      if (results.length === 1) {
+        await this.uiService.respondToImportInteraction(
+          interaction,
+          {
+            components: this.uiService.buildCompletionatorWorkingComponents(),
+          },
+          false,
+          context,
+        );
+        await this.workflowService.handleCompletionatorMatch(
+          interaction,
+          session,
+          item,
+          results[0].id,
+          false,
+          context,
+        );
+        return;
+      }
+
       await this.workflowService.renderCompletionatorGameDbResults(
         interaction,
         session,
         item,
         results,
-        baseLines,
         false,
         context,
       );
@@ -891,6 +995,10 @@ const handlerService = new CompletionatorHandlersService();
 
 export async function handleCompletionatorSelect(interaction: StringSelectMenuInteraction): Promise<void> {
   return handlerService.handleCompletionatorSelect(interaction);
+}
+
+export async function handleCompletionatorChoose(interaction: ButtonInteraction): Promise<void> {
+  return handlerService.handleCompletionatorChoose(interaction);
 }
 
 export async function handleCompletionatorUpdateFields(interaction: StringSelectMenuInteraction): Promise<void> {

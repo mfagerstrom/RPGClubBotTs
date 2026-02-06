@@ -1,5 +1,36 @@
 # Commit snapshot (2026-02-06)
 
+38b4c1b 2026-02-06 fix: adjusted variables for IGDB scanning timing
+6e45fa8 2026-02-06 issue-183: implemented IGDB scan service to update descriptions and release data
+5b0664f 2026-02-06 issue-181: implemented log batching for [INFO] messages
+5d4433e 2026-02-06 issue-179: move new game release announcments to a new channel
+48e6ae5 2026-02-05 refactored steam import
+
+# Commit snapshot (2026-02-06)
+
+38b4c1b 2026-02-06 fix: adjusted variables for IGDB scanning timing
+6e45fa8 2026-02-06 issue-183: implemented IGDB scan service to update descriptions and release data
+5b0664f 2026-02-06 issue-181: implemented log batching for [INFO] messages
+5d4433e 2026-02-06 issue-179: move new game release announcments to a new channel
+48e6ae5 2026-02-05 refactored steam import
+
+# Commit snapshot (2026-02-06)
+
+38b4c1b 2026-02-06 fix: adjusted variables for IGDB scanning timing
+6e45fa8 2026-02-06 issue-183: implemented IGDB scan service to update descriptions and release data
+5b0664f 2026-02-06 issue-181: implemented log batching for [INFO] messages
+5d4433e 2026-02-06 issue-179: move new game release announcments to a new channel
+48e6ae5 2026-02-05 refactored steam import
+
+# Commit snapshot (2026-02-06)
+
+38b4c1b 2026-02-06 fix: adjusted variables for IGDB scanning timing
+6e45fa8 2026-02-06 issue-183: implemented IGDB scan service to update descriptions and release data
+5b0664f 2026-02-06 issue-181: implemented log batching for [INFO] messages
+5d4433e 2026-02-06 issue-179: move new game release announcments to a new channel
+
+# Commit snapshot (2026-02-06)
+
 5d4433e 2026-02-06 issue-179: move new game release announcments to a new channel
 48e6ae5 2026-02-05 refactored steam import
 8360a76 2026-02-05 chore: updated readme

@@ -1,6 +1,11 @@
 // Helper utilities for game completion functionality
 
-import type { CommandInteraction, ButtonInteraction, StringSelectMenuInteraction } from "discord.js";
+import type {
+  CommandInteraction,
+  ButtonInteraction,
+  ModalSubmitInteraction,
+  StringSelectMenuInteraction,
+} from "discord.js";
 import Member from "../../classes/Member.js";
 import { promptRemoveFromNowPlaying } from "../../functions/CompletionHelpers.js";
 
@@ -16,7 +21,11 @@ function shouldPromptNowPlayingRemoval(
 }
 
 export async function resolveNowPlayingRemoval(
-  interaction: CommandInteraction | ButtonInteraction | StringSelectMenuInteraction,
+  interaction:
+    | CommandInteraction
+    | ButtonInteraction
+    | ModalSubmitInteraction
+    | StringSelectMenuInteraction,
   userId: string,
   gameId: number,
   gameTitle: string,
@@ -51,4 +60,42 @@ export function getCompletionatorThreadKey(userId: string, importId: number): st
 
 export function getCompletionatorFormKey(importId: number, itemId: number): string {
   return `${importId}:${itemId}`;
+}
+
+export function buildCompletionatorChooseId(params: {
+  ownerId: string;
+  importId: number;
+  itemId: number;
+  gameId: number;
+}): string {
+  return `comp-import-choose-v1:${params.ownerId}:${params.importId}:${params.itemId}:${params.gameId}`;
+}
+
+export function parseCompletionatorChooseId(customId: string): {
+  ownerId: string;
+  importId: number;
+  itemId: number;
+  gameId: number;
+} | null {
+  const parts = customId.split(":");
+  if (parts.length !== 5) return null;
+  const [prefix, ownerId, importIdRaw, itemIdRaw, gameIdRaw] = parts;
+  if (prefix !== "comp-import-choose-v1") return null;
+  const importId = Number(importIdRaw);
+  const itemId = Number(itemIdRaw);
+  const gameId = Number(gameIdRaw);
+  if (
+    !ownerId ||
+    !Number.isInteger(importId) ||
+    !Number.isInteger(itemId) ||
+    !Number.isInteger(gameId)
+  ) {
+    return null;
+  }
+  return {
+    ownerId,
+    importId,
+    itemId,
+    gameId,
+  };
 }

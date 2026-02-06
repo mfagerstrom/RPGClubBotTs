@@ -65,6 +65,7 @@ import {
 } from "./game-completion/completion-delete.service.js";
 import {
   handleCompletionatorSelect,
+  handleCompletionatorChoose,
   handleCompletionatorUpdateFields,
   handleCompletionatorAction,
   handleCompletionatorFormSelect,
@@ -748,6 +749,11 @@ export class GameCompletionCommands {
   @SelectMenuComponent({ id: /^comp-import-select:\d+:\d+:\d+$/ })
   async handleCompletionatorSelectHandler(interaction: StringSelectMenuInteraction): Promise<void> {
     await handleCompletionatorSelect(interaction);
+  }
+
+  @ButtonComponent({ id: /^comp-import-choose-v1:\d+:\d+:\d+:\d+$/ })
+  async handleCompletionatorChooseHandler(interaction: ButtonInteraction): Promise<void> {
+    await handleCompletionatorChoose(interaction);
   }
 
   @SelectMenuComponent({ id: /^comp-import-update-fields:\d+:\d+:\d+$/ })

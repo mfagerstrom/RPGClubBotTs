@@ -220,7 +220,11 @@ export async function announceCompletion(
 }
 
 export async function promptRemoveFromNowPlaying(
-  interaction: CommandInteraction | StringSelectMenuInteraction | ButtonInteraction,
+  interaction:
+    | CommandInteraction
+    | StringSelectMenuInteraction
+    | ButtonInteraction
+    | ModalSubmitInteraction,
   gameTitle: string,
 ): Promise<boolean> {
   const promptId = `np-remove:${interaction.user.id}:${Date.now()}`;
