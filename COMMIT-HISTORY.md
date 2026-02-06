@@ -1,5 +1,46 @@
 # Commit snapshot (2026-02-06)
 
+4b45e5b 2026-02-05 chore: updated readme
+1d7e2d3 2026-02-05 issue-180: implemented /collection overview
+38e890b 2026-02-05 steam import beta is complete
+0c74ad0 2026-02-05 more steam import fixes
+f195534 2026-02-05 UI/UX improvements and polish for Steam Import
+dfa1fc9 2026-02-04 steam import tweaks
+580d114 2026-02-04 implemented a game collection import from steam.  Still needs UI/UX work
+d045635 2026-02-04 issue-169: improved UI of new game release announcements
+7e3f769 2026-02-04 more collection tweaks
+7f0fc96 2026-02-04 issue-168: improved /collection list UI/UX
+5d9d699 2026-02-04 issue-165: implemented dedupe and filter of new release announcements
+ebc0557 2026-02-04 collection tweaks
+05d3980 2026-02-04 issue-22: implemented a basic collection system
+eb0a96a 2026-02-04 more changes
+e58df7c 2026-02-04 issue-155: bot will now store historical, deduped activity presence icons for user and can create emoji from them.  TO BE TESTED as no data is available right now.
+c91b542 2026-02-04 numerous improvements
+56b6db2 2026-02-04 issue-161: Added year to game title autocomplete fields
+7a3a9c7 2026-02-04 issue-162: redid the game completion edit command
+f400cba 2026-02-04 issue-162: added success message for game completion edits
+483c18d 2026-02-04 issue-53: implemented search for game completions in common
+2e6f3ac 2026-02-04 issue-160: added a required platform param featuring an autocomplete to game completion slashcommands
+0afb087 2026-02-04 issue-159: gamedb view will not render an add completion button for unreleased games
+090d272 2026-02-04 issue-89: New release announcements implemented
+69ec8f9 2026-02-04 issue-154: gotm/nr-gotm search for year uses a single message now
+854979e 2026-02-04 issue-158: /todo will no longer strip discord markdown from content
+63bd69a 2026-02-04 issue-156: implemented image support for /todo view
+4b95344 2026-02-04 issue-157: corrected a bug when entering completions and the dropdown for platform would disappear
+d1d376a 2026-02-03 fix: corrected buildProd script
+fd99e1d 2026-02-02 issue-153: Used a link for threads in nom UI
+d977ad9 2026-02-02 fix: corrected errors in gotm audit
+b8b8ada 2026-02-02 updated gotm audit to update existing entries with thread links and reddit urls
+ef21123 2026-02-02 issue-152: nomination announcement UI fix
+e107716 2026-02-02 fix: used platform abbreviations for now-playing list
+ff1c321 2026-02-02 automatic backup implemented when user finishes a completionator import
+e3bec5d 2026-02-02 cleanup
+2ef9c78 2026-02-02 trashing the tests for now
+14a99aa 2026-02-02 chore: added some unit tests
+b6b7e34 2026-02-02 feat: refactored game-completion
+bd4b38b 2026-02-02 refactor: split admin.command.ts into multiple files
+6c276a0 2026-02-02 refactor: removed excess blank lines
+
 1d7e2d3 2026-02-05 issue-180: implemented /collection overview
 38e890b 2026-02-05 steam import beta is complete
 0c74ad0 2026-02-05 more steam import fixes

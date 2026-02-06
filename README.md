@@ -6,8 +6,8 @@ RPGClub GameDB Bot is a Discord bot that powers GameDB lookups, Monthly Games wo
 
 - GameDB search, import, and viewing with IGDB data
 - GOTM and NR-GOTM history, nominations, and round status
-- Member profiles, Now Playing, and game completion tracking
-- Personal game collections with Steam import workflows
+- Member profiles, Now Playing, and game completion tracking with CSV imports
+- Personal game collections with Steam imports for collection entries
 - Reminders, RSS relays, public reminders, and giveaway tools
 - GitHub issue management via bot commands
 
