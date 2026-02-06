@@ -42,7 +42,6 @@ import UserGameCollection, {
 } from "../classes/UserGameCollection.js";
 import {
   type SteamCollectionMatchConfidence,
-  type SteamCollectionImportStatus,
   countSteamCollectionImportResultReasons,
   createSteamCollectionImportSession,
   countSteamCollectionImportItems,
@@ -86,6 +85,17 @@ import {
 import { SteamApiError, steamApiService } from "../services/SteamApiService.js";
 import { COMPONENTS_V2_FLAG } from "../config/flags.js";
 import { COLLECTION_OVERVIEW_EMOJIS } from "../config/emojis.js";
+import {
+  buildImportActionsContainer,
+  buildImportMessageContainer,
+  buildImportTextContainer,
+  flattenErrorMessages,
+  handleImportActionCommand,
+  IMPORT_ACTIONS,
+  type ImportAction,
+  logImportComponentDiagnostics,
+  safeV2TextContent,
+} from "./imports/import-scaffold.service.js";
 
 const COLLECTION_ENTRY_VALUE_PREFIX = "collection";
 const COLLECTION_LIST_PAGE_SIZE = 10;
@@ -95,13 +105,6 @@ const COLLECTION_LIST_FILTER_PANEL_PREFIX = "clf1";
 const COLLECTION_LIST_FILTER_MODAL_PREFIX = "clfm1";
 const COLLECTION_FILTER_TITLE_INPUT_ID = "collection-filter-title";
 const COLLECTION_FILTER_PLATFORM_INPUT_ID = "collection-filter-platform";
-const COLLECTION_STEAM_IMPORT_ACTIONS = [
-  "start",
-  "resume",
-  "status",
-  "pause",
-  "cancel",
-] as const;
 const COLLECTION_STEAM_IMPORT_ACTION_PREFIX = "collection-steam-import-v1";
 const COLLECTION_STEAM_CHOOSE_PREFIX = "collection-steam-choose-v1";
 const COLLECTION_STEAM_REMAP_MODAL_PREFIX = "collection-steam-remap-v1";
@@ -159,18 +162,11 @@ const COLLECTION_OVERVIEW_PLATFORM_EMOJI_KEYS: Record<string, keyof typeof COLLE
   "3ds": "3ds",
 };
 
-type CollectionSteamImportAction = (typeof COLLECTION_STEAM_IMPORT_ACTIONS)[number];
 type CollectionSteamImportButtonAction = "skip" | "remap" | "game-id" | "pause";
 type SteamImportCandidate = {
   gameId: number;
   title: string;
 };
-
-function safeV2TextContent(value: string, maxLength: number): string {
-  const normalized = value.split("\0").join("").trim();
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, Math.max(0, maxLength - 1))}...`;
-}
 
 function dedupeSteamImportCandidates(candidates: SteamImportCandidate[]): SteamImportCandidate[] {
   const seen = new Set<number>();
@@ -204,68 +200,6 @@ function buildSteamImportReasonSummary(reasonCounts: Record<string, number>): st
 function logSteamImportEvent(message: string, meta: Record<string, string | number>): void {
   const entries = Object.entries(meta).map(([key, value]) => `${key}=${value}`);
   console.info(`[SteamImport] ${message} ${entries.join(" ")}`.trim());
-}
-
-function flattenErrorMessages(error: unknown, depth: number = 0): string[] {
-  if (!error || depth > 3) return [];
-  const anyError = error as any;
-  const messages: string[] = [];
-  const baseMessage = String(anyError?.message ?? "").trim();
-  if (baseMessage) messages.push(baseMessage);
-
-  const nested = [
-    ...(Array.isArray(anyError?.errors) ? anyError.errors : []),
-    ...(Array.isArray(anyError?.issues) ? anyError.issues : []),
-  ];
-  for (const item of nested) {
-    const nestedMessage = String((item as any)?.message ?? "").trim();
-    if (nestedMessage) messages.push(nestedMessage);
-    messages.push(...flattenErrorMessages(item, depth + 1));
-  }
-
-  if (anyError?.cause) {
-    messages.push(...flattenErrorMessages(anyError.cause, depth + 1));
-  }
-
-  return [...new Set(messages)].slice(0, 8);
-}
-
-function describeComponentForDebug(component: unknown): string {
-  const anyComponent = component as any;
-  const typeName = String(anyComponent?.constructor?.name ?? typeof component);
-  return typeName;
-}
-
-function logSteamImportComponentDiagnostics(params: {
-  importId: number;
-  itemId: number;
-  rowIndex: number;
-  components: Array<ContainerBuilder | ActionRowBuilder<any>>;
-}): void {
-  params.components.forEach((component, index) => {
-    try {
-      (component as any)?.toJSON?.();
-    } catch (error) {
-      const messages = flattenErrorMessages(error);
-      logSteamImportEvent("render_component_invalid", {
-        importId: params.importId,
-        itemId: params.itemId,
-        rowIndex: params.rowIndex,
-        componentIndex: index,
-      });
-      console.error(
-        "[SteamImport] component validation failed",
-        JSON.stringify({
-          importId: params.importId,
-          itemId: params.itemId,
-          rowIndex: params.rowIndex,
-          componentIndex: index,
-          componentType: describeComponentForDebug(component),
-          messages,
-        }),
-      );
-    }
-  });
 }
 
 function buildCollectionSteamImportActionId(params: {
@@ -629,45 +563,6 @@ async function buildSteamImportCandidatesContainer(params: {
   return container;
 }
 
-function buildSteamImportMessageContainer(content: string, thumbnailUrl: string | null): ContainerBuilder {
-  const safeContent = safeV2TextContent(content, 3500);
-  const container = new ContainerBuilder();
-  if (!thumbnailUrl) {
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(safeContent),
-    );
-    return container;
-  }
-  try {
-    const section = new SectionBuilder().addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(safeContent),
-    );
-    section.setThumbnailAccessory(new ThumbnailBuilder().setURL(thumbnailUrl));
-    section.toJSON();
-    container.addSectionComponents(section);
-  } catch (error) {
-    const messages = flattenErrorMessages(error);
-    console.error(
-      "[SteamImport] header section validation failed",
-      JSON.stringify({
-        contentLength: safeContent.length,
-        hasThumbnail: Boolean(thumbnailUrl),
-        messages,
-      }),
-    );
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(safeV2TextContent(content, 1000)),
-    );
-  }
-  return container;
-}
-
-function buildSteamImportTextContainer(content: string): ContainerBuilder {
-  return new ContainerBuilder().addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(safeV2TextContent(content, 3500)),
-  );
-}
-
 function buildSteamImportIgdbContainer(params: {
   steamAppName: string;
   igdbRows: ActionRowBuilder<any>[];
@@ -691,18 +586,6 @@ function buildSteamImportIgdbContainer(params: {
       `Not seeing the right title? ${igdbLink}, find the **IGDB ID** and enter it using the button below.`,
     ),
   );
-  return container;
-}
-
-function buildSteamImportActionsContainer(params: {
-  helpText: string;
-  controlRow: ActionRowBuilder<ButtonBuilder>;
-}): ContainerBuilder {
-  const container = new ContainerBuilder().addTextDisplayComponents(
-    new TextDisplayBuilder().setContent("### Actions"),
-    new TextDisplayBuilder().setContent(params.helpText),
-  );
-  container.addActionRowComponents(params.controlRow.toJSON());
   return container;
 }
 
@@ -1894,7 +1777,7 @@ export class CollectionCommand {
     if (!session || session.userId !== ownerId) {
       const payload = {
         content: null,
-        components: [buildSteamImportTextContainer("This Steam import session no longer exists.")],
+        components: [buildImportTextContainer("This Steam import session no longer exists.")],
         flags: buildComponentsV2Flags(true),
       };
       if (shouldUseInteractionUpdate || shouldUseModalUpdate) {
@@ -1908,7 +1791,7 @@ export class CollectionCommand {
     if (session.status !== "ACTIVE") {
       const payload = {
         content: null,
-        components: [buildSteamImportTextContainer(
+        components: [buildImportTextContainer(
           `Steam import #${session.importId} is ${session.status.toLowerCase()}.`,
         )],
         flags: buildComponentsV2Flags(true),
@@ -1946,7 +1829,7 @@ export class CollectionCommand {
       ].join("\n");
       const payload = {
         content: null,
-        components: [buildSteamImportTextContainer(done)],
+        components: [buildImportTextContainer(done)],
         flags: buildComponentsV2Flags(true),
       };
       if (shouldUseInteractionUpdate || shouldUseModalUpdate) {
@@ -2124,7 +2007,16 @@ export class CollectionCommand {
       importId: session.importId,
       itemId: nextItem.itemId,
     });
-    const contentContainer = buildSteamImportMessageContainer(content, steamHeaderImageUrl);
+    const contentContainer = buildImportMessageContainer({
+      content,
+      thumbnailUrl: steamHeaderImageUrl,
+      logPrefix: "SteamImport",
+      logMeta: {
+        importId: session.importId,
+        itemId: nextItem.itemId,
+        rowIndex: nextItem.rowIndex,
+      },
+    });
     const candidatesContainer = await buildSteamImportCandidatesContainer({
       ownerId,
       importId: session.importId,
@@ -2140,16 +2032,18 @@ export class CollectionCommand {
         ? null
         : "No IGDB matches found for this title. Try Search a different title.",
     });
-    const actionsContainer = buildSteamImportActionsContainer({
+    const actionsContainer = buildImportActionsContainer({
       helpText,
       controlRow: controlsRow,
     });
     const components = [contentContainer, candidatesContainer, igdbContainer, actionsContainer];
-    logSteamImportComponentDiagnostics({
+    logImportComponentDiagnostics({
       importId: session.importId,
       itemId: nextItem.itemId,
       rowIndex: nextItem.rowIndex,
       components,
+      logPrefix: "SteamImport",
+      logEvent: logSteamImportEvent,
     });
 
     try {
@@ -2192,7 +2086,7 @@ export class CollectionCommand {
   @Slash({ name: "import-steam", description: "Import your collection from Steam" })
   async steamImport(
     @SlashChoice(
-      ...COLLECTION_STEAM_IMPORT_ACTIONS.map((value) => ({
+      ...IMPORT_ACTIONS.map((value) => ({
         name: value,
         value,
       })),
@@ -2203,7 +2097,7 @@ export class CollectionCommand {
       type: ApplicationCommandOptionType.String,
       required: true,
     })
-    action: CollectionSteamImportAction,
+    action: ImportAction,
     @SlashOption({
       name: "steam_profile",
       description: "Steam profile URL, vanity name, or SteamID64",
@@ -2223,171 +2117,160 @@ export class CollectionCommand {
     }
 
     await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
-
-    if (action === "start") {
-      const existing = await getActiveSteamCollectionImportForUser(interaction.user.id);
-      if (existing) {
-        await interaction.editReply(
-          `You already have import #${existing.importId} (${existing.status}). ` +
-          "Use action:resume, action:status, action:pause, or action:cancel.",
-        );
-        return;
-      }
-
-      const identifierInput = steamProfile
-        ? sanitizeUserInput(steamProfile, { preserveNewlines: false }).trim()
-        : "";
-      let identifier = identifierInput;
-      if (!identifier) {
-        const memberRecord = await Member.getByUserId(interaction.user.id);
-        identifier = memberRecord?.steamUrl?.trim() ?? "";
-      }
-
-      if (!identifier) {
-        await interaction.editReply(
-          "Provide steam_profile or add your Steam URL with `/profile edit steam:<url>` first.",
-        );
-        return;
-      }
-
-      try {
-        const resolved = await steamApiService.resolveProfileIdentifier(identifier);
-        const library = await steamApiService.getOwnedGames(resolved.steamId64);
-
-        if (!library.games.length) {
+    await handleImportActionCommand({
+      interaction,
+      action,
+      onStart: async () => {
+        const existing = await getActiveSteamCollectionImportForUser(interaction.user.id);
+        if (existing) {
           await interaction.editReply(
-            "No Steam games were found. Ensure your profile and game details are public.",
+            `You already have import #${existing.importId} (${existing.status}). ` +
+            "Use action:resume, action:status, action:pause, or action:cancel.",
           );
           return;
         }
 
-        const session = await createSteamCollectionImportSession({
-          userId: interaction.user.id,
-          totalCount: library.games.length,
-          steamId64: resolved.steamId64,
-          steamProfileRef: identifier,
-          sourceProfileName: library.profileName,
-        });
+        const identifierInput = steamProfile
+          ? sanitizeUserInput(steamProfile, { preserveNewlines: false }).trim()
+          : "";
+        let identifier = identifierInput;
+        if (!identifier) {
+          const memberRecord = await Member.getByUserId(interaction.user.id);
+          identifier = memberRecord?.steamUrl?.trim() ?? "";
+        }
 
-        await insertSteamCollectionImportItems(
-          session.importId,
-          library.games.map((game, index) => ({
-            rowIndex: index + 1,
-            steamAppId: game.appId,
-            steamAppName: game.name,
-            playtimeForeverMin: game.playtimeForeverMinutes,
-            playtimeWindowsMin: game.playtimeWindowsMinutes,
-            playtimeMacMin: game.playtimeMacMinutes,
-            playtimeLinuxMin: game.playtimeLinuxMinutes,
-            playtimeDeckMin: game.playtimeDeckMinutes,
-            lastPlayedAt: game.lastPlayedAt,
-          })),
-        );
-        logSteamImportEvent("started", {
-          userId: interaction.user.id,
-          importId: session.importId,
-          steamId64: resolved.steamId64,
-          total: library.gameCount,
-        });
-
-        await interaction.editReply(
-          `Steam import #${session.importId} created for **${library.gameCount}** games ` +
-          `(${library.profileName ?? resolved.steamId64}). Starting review now.`,
-        );
-        await this.renderNextSteamImportItem(interaction, session.importId, interaction.user.id);
-      } catch (error: any) {
-        logSteamImportEvent("start_failed", {
-          userId: interaction.user.id,
-          error: String(error?.message ?? "unknown"),
-        });
-        if (error instanceof SteamApiError) {
-          await interaction.editReply(error.message);
+        if (!identifier) {
+          await interaction.editReply(
+            "Provide steam_profile or add your Steam URL with `/profile edit steam:<url>` first.",
+          );
           return;
         }
-        await interaction.editReply(
-          error?.message ?? "Failed to start Steam import. Verify profile and try again.",
-        );
-      }
-      return;
-    }
 
-    const session = await getActiveSteamCollectionImportForUser(interaction.user.id);
-    if (!session) {
-      await interaction.editReply("No active Steam import session found.");
-      return;
-    }
+        try {
+          const resolved = await steamApiService.resolveProfileIdentifier(identifier);
+          const library = await steamApiService.getOwnedGames(resolved.steamId64);
 
-    if (action === "status") {
-      const stats = await countSteamCollectionImportItems(session.importId);
-      const reasonCounts = await countSteamCollectionImportResultReasons(session.importId);
-      const reasonLines = buildSteamImportReasonSummary(reasonCounts);
-      const embed = new EmbedBuilder()
-        .setTitle(`Steam Collection Import #${session.importId}`)
-        .setDescription(`Status: ${session.status}`)
-        .addFields(
-          { name: "Pending", value: String(stats.pending), inline: true },
-          { name: "Added", value: String(stats.added), inline: true },
-          { name: "Updated", value: String(stats.updated), inline: true },
-          { name: "Skipped", value: String(stats.skipped), inline: true },
-          { name: "Failed", value: String(stats.failed), inline: true },
-        );
-      if (reasonLines.length) {
-        embed.addFields({
-          name: "Reason breakdown",
-          value: reasonLines.join(" | ").slice(0, 1024),
+          if (!library.games.length) {
+            await interaction.editReply(
+              "No Steam games were found. Ensure your profile and game details are public.",
+            );
+            return;
+          }
+
+          const session = await createSteamCollectionImportSession({
+            userId: interaction.user.id,
+            totalCount: library.games.length,
+            steamId64: resolved.steamId64,
+            steamProfileRef: identifier,
+            sourceProfileName: library.profileName,
+          });
+
+          await insertSteamCollectionImportItems(
+            session.importId,
+            library.games.map((game, index) => ({
+              rowIndex: index + 1,
+              steamAppId: game.appId,
+              steamAppName: game.name,
+              playtimeForeverMin: game.playtimeForeverMinutes,
+              playtimeWindowsMin: game.playtimeWindowsMinutes,
+              playtimeMacMin: game.playtimeMacMinutes,
+              playtimeLinuxMin: game.playtimeLinuxMinutes,
+              playtimeDeckMin: game.playtimeDeckMinutes,
+              lastPlayedAt: game.lastPlayedAt,
+            })),
+          );
+          logSteamImportEvent("started", {
+            userId: interaction.user.id,
+            importId: session.importId,
+            steamId64: resolved.steamId64,
+            total: library.gameCount,
+          });
+
+          await interaction.editReply(
+            `Steam import #${session.importId} created for **${library.gameCount}** games ` +
+            `(${library.profileName ?? resolved.steamId64}). Starting review now.`,
+          );
+          await this.renderNextSteamImportItem(interaction, session.importId, interaction.user.id);
+        } catch (error: any) {
+          logSteamImportEvent("start_failed", {
+            userId: interaction.user.id,
+            error: String(error?.message ?? "unknown"),
+          });
+          if (error instanceof SteamApiError) {
+            await interaction.editReply(error.message);
+            return;
+          }
+          await interaction.editReply(
+            error?.message ?? "Failed to start Steam import. Verify profile and try again.",
+          );
+        }
+      },
+      getActiveSession: (userId: string) => getActiveSteamCollectionImportForUser(userId),
+      onMissingSession: async () => {
+        await interaction.editReply("No active Steam import session found.");
+      },
+      onStatus: async (session) => {
+        const stats = await countSteamCollectionImportItems(session.importId);
+        const reasonCounts = await countSteamCollectionImportResultReasons(session.importId);
+        const reasonLines = buildSteamImportReasonSummary(reasonCounts);
+        const embed = new EmbedBuilder()
+          .setTitle(`Steam Collection Import #${session.importId}`)
+          .setDescription(`Status: ${session.status}`)
+          .addFields(
+            { name: "Pending", value: String(stats.pending), inline: true },
+            { name: "Added", value: String(stats.added), inline: true },
+            { name: "Updated", value: String(stats.updated), inline: true },
+            { name: "Skipped", value: String(stats.skipped), inline: true },
+            { name: "Failed", value: String(stats.failed), inline: true },
+          );
+        if (reasonLines.length) {
+          embed.addFields({
+            name: "Reason breakdown",
+            value: reasonLines.join(" | ").slice(0, 1024),
+          });
+        }
+        await interaction.editReply({ embeds: [embed] });
+      },
+      onPause: async (session) => {
+        await setSteamCollectionImportStatus(session.importId, "PAUSED");
+        const stats = await countSteamCollectionImportItems(session.importId);
+        logSteamImportEvent("paused", {
+          userId: interaction.user.id,
+          importId: session.importId,
+          pending: stats.pending,
         });
-      }
-      await interaction.editReply({ embeds: [embed] });
-      return;
-    }
-
-    let nextStatus: SteamCollectionImportStatus;
-    if (action === "pause") {
-      nextStatus = "PAUSED";
-    } else if (action === "cancel") {
-      nextStatus = "CANCELED";
-    } else {
-      nextStatus = "ACTIVE";
-    }
-
-    await setSteamCollectionImportStatus(session.importId, nextStatus);
-    if (action === "pause") {
-      const stats = await countSteamCollectionImportItems(session.importId);
-      logSteamImportEvent("paused", {
-        userId: interaction.user.id,
-        importId: session.importId,
-        pending: stats.pending,
-      });
-      await interaction.editReply(
-        `Steam import #${session.importId} paused. ` +
-        `Pending ${stats.pending}, Added ${stats.added}, Updated ${stats.updated}, ` +
-        `Skipped ${stats.skipped}, Failed ${stats.failed}.`,
-      );
-      return;
-    }
-    if (action === "cancel") {
-      const stats = await countSteamCollectionImportItems(session.importId);
-      logSteamImportEvent("canceled", {
-        userId: interaction.user.id,
-        importId: session.importId,
-        pending: stats.pending,
-      });
-      await interaction.editReply(
-        `Steam import #${session.importId} canceled. ` +
-        `Pending ${stats.pending}, Added ${stats.added}, Updated ${stats.updated}, ` +
-        `Skipped ${stats.skipped}, Failed ${stats.failed}.`,
-      );
-      return;
-    }
-
-    await interaction.editReply(
-      `Steam import #${session.importId} resumed.`,
-    );
-    logSteamImportEvent("resumed", {
-      userId: interaction.user.id,
-      importId: session.importId,
+        await interaction.editReply(
+          `Steam import #${session.importId} paused. ` +
+          `Pending ${stats.pending}, Added ${stats.added}, Updated ${stats.updated}, ` +
+          `Skipped ${stats.skipped}, Failed ${stats.failed}.`,
+        );
+      },
+      onCancel: async (session) => {
+        await setSteamCollectionImportStatus(session.importId, "CANCELED");
+        const stats = await countSteamCollectionImportItems(session.importId);
+        logSteamImportEvent("canceled", {
+          userId: interaction.user.id,
+          importId: session.importId,
+          pending: stats.pending,
+        });
+        await interaction.editReply(
+          `Steam import #${session.importId} canceled. ` +
+          `Pending ${stats.pending}, Added ${stats.added}, Updated ${stats.updated}, ` +
+          `Skipped ${stats.skipped}, Failed ${stats.failed}.`,
+        );
+      },
+      onResume: async (session) => {
+        await setSteamCollectionImportStatus(session.importId, "ACTIVE");
+        await interaction.editReply(
+          `Steam import #${session.importId} resumed.`,
+        );
+        logSteamImportEvent("resumed", {
+          userId: interaction.user.id,
+          importId: session.importId,
+        });
+        await this.renderNextSteamImportItem(interaction, session.importId, interaction.user.id);
+      },
     });
-    await this.renderNextSteamImportItem(interaction, session.importId, interaction.user.id);
   }
 
   @ButtonComponent({
@@ -2415,7 +2298,7 @@ export class CollectionCommand {
     if (!session || session.userId !== parsed.ownerId) {
       await safeUpdate(interaction, {
         content: null,
-        components: [buildSteamImportTextContainer("This Steam import session no longer exists.")],
+        components: [buildImportTextContainer("This Steam import session no longer exists.")],
         flags: buildComponentsV2Flags(true),
       });
       return;
@@ -2423,7 +2306,7 @@ export class CollectionCommand {
     if (session.status !== "ACTIVE") {
       await safeUpdate(interaction, {
         content: null,
-        components: [buildSteamImportTextContainer(
+        components: [buildImportTextContainer(
           `Steam import #${session.importId} is ${session.status.toLowerCase()}.`,
         )],
         flags: buildComponentsV2Flags(true),
@@ -2442,7 +2325,7 @@ export class CollectionCommand {
       await setSteamCollectionImportStatus(session.importId, "PAUSED");
       await safeUpdate(interaction, {
         content: null,
-        components: [buildSteamImportTextContainer(
+        components: [buildImportTextContainer(
           `Steam import #${session.importId} paused. ` +
           "Use `/collection import-steam action:resume` to continue.",
         )],
@@ -2553,7 +2436,7 @@ export class CollectionCommand {
     if (!session || session.userId !== parsed.ownerId || session.status !== "ACTIVE") {
       await safeUpdate(interaction, {
         content: null,
-        components: [buildSteamImportTextContainer("This Steam import session is no longer active.")],
+        components: [buildImportTextContainer("This Steam import session is no longer active.")],
         flags: buildComponentsV2Flags(true),
       });
       return;
