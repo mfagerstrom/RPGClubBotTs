@@ -1126,7 +1126,10 @@ export function buildMainHelpResponse(): {
         `${formatCommandLine("game-completion", "Log and manage your completed games.")}\n\n` +
         "**Utilities**\n" +
         `${formatCommandLine("hltb", "Look up HowLongToBeat playtimes.")}\n` +
+        `${formatCommandLine("activity-emoji", "Generate emoji assets from activity icons.")}\n` +
         `${formatCommandLine("remindme", "Set personal reminders with snooze.")}\n` +
+        `${formatCommandLine("gamegiveaway", "Jump to the giveaway hub list.")}\n` +
+        `${formatCommandLine("avatar-history", "View a member's avatar history.")}\n` +
         `${formatCommandLine("suggestion", "Submit a bot suggestion.")}\n\n` +
         "**Server Administration**\n" +
         `${formatCommandLine("mod", "Moderator tools.")}\n` +
