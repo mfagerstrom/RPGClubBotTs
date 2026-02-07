@@ -6,6 +6,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonInteraction,
+  type Attachment,
   ModalBuilder,
   ModalSubmitInteraction,
   MessageFlags,
@@ -57,11 +58,28 @@ import {
   updateSteamCollectionImportIndex,
   updateSteamCollectionImportItem,
 } from "../classes/SteamCollectionImport.js";
+import {
+  type CollectionCsvMatchConfidence,
+  type ICollectionCsvImport,
+  type ICollectionCsvImportItem,
+  countCollectionCsvImportItems,
+  countCollectionCsvImportResultReasons,
+  createCollectionCsvImportSession,
+  getActiveCollectionCsvImportForUser,
+  getCollectionCsvImportById,
+  getCollectionCsvImportItemById,
+  getNextPendingCollectionCsvImportItem,
+  insertCollectionCsvImportItems,
+  setCollectionCsvImportStatus,
+  updateCollectionCsvImportIndex,
+  updateCollectionCsvImportItem,
+} from "../classes/CollectionCsvImport.js";
 import Game from "../classes/Game.js";
 import Member from "../classes/Member.js";
 import {
   autocompleteGameCompletionPlatformStandardFirst,
   resolveGameCompletionPlatformId,
+  resolveGameCompletionPlatformLabel,
 } from "./game-completion/completion-autocomplete.utils.js";
 import {
   safeDeferReply,
@@ -96,6 +114,13 @@ import {
   logImportComponentDiagnostics,
   safeV2TextContent,
 } from "./imports/import-scaffold.service.js";
+import {
+  COLLECTION_CSV_TEMPLATE_VERSION,
+  COLLECTION_CSV_EXAMPLE_NOTE,
+  buildCollectionCsvTemplateAttachment,
+  fetchCsvAttachment,
+  parseCollectionCsvImportText,
+} from "./collection/collection-csv-import.service.js";
 
 const COLLECTION_ENTRY_VALUE_PREFIX = "collection";
 const COLLECTION_LIST_PAGE_SIZE = 10;
@@ -111,6 +136,12 @@ const COLLECTION_STEAM_REMAP_MODAL_PREFIX = "collection-steam-remap-v1";
 const COLLECTION_STEAM_REMAP_INPUT_ID = "collection-steam-remap-title";
 const COLLECTION_STEAM_GAME_ID_MODAL_PREFIX = "collection-steam-game-id-v1";
 const COLLECTION_STEAM_GAME_ID_INPUT_ID = "collection-steam-game-id";
+const COLLECTION_CSV_IMPORT_ACTION_PREFIX = "collection-csv-import-v1";
+const COLLECTION_CSV_CHOOSE_PREFIX = "collection-csv-choose-v1";
+const COLLECTION_CSV_REMAP_MODAL_PREFIX = "collection-csv-remap-v1";
+const COLLECTION_CSV_REMAP_INPUT_ID = "collection-csv-remap-title";
+const COLLECTION_CSV_GAME_ID_MODAL_PREFIX = "collection-csv-game-id-v1";
+const COLLECTION_CSV_GAME_ID_INPUT_ID = "collection-csv-game-id";
 const COLLECTION_OVERVIEW_SELECT_PREFIX = "collection-overview-select-v1";
 const COLLECTION_OVERVIEW_SELECT_OVERVIEW = "overview";
 const COLLECTION_OVERVIEW_SELECT_ALL_GAMES = "all-games";
@@ -119,7 +150,7 @@ const COLLECTION_OVERVIEW_UNKNOWN_PLATFORM = "Unknown platform";
 const COLLECTION_OVERVIEW_MAX_COMPONENTS = 35;
 const COLLECTION_OVERVIEW_PLATFORM_EMOJI_KEYS: Record<string, keyof typeof COLLECTION_OVERVIEW_EMOJIS> = {
   "pc (microsoft windows)": "steam",
-  pc: "steam",
+  "pc (steam)": "steam",
   windows: "steam",
   steam: "steam",
   "steam deck": "steam",
@@ -133,7 +164,7 @@ const COLLECTION_OVERVIEW_PLATFORM_EMOJI_KEYS: Record<string, keyof typeof COLLE
   ps3: "ps3",
   ps4: "ps4",
   ps5: "ps5",
-  xbox: "xone",
+  xbox: "xbox",
   "xbox 360": "x360",
   "xbox one": "xone",
   "xbox series": "xsx",
@@ -144,8 +175,10 @@ const COLLECTION_OVERVIEW_PLATFORM_EMOJI_KEYS: Record<string, keyof typeof COLLE
   "nintendo switch": "nsw",
   "nintendo switch 2": "nsw2",
   nsw: "nsw",
-  nsw2: "nsw2",
+  "switch 2": "nsw2",
   switch: "nsw",
+  "pc (epic)": "epic",
+  "pc (luna)": "luna",
   wii: "wii",
   "wii u": "wiiu",
   "nintendo 3ds": "3ds",
@@ -163,14 +196,17 @@ const COLLECTION_OVERVIEW_PLATFORM_EMOJI_KEYS: Record<string, keyof typeof COLLE
 };
 
 type CollectionSteamImportButtonAction = "skip" | "remap" | "game-id" | "pause";
-type SteamImportCandidate = {
+type CollectionCsvImportButtonAction = "skip" | "remap" | "game-id" | "pause";
+type ImportCandidate = {
   gameId: number;
   title: string;
 };
 
-function dedupeSteamImportCandidates(candidates: SteamImportCandidate[]): SteamImportCandidate[] {
+type ImportMatchConfidence = SteamCollectionMatchConfidence | CollectionCsvMatchConfidence;
+
+function dedupeImportCandidates(candidates: ImportCandidate[]): ImportCandidate[] {
   const seen = new Set<number>();
-  const deduped: SteamImportCandidate[] = [];
+  const deduped: ImportCandidate[] = [];
   for (const candidate of candidates) {
     if (seen.has(candidate.gameId)) continue;
     seen.add(candidate.gameId);
@@ -180,26 +216,50 @@ function dedupeSteamImportCandidates(candidates: SteamImportCandidate[]): SteamI
   return deduped;
 }
 
-function buildSteamImportReasonSummary(reasonCounts: Record<string, number>): string[] {
-  const labels: Record<string, string> = {
-    DUPLICATE: "duplicate",
-    MANUAL_SKIP: "manual-skip",
-    SKIP_MAPPED: "mapped-skip",
-    ADD_FAILED: "add-failed",
-    PLATFORM_UNRESOLVED: "platform-unresolved",
-    NO_CANDIDATE: "no-candidate",
-    INVALID_REMAP: "invalid-remap",
-  };
+const STEAM_IMPORT_REASON_LABELS: Record<string, string> = {
+  DUPLICATE: "duplicate",
+  MANUAL_SKIP: "manual-skip",
+  SKIP_MAPPED: "mapped-skip",
+  ADD_FAILED: "add-failed",
+  PLATFORM_UNRESOLVED: "platform-unresolved",
+  NO_CANDIDATE: "no-candidate",
+  INVALID_REMAP: "invalid-remap",
+};
 
+const CSV_IMPORT_REASON_LABELS: Record<string, string> = {
+  DUPLICATE: "duplicate",
+  MANUAL_SKIP: "manual-skip",
+  ADD_FAILED: "add-failed",
+  PLATFORM_UNRESOLVED: "platform-unresolved",
+  NO_CANDIDATE: "no-candidate",
+  INVALID_REMAP: "invalid-remap",
+  INVALID_ROW: "invalid-row",
+  CSV_GAMEDB_ID: "csv-gamedb-id",
+  CSV_IGDB_ID: "csv-igdb-id",
+};
+
+function buildImportReasonSummary(
+  reasonCounts: Record<string, number>,
+  labels: Record<string, string>,
+): string[] {
   return Object.entries(reasonCounts)
     .filter(([, count]) => count > 0)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([reason, count]) => `${labels[reason] ?? reason.toLowerCase()}: ${count}`);
 }
 
+function buildSteamImportReasonSummary(reasonCounts: Record<string, number>): string[] {
+  return buildImportReasonSummary(reasonCounts, STEAM_IMPORT_REASON_LABELS);
+}
+
 function logSteamImportEvent(message: string, meta: Record<string, string | number>): void {
   const entries = Object.entries(meta).map(([key, value]) => `${key}=${value}`);
   console.info(`[SteamImport] ${message} ${entries.join(" ")}`.trim());
+}
+
+function logCsvImportEvent(message: string, meta: Record<string, string | number>): void {
+  const entries = Object.entries(meta).map(([key, value]) => `${key}=${value}`);
+  console.info(`[CsvImport] ${message} ${entries.join(" ")}`.trim());
 }
 
 function buildCollectionSteamImportActionId(params: {
@@ -363,12 +423,167 @@ function parseCollectionSteamGameIdModalId(customId: string): {
   };
 }
 
-function parseSteamImportCandidates(raw: unknown): SteamImportCandidate[] {
+function buildCollectionCsvImportActionId(params: {
+  ownerId: string;
+  importId: number;
+  itemId: number;
+  action: CollectionCsvImportButtonAction;
+}): string {
+  const actionCode = params.action === "skip"
+    ? "s"
+    : params.action === "remap"
+      ? "r"
+      : params.action === "game-id"
+        ? "i"
+      : "p";
+  return [
+    COLLECTION_CSV_IMPORT_ACTION_PREFIX,
+    params.ownerId,
+    String(params.importId),
+    String(params.itemId),
+    actionCode,
+  ].join(":");
+}
+
+function parseCollectionCsvImportActionId(customId: string): {
+  ownerId: string;
+  importId: number;
+  itemId: number;
+  action: CollectionCsvImportButtonAction;
+} | null {
+  const parts = customId.split(":");
+  if (parts.length !== 5) return null;
+  if (parts[0] !== COLLECTION_CSV_IMPORT_ACTION_PREFIX) return null;
+  const importId = Number(parts[2]);
+  const itemId = Number(parts[3]);
+  if (!Number.isInteger(importId) || !Number.isInteger(itemId)) return null;
+  if (!parts[1]) return null;
+  const action = parts[4] === "s"
+    ? "skip"
+    : parts[4] === "r"
+      ? "remap"
+      : parts[4] === "i"
+        ? "game-id"
+      : parts[4] === "p"
+        ? "pause"
+        : null;
+  if (!action) return null;
+  return {
+    ownerId: parts[1],
+    importId,
+    itemId,
+    action,
+  };
+}
+
+function buildCollectionCsvChooseId(params: {
+  ownerId: string;
+  importId: number;
+  itemId: number;
+  gameId: number;
+}): string {
+  return [
+    COLLECTION_CSV_CHOOSE_PREFIX,
+    params.ownerId,
+    String(params.importId),
+    String(params.itemId),
+    String(params.gameId),
+  ].join(":");
+}
+
+function parseCollectionCsvChooseId(customId: string): {
+  ownerId: string;
+  importId: number;
+  itemId: number;
+  gameId: number;
+} | null {
+  const parts = customId.split(":");
+  if (parts.length !== 5) return null;
+  if (parts[0] !== COLLECTION_CSV_CHOOSE_PREFIX) return null;
+  const importId = Number(parts[2]);
+  const itemId = Number(parts[3]);
+  const gameId = Number(parts[4]);
+  if (!Number.isInteger(importId) || !Number.isInteger(itemId)) return null;
+  if (!Number.isInteger(gameId) || gameId <= 0) return null;
+  if (!parts[1]) return null;
+  return {
+    ownerId: parts[1],
+    importId,
+    itemId,
+    gameId,
+  };
+}
+
+function buildCollectionCsvRemapModalId(params: {
+  ownerId: string;
+  importId: number;
+  itemId: number;
+}): string {
+  return [
+    COLLECTION_CSV_REMAP_MODAL_PREFIX,
+    params.ownerId,
+    String(params.importId),
+    String(params.itemId),
+  ].join(":");
+}
+
+function parseCollectionCsvRemapModalId(customId: string): {
+  ownerId: string;
+  importId: number;
+  itemId: number;
+} | null {
+  const parts = customId.split(":");
+  if (parts.length !== 4) return null;
+  if (parts[0] !== COLLECTION_CSV_REMAP_MODAL_PREFIX) return null;
+  const importId = Number(parts[2]);
+  const itemId = Number(parts[3]);
+  if (!Number.isInteger(importId) || !Number.isInteger(itemId)) return null;
+  if (!parts[1]) return null;
+  return {
+    ownerId: parts[1],
+    importId,
+    itemId,
+  };
+}
+
+function buildCollectionCsvGameIdModalId(params: {
+  ownerId: string;
+  importId: number;
+  itemId: number;
+}): string {
+  return [
+    COLLECTION_CSV_GAME_ID_MODAL_PREFIX,
+    params.ownerId,
+    String(params.importId),
+    String(params.itemId),
+  ].join(":");
+}
+
+function parseCollectionCsvGameIdModalId(customId: string): {
+  ownerId: string;
+  importId: number;
+  itemId: number;
+} | null {
+  const parts = customId.split(":");
+  if (parts.length !== 4) return null;
+  if (parts[0] !== COLLECTION_CSV_GAME_ID_MODAL_PREFIX) return null;
+  const importId = Number(parts[2]);
+  const itemId = Number(parts[3]);
+  if (!Number.isInteger(importId) || !Number.isInteger(itemId)) return null;
+  if (!parts[1]) return null;
+  return {
+    ownerId: parts[1],
+    importId,
+    itemId,
+  };
+}
+
+function parseImportCandidates(raw: unknown): ImportCandidate[] {
   if (typeof raw !== "string") return [];
   if (!raw.trim()) return [];
   try {
     const parsed = JSON.parse(raw) as Array<{ gameId?: number; title?: string }>;
-    return dedupeSteamImportCandidates(parsed
+    return dedupeImportCandidates(parsed
       .map((value) => ({
         gameId: Number(value.gameId ?? 0),
         title: String(value.title ?? ""),
@@ -379,28 +594,34 @@ function parseSteamImportCandidates(raw: unknown): SteamImportCandidate[] {
   }
 }
 
-function buildSteamImportMatchConfidence(
+function buildImportMatchConfidence(
   searchTitle: string,
-  candidates: SteamImportCandidate[],
-): SteamCollectionMatchConfidence | null {
+  candidates: ImportCandidate[],
+): ImportMatchConfidence | null {
   if (!candidates.length) return null;
   return candidates[0].title.toLowerCase() === searchTitle.toLowerCase() ? "EXACT" : "FUZZY";
 }
 
-function normalizeSteamTitleForSearch(title: string): string {
+function normalizeImportTitleForSearch(title: string): string {
   return title
+    .toLowerCase()
     .replace(/\s*\((?:19|20)\d{2}\)\s*/g, " ")
     .replace(/[™®]/g, "")
+    .replace(/[-–—]/g, " ")
+    .replace(/:/g, " ")
+    .replace(/^(the|a|an)\s+/i, "")
+    .replace(/\s+(the|a|an)\s+/gi, " ")
+    .replace(/[^\p{L}\p{N}'-]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function isExactSteamTitleMatch(steamTitle: string, gameDbTitle: string): boolean {
-  return normalizeSteamTitleForSearch(steamTitle).toLowerCase() ===
-    normalizeSteamTitleForSearch(gameDbTitle).toLowerCase();
+function isExactImportTitleMatch(sourceTitle: string, gameDbTitle: string): boolean {
+  return normalizeImportTitleForSearch(sourceTitle).toLowerCase() ===
+    normalizeImportTitleForSearch(gameDbTitle).toLowerCase();
 }
 
-async function buildSteamImportCandidates(title: string): Promise<SteamImportCandidate[]> {
+async function buildImportCandidates(title: string): Promise<ImportCandidate[]> {
   function normalizeCandidate(value: string): string {
     return value
       .toLowerCase()
@@ -419,7 +640,7 @@ async function buildSteamImportCandidates(title: string): Promise<SteamImportCan
     return Math.floor((matchedWords / searchWords.length) * 60);
   }
 
-  const search = normalizeSteamTitleForSearch(
+  const search = normalizeImportTitleForSearch(
     sanitizeUserInput(title, { preserveNewlines: false }),
   );
   if (!search) return [];
@@ -439,10 +660,10 @@ async function buildSteamImportCandidates(title: string): Promise<SteamImportCan
     .slice(0, 10)
     .map((entry) => ({ gameId: entry.gameId, title: entry.title }));
 
-  return dedupeSteamImportCandidates(ranked);
+  return dedupeImportCandidates(ranked);
 }
 
-async function buildSteamImportCandidatesFromMappedIds(gameIds: number[]): Promise<SteamImportCandidate[]> {
+async function buildImportCandidatesFromMappedIds(gameIds: number[]): Promise<ImportCandidate[]> {
   if (!gameIds.length) return [];
   const uniqueIds = Array.from(new Set(gameIds.filter((value) => Number.isInteger(value) && value > 0)));
   if (!uniqueIds.length) return [];
@@ -452,7 +673,7 @@ async function buildSteamImportCandidatesFromMappedIds(gameIds: number[]): Promi
     .map((id) => byId.get(id))
     .filter((game): game is NonNullable<typeof game> => Boolean(game))
     .map((game) => ({ gameId: game.id, title: game.title }));
-  return dedupeSteamImportCandidates(ordered);
+  return dedupeImportCandidates(ordered);
 }
 
 function buildSteamImportItemMessage(params: {
@@ -473,13 +694,51 @@ function buildSteamImportItemMessage(params: {
   );
 }
 
-async function buildSteamImportCandidatesContainer(params: {
+function buildCsvImportItemMessage(params: {
+  importId: number;
+  rowIndex: number;
+  totalCount: number;
+  title: string;
+  platformLabel: string;
+  ownershipType: string;
+  note: string | null;
+  sourceGameDbId: number | null;
+  sourceIgdbId: number | null;
+}): string {
+  const details = [
+    `Platform: ${params.platformLabel}`,
+    `Ownership: ${params.ownershipType}`,
+  ];
+  if (params.sourceGameDbId) {
+    details.push(`CSV GameDB ID: ${params.sourceGameDbId}`);
+  }
+  if (params.sourceIgdbId) {
+    details.push(`CSV IGDB ID: ${params.sourceIgdbId}`);
+  }
+
+  const noteText = params.note ? `\nNote: ${params.note}` : "";
+  return (
+    `## CSV Import #${params.importId}\n` +
+    `Row ${params.rowIndex}/${params.totalCount}\n` +
+    `Title: **${params.title}**\n` +
+    `${details.join(" | ")}${noteText}`
+  );
+}
+
+async function buildImportCandidatesContainer(params: {
   ownerId: string;
   importId: number;
   itemId: number;
   headerText: string;
   headerHelpText?: string | null;
-  candidates: SteamImportCandidate[];
+  candidates: ImportCandidate[];
+  buildChooseCustomId: (params: {
+    ownerId: string;
+    importId: number;
+    itemId: number;
+    gameId: number;
+  }) => string;
+  logPrefix: string;
 }): Promise<ContainerBuilder> {
   const container = new ContainerBuilder().addTextDisplayComponents(
     new TextDisplayBuilder().setContent(params.headerText),
@@ -527,7 +786,7 @@ async function buildSteamImportCandidatesContainer(params: {
       section.setButtonAccessory(
         new V2ButtonBuilder()
           .setCustomId(
-            buildCollectionSteamChooseId({
+            params.buildChooseCustomId({
               ownerId: params.ownerId,
               importId: params.importId,
               itemId: params.itemId,
@@ -542,7 +801,7 @@ async function buildSteamImportCandidatesContainer(params: {
     } catch (error) {
       const messages = flattenErrorMessages(error);
       console.error(
-        "[SteamImport] candidate section validation failed",
+        `[${params.logPrefix}] candidate section validation failed`,
         JSON.stringify({
           importId: params.importId,
           itemId: params.itemId,
@@ -563,13 +822,13 @@ async function buildSteamImportCandidatesContainer(params: {
   return container;
 }
 
-function buildSteamImportIgdbContainer(params: {
-  steamAppName: string;
+function buildImportIgdbContainer(params: {
+  searchTitle: string;
   igdbRows: ActionRowBuilder<any>[];
   noResultsText: string | null;
 }): ContainerBuilder {
-  const igdbSearchUrl = `https://www.igdb.com/search?utf8=%E2%9C%93&type=1&q=${encodeURIComponent(params.steamAppName)}`;
-  const igdbLink = `[Search IGDB for ${params.steamAppName}](${igdbSearchUrl})`;
+  const igdbSearchUrl = `https://www.igdb.com/search?utf8=%E2%9C%93&type=1&q=${encodeURIComponent(params.searchTitle)}`;
+  const igdbLink = `[Search IGDB for ${params.searchTitle}](${igdbSearchUrl})`;
   const container = new ContainerBuilder().addTextDisplayComponents(
     new TextDisplayBuilder().setContent("### Import Game From IGDB"),
   );
@@ -596,6 +855,22 @@ function parseCollectionSteamChooseButtonId(customId: string): {
   gameId: number;
 } | null {
   const parsed = parseCollectionSteamChooseId(customId);
+  if (!parsed) return null;
+  return {
+    ownerId: parsed.ownerId,
+    importId: parsed.importId,
+    itemId: parsed.itemId,
+    gameId: parsed.gameId,
+  };
+}
+
+function parseCollectionCsvChooseButtonId(customId: string): {
+  ownerId: string;
+  importId: number;
+  itemId: number;
+  gameId: number;
+} | null {
+  const parsed = parseCollectionCsvChooseId(customId);
   if (!parsed) return null;
   return {
     ownerId: parsed.ownerId,
@@ -647,6 +922,59 @@ function buildSteamImportItemButtons(params: {
     new ButtonBuilder()
       .setCustomId(
         buildCollectionSteamImportActionId({
+          ownerId: params.ownerId,
+          importId: params.importId,
+          itemId: params.itemId,
+          action: "pause",
+        }),
+      )
+      .setLabel("Pause")
+      .setStyle(ButtonStyle.Danger),
+  );
+}
+
+function buildCsvImportItemButtons(params: {
+  ownerId: string;
+  importId: number;
+  itemId: number;
+}): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(
+        buildCollectionCsvImportActionId({
+          ownerId: params.ownerId,
+          importId: params.importId,
+          itemId: params.itemId,
+          action: "remap",
+        }),
+      )
+      .setLabel("Search a different title")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(
+        buildCollectionCsvImportActionId({
+          ownerId: params.ownerId,
+          importId: params.importId,
+          itemId: params.itemId,
+          action: "game-id",
+        }),
+      )
+      .setLabel("Enter GameDB or IGDB ID")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(
+        buildCollectionCsvImportActionId({
+          ownerId: params.ownerId,
+          importId: params.importId,
+          itemId: params.itemId,
+          action: "skip",
+        }),
+      )
+      .setLabel("Skip")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(
+        buildCollectionCsvImportActionId({
           ownerId: params.ownerId,
           importId: params.importId,
           itemId: params.itemId,
@@ -713,7 +1041,7 @@ function resolveCollectionOverviewEmoji(params: {
   if (resolvedAbbrevKey) {
     return COLLECTION_OVERVIEW_EMOJIS[resolvedAbbrevKey] ?? null;
   }
-  return null;
+  return ":question:";
 }
 
 function formatCollectionOverviewPlatformLabel(
@@ -1841,7 +2169,7 @@ export class CollectionCommand {
     }
 
     await updateSteamCollectionImportIndex(session.importId, nextItem.rowIndex);
-    let candidates = parseSteamImportCandidates(nextItem.matchCandidateJson);
+    let candidates = parseImportCandidates(nextItem.matchCandidateJson);
     let igdbComponents: ActionRowBuilder<any>[] | null = null;
     let igdbHasResults = false;
     if (!candidates.length) {
@@ -1853,7 +2181,7 @@ export class CollectionCommand {
         }
       }
       if (!candidates.length && mapped?.status !== "SKIPPED") {
-        candidates = await buildSteamImportCandidates(nextItem.steamAppName);
+        candidates = await buildImportCandidates(nextItem.steamAppName);
       }
 
       if (candidates.length > 1) {
@@ -1863,11 +2191,11 @@ export class CollectionCommand {
           limit: 5,
         });
         if (historicalGameIds.length) {
-          const historicalCandidates = await buildSteamImportCandidatesFromMappedIds(historicalGameIds);
-          candidates = dedupeSteamImportCandidates([...candidates, ...historicalCandidates]);
+          const historicalCandidates = await buildImportCandidatesFromMappedIds(historicalGameIds);
+          candidates = dedupeImportCandidates([...candidates, ...historicalCandidates]);
         }
       }
-      const matchConfidence = buildSteamImportMatchConfidence(nextItem.steamAppName, candidates);
+      const matchConfidence = buildImportMatchConfidence(nextItem.steamAppName, candidates);
       await updateSteamCollectionImportItem(nextItem.itemId, {
         matchCandidateJson: candidates.length ? JSON.stringify(candidates) : null,
         matchConfidence,
@@ -1876,7 +2204,7 @@ export class CollectionCommand {
     }
 
     try {
-      const igdbSearchTitle = normalizeSteamTitleForSearch(nextItem.steamAppName);
+      const igdbSearchTitle = normalizeImportTitleForSearch(nextItem.steamAppName);
       const igdbSearch = await igdbService.searchGames(igdbSearchTitle, 10);
       igdbHasResults = igdbSearch.results.length > 0;
       const options = igdbHasResults
@@ -1914,7 +2242,7 @@ export class CollectionCommand {
               matchCandidateJson: JSON.stringify([{
                 gameId: imported.gameId,
                 title: imported.title,
-              } satisfies SteamImportCandidate]),
+              } satisfies ImportCandidate]),
               matchConfidence: "MANUAL",
             });
 
@@ -1966,7 +2294,7 @@ export class CollectionCommand {
       steamApiService.getAppHeaderImageUrl(nextItem.steamAppId),
     ]);
     const singleExactCandidate = candidates.length === 1 &&
-      isExactSteamTitleMatch(nextItem.steamAppName, candidates[0].title)
+      isExactImportTitleMatch(nextItem.steamAppName, candidates[0].title)
       ? candidates[0]
       : null;
     if (singleExactCandidate) {
@@ -2017,16 +2345,18 @@ export class CollectionCommand {
         rowIndex: nextItem.rowIndex,
       },
     });
-    const candidatesContainer = await buildSteamImportCandidatesContainer({
+    const candidatesContainer = await buildImportCandidatesContainer({
       ownerId,
       importId: session.importId,
       itemId: nextItem.itemId,
       headerText: "### GameDB Match Candidates",
       headerHelpText: candidates.length > 1 ? guidance : null,
       candidates,
+      buildChooseCustomId: buildCollectionSteamChooseId,
+      logPrefix: "SteamImport",
     });
-    const igdbContainer = buildSteamImportIgdbContainer({
-      steamAppName: nextItem.steamAppName,
+    const igdbContainer = buildImportIgdbContainer({
+      searchTitle: nextItem.steamAppName,
       igdbRows: igdbComponents ?? [],
       noResultsText: igdbHasResults
         ? null
@@ -2075,6 +2405,404 @@ export class CollectionCommand {
           rowIndex: nextItem.rowIndex,
           steamAppId: nextItem.steamAppId,
           steamAppName: nextItem.steamAppName,
+          candidateCount: candidates.length,
+          messages,
+        }),
+      );
+      throw error;
+    }
+  }
+
+  private async applyCsvImportSelection(params: {
+    ownerId: string;
+    item: ICollectionCsvImportItem;
+    gameId: number;
+    reason: "AUTO_MATCH" | "MANUAL_REMAP" | "CSV_GAMEDB_ID" | "CSV_IGDB_ID";
+  }): Promise<void> {
+    const platformId = params.item.platformId ?? null;
+    const platformWarning = !platformId && params.item.rawPlatform
+      ? "Platform not recognized; imported without platform."
+      : null;
+    const ownershipType = params.item.ownershipType ?? "Digital";
+    const note = params.item.note ?? null;
+    const matchConfidence = params.reason === "AUTO_MATCH" ? "EXACT" : "MANUAL";
+
+    try {
+      const created = await UserGameCollection.addEntry({
+        userId: params.ownerId,
+        gameId: params.gameId,
+        platformId,
+        ownershipType,
+        note,
+      });
+      await updateCollectionCsvImportItem(params.item.itemId, {
+        status: "ADDED",
+        gameDbGameId: params.gameId,
+        collectionEntryId: created.entryId,
+        matchConfidence,
+        resultReason: platformWarning ? "PLATFORM_UNRESOLVED" : params.reason,
+        errorText: platformWarning,
+      });
+    } catch (error: any) {
+      const message = String(error?.message ?? "");
+      const isDuplicate = /already exists/i.test(message);
+      await updateCollectionCsvImportItem(params.item.itemId, {
+        status: isDuplicate ? "SKIPPED" : "FAILED",
+        gameDbGameId: params.gameId,
+        matchConfidence,
+        resultReason: isDuplicate ? "DUPLICATE" : "ADD_FAILED",
+        errorText: message || "Failed to add collection entry.",
+      });
+    }
+  }
+
+  private async renderNextCsvImportItem(
+    interaction:
+      | CommandInteraction
+      | ButtonInteraction
+      | StringSelectMenuInteraction
+      | ModalSubmitInteraction,
+    importId: number,
+    ownerId: string,
+  ): Promise<void> {
+    const shouldUseInteractionUpdate = (interaction.isButton() || interaction.isStringSelectMenu()) &&
+      !interaction.deferred &&
+      !interaction.replied;
+    const shouldUseModalUpdate = interaction.isModalSubmit();
+
+    const session = await getCollectionCsvImportById(importId);
+    if (!session || session.userId !== ownerId) {
+      const payload = {
+        content: null,
+        components: [buildImportTextContainer("This CSV import session no longer exists.")],
+        flags: buildComponentsV2Flags(true),
+      };
+      if (shouldUseInteractionUpdate || shouldUseModalUpdate) {
+        await safeUpdate(interaction, payload);
+      } else {
+        await interaction.editReply(payload);
+      }
+      return;
+    }
+
+    if (session.status !== "ACTIVE") {
+      const payload = {
+        content: null,
+        components: [buildImportTextContainer(
+          `CSV import #${session.importId} is ${session.status.toLowerCase()}.`,
+        )],
+        flags: buildComponentsV2Flags(true),
+      };
+      if (shouldUseInteractionUpdate || shouldUseModalUpdate) {
+        await safeUpdate(interaction, payload);
+      } else {
+        await interaction.editReply(payload);
+      }
+      return;
+    }
+
+    const nextItem = await getNextPendingCollectionCsvImportItem(session.importId);
+    if (!nextItem) {
+      await setCollectionCsvImportStatus(session.importId, "COMPLETED");
+      const stats = await countCollectionCsvImportItems(session.importId);
+      const reasonCounts = await countCollectionCsvImportResultReasons(session.importId);
+      logCsvImportEvent("completed", {
+        userId: ownerId,
+        importId: session.importId,
+        added: stats.added,
+        updated: stats.updated,
+        skipped: stats.skipped,
+        failed: stats.failed,
+      });
+      const reasonLines = buildImportReasonSummary(reasonCounts, CSV_IMPORT_REASON_LABELS);
+      const done = [
+        `## CSV Import #${session.importId}`,
+        "Import completed.",
+        `Added: ${stats.added}`,
+        `Updated: ${stats.updated}`,
+        `Skipped: ${stats.skipped}`,
+        `Failed: ${stats.failed}`,
+        ...(reasonLines.length ? ["", `Reasons: ${reasonLines.join(" | ")}`] : []),
+      ].join("\n");
+      const payload = {
+        content: null,
+        components: [buildImportTextContainer(done)],
+        flags: buildComponentsV2Flags(true),
+      };
+      if (shouldUseInteractionUpdate || shouldUseModalUpdate) {
+        await safeUpdate(interaction, payload);
+      } else {
+        await interaction.editReply(payload);
+      }
+      return;
+    }
+
+    await updateCollectionCsvImportIndex(session.importId, nextItem.rowIndex);
+
+    if (nextItem.rawGameDbId) {
+      const game = await Game.getGameById(nextItem.rawGameDbId);
+      if (!game) {
+        await updateCollectionCsvImportItem(nextItem.itemId, {
+          status: "FAILED",
+          resultReason: "INVALID_ROW",
+          errorText: `GameDB id ${nextItem.rawGameDbId} was not found.`,
+        });
+        await this.renderNextCsvImportItem(interaction, session.importId, ownerId);
+        return;
+      }
+      await this.applyCsvImportSelection({
+        ownerId,
+        item: nextItem,
+        gameId: game.id,
+        reason: "CSV_GAMEDB_ID",
+      });
+      logCsvImportEvent("item_csv_gamedb_id", {
+        userId: ownerId,
+        importId: session.importId,
+        itemId: nextItem.itemId,
+        gameDbGameId: game.id,
+      });
+      await this.renderNextCsvImportItem(interaction, session.importId, ownerId);
+      return;
+    }
+
+    if (nextItem.rawIgdbId) {
+      try {
+        const imported = await Game.importGameFromIgdb(nextItem.rawIgdbId);
+        await this.applyCsvImportSelection({
+          ownerId,
+          item: nextItem,
+          gameId: imported.gameId,
+          reason: "CSV_IGDB_ID",
+        });
+        logCsvImportEvent("item_csv_igdb_id", {
+          userId: ownerId,
+          importId: session.importId,
+          itemId: nextItem.itemId,
+          igdbId: nextItem.rawIgdbId,
+          gameDbGameId: imported.gameId,
+        });
+      } catch (error: any) {
+        await updateCollectionCsvImportItem(nextItem.itemId, {
+          status: "FAILED",
+          resultReason: "INVALID_ROW",
+          errorText: error?.message ?? "Failed to import IGDB id.",
+        });
+      }
+      await this.renderNextCsvImportItem(interaction, session.importId, ownerId);
+      return;
+    }
+
+    let candidates = parseImportCandidates(nextItem.matchCandidateJson);
+    let igdbComponents: ActionRowBuilder<any>[] | null = null;
+    let igdbHasResults = false;
+    if (!candidates.length) {
+      candidates = await buildImportCandidates(nextItem.rawTitle);
+      const matchConfidence = buildImportMatchConfidence(nextItem.rawTitle, candidates);
+      await updateCollectionCsvImportItem(nextItem.itemId, {
+        matchCandidateJson: candidates.length ? JSON.stringify(candidates) : null,
+        matchConfidence,
+      });
+    }
+
+    try {
+      const igdbSearchTitle = normalizeImportTitleForSearch(nextItem.rawTitle);
+      const igdbSearch = await igdbService.searchGames(igdbSearchTitle, 10);
+      igdbHasResults = igdbSearch.results.length > 0;
+      const options = igdbHasResults
+        ? await buildCollectionIgdbSelectOptions(igdbSearch.results)
+        : [];
+      const igdbSession = createIgdbSession(
+        ownerId,
+        options,
+        async (selectionInteraction, igdbId) => {
+          const currentSession = await getCollectionCsvImportById(session.importId);
+          if (!currentSession || currentSession.userId !== ownerId || currentSession.status !== "ACTIVE") {
+            await selectionInteraction.followUp({
+              content: "This CSV import session is no longer active.",
+              flags: MessageFlags.Ephemeral,
+            }).catch(() => {});
+            return;
+          }
+
+          const currentItem = await getCollectionCsvImportItemById(nextItem.itemId);
+          if (
+            !currentItem ||
+            currentItem.importId !== session.importId ||
+            currentItem.status !== "PENDING"
+          ) {
+            await selectionInteraction.followUp({
+              content: "This import row is no longer pending.",
+              flags: MessageFlags.Ephemeral,
+            }).catch(() => {});
+            return;
+          }
+
+          try {
+            const imported = await Game.importGameFromIgdb(igdbId);
+            await updateCollectionCsvImportItem(currentItem.itemId, {
+              matchCandidateJson: JSON.stringify([{
+                gameId: imported.gameId,
+                title: imported.title,
+              } satisfies ImportCandidate]),
+              matchConfidence: "MANUAL",
+            });
+
+            await this.applyCsvImportSelection({
+              ownerId,
+              item: currentItem,
+              gameId: imported.gameId,
+              reason: "MANUAL_REMAP",
+            });
+            logCsvImportEvent("item_igdb_imported", {
+              userId: ownerId,
+              importId: session.importId,
+              itemId: currentItem.itemId,
+              gameDbGameId: imported.gameId,
+            });
+          } catch (error: any) {
+            await updateCollectionCsvImportItem(currentItem.itemId, {
+              resultReason: "ADD_FAILED",
+              errorText: error?.message ?? "Failed to import title from IGDB.",
+            });
+          }
+
+          await this.renderNextCsvImportItem(
+            selectionInteraction,
+            session.importId,
+            ownerId,
+          );
+        },
+        undefined,
+        `No IGDB matches found for "${nextItem.rawTitle}". Try Search a different title.`,
+      );
+      igdbComponents = igdbSession.components;
+    } catch {
+      const igdbSession = createIgdbSession(
+        ownerId,
+        [],
+        async () => {},
+        undefined,
+        `No IGDB matches found for "${nextItem.rawTitle}". Try Search a different title.`,
+      );
+      igdbComponents = igdbSession.components;
+    }
+
+    const singleExactCandidate = candidates.length === 1 &&
+      isExactImportTitleMatch(nextItem.rawTitle, candidates[0].title)
+      ? candidates[0]
+      : null;
+    if (singleExactCandidate) {
+      await this.applyCsvImportSelection({
+        ownerId,
+        item: nextItem,
+        gameId: singleExactCandidate.gameId,
+        reason: "AUTO_MATCH",
+      });
+      logCsvImportEvent("item_auto_accepted_exact", {
+        userId: ownerId,
+        importId: session.importId,
+        itemId: nextItem.itemId,
+        gameDbGameId: singleExactCandidate.gameId,
+      });
+      await this.renderNextCsvImportItem(interaction, session.importId, ownerId);
+      return;
+    }
+
+    const platformLabel = nextItem.platformId
+      ? await resolveGameCompletionPlatformLabel(nextItem.platformId)
+      : nextItem.rawPlatform ?? "No platform";
+    const content = buildCsvImportItemMessage({
+      importId: session.importId,
+      rowIndex: nextItem.rowIndex,
+      totalCount: session.totalCount,
+      title: nextItem.rawTitle,
+      platformLabel,
+      ownershipType: nextItem.ownershipType ?? "Digital",
+      note: nextItem.note,
+      sourceGameDbId: nextItem.rawGameDbId,
+      sourceIgdbId: nextItem.rawIgdbId,
+    });
+    const guidance = candidates.length > 1
+      ? "Ambiguous match. Use Choose to select the right GameDB title."
+      : candidates.length === 1
+        ? "Single match found. Use Choose to confirm import."
+        : "No matches yet. Use Search a different title to search again or Skip.";
+    const helpText = "Use **Choose**, or choose **Search a different title**, **Enter GameDB or IGDB ID**, " +
+      "**Skip**, or **Pause**.";
+    const controlsRow = buildCsvImportItemButtons({
+      ownerId,
+      importId: session.importId,
+      itemId: nextItem.itemId,
+    });
+    const contentContainer = buildImportMessageContainer({
+      content,
+      thumbnailUrl: null,
+      logPrefix: "CsvImport",
+      logMeta: {
+        importId: session.importId,
+        itemId: nextItem.itemId,
+        rowIndex: nextItem.rowIndex,
+      },
+    });
+    const candidatesContainer = await buildImportCandidatesContainer({
+      ownerId,
+      importId: session.importId,
+      itemId: nextItem.itemId,
+      headerText: "### GameDB Match Candidates",
+      headerHelpText: candidates.length > 1 ? guidance : null,
+      candidates,
+      buildChooseCustomId: buildCollectionCsvChooseId,
+      logPrefix: "CsvImport",
+    });
+    const igdbContainer = buildImportIgdbContainer({
+      searchTitle: nextItem.rawTitle,
+      igdbRows: igdbComponents ?? [],
+      noResultsText: igdbHasResults
+        ? null
+        : "No IGDB matches found for this title. Try Search a different title.",
+    });
+    const actionsContainer = buildImportActionsContainer({
+      helpText,
+      controlRow: controlsRow,
+    });
+    const components = [contentContainer, candidatesContainer, igdbContainer, actionsContainer];
+    logImportComponentDiagnostics({
+      importId: session.importId,
+      itemId: nextItem.itemId,
+      rowIndex: nextItem.rowIndex,
+      components,
+      logPrefix: "CsvImport",
+      logEvent: logCsvImportEvent,
+    });
+
+    try {
+      if (shouldUseInteractionUpdate || shouldUseModalUpdate) {
+        await safeUpdate(interaction, {
+          content: null,
+          components,
+          flags: buildComponentsV2Flags(true),
+        });
+        return;
+      }
+      await interaction.editReply({
+        content: null,
+        components,
+        flags: buildComponentsV2Flags(true),
+      });
+    } catch (error) {
+      const messages = flattenErrorMessages(error);
+      logCsvImportEvent("render_failed", {
+        importId: session.importId,
+        itemId: nextItem.itemId,
+        rowIndex: nextItem.rowIndex,
+      });
+      console.error(
+        "[CsvImport] message render failed",
+        JSON.stringify({
+          importId: session.importId,
+          itemId: nextItem.itemId,
+          rowIndex: nextItem.rowIndex,
           candidateCount: candidates.length,
           messages,
         }),
@@ -2269,6 +2997,216 @@ export class CollectionCommand {
           importId: session.importId,
         });
         await this.renderNextSteamImportItem(interaction, session.importId, interaction.user.id);
+      },
+    });
+  }
+
+  @Slash({ name: "import-csv", description: "Import your collection from a custom CSV template" })
+  async csvImport(
+    @SlashChoice(
+      ...IMPORT_ACTIONS.map((value) => ({
+        name: value,
+        value,
+      })),
+    )
+    @SlashOption({
+      name: "action",
+      description: "CSV import action",
+      type: ApplicationCommandOptionType.String,
+      required: true,
+    })
+    action: ImportAction,
+    @SlashOption({
+      name: "file",
+      description: "CSV file exported from the collection template (required for start)",
+      type: ApplicationCommandOptionType.Attachment,
+      required: false,
+    })
+    file: Attachment | undefined,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    const guild = interaction.guild;
+    if (!guild) {
+      await interaction.reply({
+        content: "This command can only be used inside a server.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    await safeDeferReply(interaction, { flags: MessageFlags.Ephemeral });
+    await handleImportActionCommand<ICollectionCsvImport>({
+      interaction,
+      action,
+      onStart: async () => {
+        const existing = await getActiveCollectionCsvImportForUser(interaction.user.id);
+        if (existing) {
+          await interaction.editReply(
+            `You already have import #${existing.importId} (${existing.status}). ` +
+            "Use action:resume, action:status, action:pause, or action:cancel.",
+          );
+          return;
+        }
+
+        if (!file) {
+          const template = await buildCollectionCsvTemplateAttachment();
+          await interaction.editReply({
+            content: [
+              "### Custom CSV Collection Import",
+              "Download the attached Excel template and fill in your rows.",
+              "Required column: `title`.",
+              "Optional columns: `platform`, `ownership_type`, `note`, `gamedb_id`, `igdb_id`.",
+              `Delete the example row marked "${COLLECTION_CSV_EXAMPLE_NOTE}" before exporting to CSV.`,
+              "Then upload the CSV with `/collection import-csv action:start file:<csv>`.",
+              "Duplicates are detected by game, platform, and ownership type.",
+            ].join("\n"),
+            files: [template],
+          });
+          return;
+        }
+
+        const isCsv = file.name?.toLowerCase().endsWith(".csv") ||
+          file.contentType?.toLowerCase().includes("csv");
+        if (!isCsv) {
+          const template = await buildCollectionCsvTemplateAttachment();
+          await interaction.editReply({
+            content: "The uploaded file is not a CSV. Use the attached template and export to CSV.",
+            files: [template],
+          });
+          return;
+        }
+
+        const csvText = await fetchCsvAttachment(file);
+        if (!csvText) {
+          await interaction.editReply("Failed to download the CSV file. Please try again.");
+          return;
+        }
+
+        const parsed = await parseCollectionCsvImportText(csvText);
+        if (parsed.errors.length) {
+          const lines = parsed.errors
+            .slice(0, 12)
+            .map((error) =>
+              `- Row ${error.rowIndex}, ${error.column}: ${error.message}`,
+            );
+          if (parsed.errors.length > 12) {
+            lines.push(`- ...and ${parsed.errors.length - 12} more`);
+          }
+          const template = await buildCollectionCsvTemplateAttachment();
+          await interaction.editReply({
+            content: [
+              "CSV validation failed. Fix the following issues and try again.",
+              "",
+              ...lines,
+            ].join("\n"),
+            files: [template],
+          });
+          return;
+        }
+
+        if (!parsed.rows.length) {
+          await interaction.editReply("CSV file contains no importable rows.");
+          return;
+        }
+
+        const session = await createCollectionCsvImportSession({
+          userId: interaction.user.id,
+          totalCount: parsed.rows.length,
+          sourceFileName: file.name ?? null,
+          sourceFileSize: typeof file.size === "number" ? file.size : null,
+          templateVersion: COLLECTION_CSV_TEMPLATE_VERSION,
+        });
+        await insertCollectionCsvImportItems(
+          session.importId,
+          parsed.rows.map((row) => ({
+            rowIndex: row.rowIndex,
+            rawTitle: row.title,
+            rawPlatform: row.platformRaw,
+            rawOwnershipType: row.ownershipRaw,
+            rawNote: row.noteRaw,
+            rawGameDbId: row.sourceGameDbId,
+            rawIgdbId: row.sourceIgdbId,
+            platformId: row.platformId,
+            ownershipType: row.ownershipType,
+            note: row.note,
+          })),
+        );
+        logCsvImportEvent("started", {
+          userId: interaction.user.id,
+          importId: session.importId,
+          total: parsed.rows.length,
+        });
+
+        await interaction.editReply(
+          `CSV import #${session.importId} created for **${parsed.rows.length}** rows. ` +
+          "Starting review now.",
+        );
+        await this.renderNextCsvImportItem(interaction, session.importId, interaction.user.id);
+      },
+      getActiveSession: (userId: string) => getActiveCollectionCsvImportForUser(userId),
+      onMissingSession: async () => {
+        await interaction.editReply("No active CSV import session found.");
+      },
+      onStatus: async (session) => {
+        const stats = await countCollectionCsvImportItems(session.importId);
+        const reasonCounts = await countCollectionCsvImportResultReasons(session.importId);
+        const reasonLines = buildImportReasonSummary(reasonCounts, CSV_IMPORT_REASON_LABELS);
+        const embed = new EmbedBuilder()
+          .setTitle(`CSV Collection Import #${session.importId}`)
+          .setDescription(`Status: ${session.status}`)
+          .addFields(
+            { name: "Pending", value: String(stats.pending), inline: true },
+            { name: "Added", value: String(stats.added), inline: true },
+            { name: "Updated", value: String(stats.updated), inline: true },
+            { name: "Skipped", value: String(stats.skipped), inline: true },
+            { name: "Failed", value: String(stats.failed), inline: true },
+          );
+        if (reasonLines.length) {
+          embed.addFields({
+            name: "Reason breakdown",
+            value: reasonLines.join(" | ").slice(0, 1024),
+          });
+        }
+        await interaction.editReply({ embeds: [embed] });
+      },
+      onPause: async (session) => {
+        await setCollectionCsvImportStatus(session.importId, "PAUSED");
+        const stats = await countCollectionCsvImportItems(session.importId);
+        logCsvImportEvent("paused", {
+          userId: interaction.user.id,
+          importId: session.importId,
+          pending: stats.pending,
+        });
+        await interaction.editReply(
+          `CSV import #${session.importId} paused. ` +
+          `Pending ${stats.pending}, Added ${stats.added}, Updated ${stats.updated}, ` +
+          `Skipped ${stats.skipped}, Failed ${stats.failed}.`,
+        );
+      },
+      onCancel: async (session) => {
+        await setCollectionCsvImportStatus(session.importId, "CANCELED");
+        const stats = await countCollectionCsvImportItems(session.importId);
+        logCsvImportEvent("canceled", {
+          userId: interaction.user.id,
+          importId: session.importId,
+          pending: stats.pending,
+        });
+        await interaction.editReply(
+          `CSV import #${session.importId} canceled. ` +
+          `Pending ${stats.pending}, Added ${stats.added}, Updated ${stats.updated}, ` +
+          `Skipped ${stats.skipped}, Failed ${stats.failed}.`,
+        );
+      },
+      onResume: async (session) => {
+        await setCollectionCsvImportStatus(session.importId, "ACTIVE");
+        await interaction.editReply(
+          `CSV import #${session.importId} resumed.`,
+        );
+        logCsvImportEvent("resumed", {
+          userId: interaction.user.id,
+          importId: session.importId,
+        });
+        await this.renderNextCsvImportItem(interaction, session.importId, interaction.user.id);
       },
     });
   }
@@ -2523,7 +3461,7 @@ export class CollectionCommand {
       return;
     }
 
-    const remapCandidates = await buildSteamImportCandidates(remapTitle);
+    const remapCandidates = await buildImportCandidates(remapTitle);
     if (!remapCandidates.length) {
       await updateSteamCollectionImportItem(item.itemId, {
         matchCandidateJson: null,
@@ -2544,7 +3482,7 @@ export class CollectionCommand {
       return;
     }
 
-    const remapMatchConfidence = buildSteamImportMatchConfidence(remapTitle, remapCandidates);
+    const remapMatchConfidence = buildImportMatchConfidence(remapTitle, remapCandidates);
     await updateSteamCollectionImportItem(item.itemId, {
       matchCandidateJson: JSON.stringify(remapCandidates),
       matchConfidence: remapMatchConfidence,
@@ -2656,6 +3594,379 @@ export class CollectionCommand {
     });
 
     await this.renderNextSteamImportItem(interaction, session.importId, parsed.ownerId);
+  }
+
+  @ButtonComponent({
+    id: /^collection-csv-import-v1:[^:]+:\d+:\d+:[srpi]$/,
+  })
+  async onCsvImportAction(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseCollectionCsvImportActionId(interaction.customId);
+    if (!parsed) {
+      await interaction.reply({
+        content: "This CSV import control is invalid.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    if (interaction.user.id !== parsed.ownerId) {
+      await interaction.reply({
+        content: "This CSV import control is not for you.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    const session = await getCollectionCsvImportById(parsed.importId);
+    if (!session || session.userId !== parsed.ownerId) {
+      await safeUpdate(interaction, {
+        content: null,
+        components: [buildImportTextContainer("This CSV import session no longer exists.")],
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+    if (session.status !== "ACTIVE") {
+      await safeUpdate(interaction, {
+        content: null,
+        components: [buildImportTextContainer(
+          `CSV import #${session.importId} is ${session.status.toLowerCase()}.`,
+        )],
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    const item = await getNextPendingCollectionCsvImportItem(session.importId);
+    if (!item || item.itemId !== parsed.itemId) {
+      await interaction.deferUpdate().catch(() => {});
+      await this.renderNextCsvImportItem(interaction, session.importId, parsed.ownerId);
+      return;
+    }
+
+    if (parsed.action === "pause") {
+      await setCollectionCsvImportStatus(session.importId, "PAUSED");
+      await safeUpdate(interaction, {
+        content: null,
+        components: [buildImportTextContainer(
+          `CSV import #${session.importId} paused. ` +
+          "Use `/collection import-csv action:resume` to continue.",
+        )],
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    if (parsed.action === "skip") {
+      await interaction.deferUpdate().catch(() => {});
+      await updateCollectionCsvImportItem(item.itemId, {
+        status: "SKIPPED",
+        resultReason: "MANUAL_SKIP",
+        errorText: "Skipped by user.",
+      });
+      logCsvImportEvent("item_skipped", {
+        userId: parsed.ownerId,
+        importId: session.importId,
+        itemId: item.itemId,
+      });
+      await this.renderNextCsvImportItem(interaction, session.importId, parsed.ownerId);
+      return;
+    }
+
+    if (parsed.action === "remap") {
+      const modal = new ModalBuilder()
+        .setCustomId(
+          buildCollectionCsvRemapModalId({
+            ownerId: parsed.ownerId,
+            importId: session.importId,
+            itemId: item.itemId,
+          }),
+        )
+        .setTitle("CSV import remap");
+
+      const remapInput = new TextInputBuilder()
+        .setCustomId(COLLECTION_CSV_REMAP_INPUT_ID)
+        .setLabel("Search title")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(120)
+        .setValue(item.rawTitle.slice(0, 120))
+        .setPlaceholder("Call of Duty Classic");
+
+      modal.addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(remapInput),
+      );
+      await interaction.showModal(modal).catch(() => {});
+      return;
+    }
+
+    if (parsed.action === "game-id") {
+      const modal = new ModalBuilder()
+        .setCustomId(
+          buildCollectionCsvGameIdModalId({
+            ownerId: parsed.ownerId,
+            importId: session.importId,
+            itemId: item.itemId,
+          }),
+        )
+        .setTitle("CSV import: Enter GameDB ID");
+
+      const gameIdInput = new TextInputBuilder()
+        .setCustomId(COLLECTION_CSV_GAME_ID_INPUT_ID)
+        .setLabel("GameDB ID (or IGDB numeric ID)")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(20)
+        .setPlaceholder("12345");
+
+      modal.addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(gameIdInput),
+      );
+      await interaction.showModal(modal).catch(() => {});
+      return;
+    }
+  }
+
+  @ButtonComponent({
+    id: /^collection-csv-choose-v1:[^:]+:\d+:\d+:\d+$/,
+  })
+  async onCsvImportChoose(interaction: ButtonInteraction): Promise<void> {
+    const parsed = parseCollectionCsvChooseButtonId(interaction.customId);
+    if (!parsed) {
+      await interaction.reply({
+        content: "This CSV import choice is invalid.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    if (interaction.user.id !== parsed.ownerId) {
+      await interaction.reply({
+        content: "This CSV import choice is not for you.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    const session = await getCollectionCsvImportById(parsed.importId);
+    if (!session || session.userId !== parsed.ownerId || session.status !== "ACTIVE") {
+      await safeUpdate(interaction, {
+        content: null,
+        components: [buildImportTextContainer("This CSV import session is no longer active.")],
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
+
+    const item = await getNextPendingCollectionCsvImportItem(session.importId);
+    if (!item || item.itemId !== parsed.itemId) {
+      await interaction.deferUpdate().catch(() => {});
+      await this.renderNextCsvImportItem(interaction, session.importId, parsed.ownerId);
+      return;
+    }
+
+    await interaction.deferUpdate().catch(() => {});
+    await this.applyCsvImportSelection({
+      ownerId: parsed.ownerId,
+      item,
+      gameId: parsed.gameId,
+      reason: "MANUAL_REMAP",
+    });
+    logCsvImportEvent("item_selected", {
+      userId: parsed.ownerId,
+      importId: session.importId,
+      itemId: item.itemId,
+      gameDbGameId: parsed.gameId,
+    });
+
+    await this.renderNextCsvImportItem(interaction, session.importId, parsed.ownerId);
+  }
+
+  @ModalComponent({
+    id: /^collection-csv-remap-v1:[^:]+:\d+:\d+$/,
+  })
+  async onCsvImportRemapModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const parsed = parseCollectionCsvRemapModalId(interaction.customId);
+    if (!parsed) {
+      await interaction.reply({
+        content: "This remap form is invalid.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    if (interaction.user.id !== parsed.ownerId) {
+      await interaction.reply({
+        content: "This remap form is not for you.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    const session = await getCollectionCsvImportById(parsed.importId);
+    if (!session || session.userId !== parsed.ownerId || session.status !== "ACTIVE") {
+      await interaction.reply({
+        content: "This CSV import session is no longer active.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    const item = await getNextPendingCollectionCsvImportItem(session.importId);
+    if (!item || item.itemId !== parsed.itemId) {
+      await safeUpdate(interaction, {
+        content: "This import row is no longer pending.",
+        components: [],
+      });
+      return;
+    }
+
+    const gameIdRaw = sanitizeUserInput(
+      interaction.fields.getTextInputValue(COLLECTION_CSV_REMAP_INPUT_ID) ?? "",
+      { preserveNewlines: false, maxLength: 120 },
+    );
+    const remapTitle = gameIdRaw.trim();
+    if (!remapTitle) {
+      await updateCollectionCsvImportItem(item.itemId, {
+        resultReason: "INVALID_REMAP",
+      });
+      await safeUpdate(interaction, {
+        content: "Enter a title to search for remap.",
+        components: [],
+      });
+      return;
+    }
+
+    const remapCandidates = await buildImportCandidates(remapTitle);
+    if (!remapCandidates.length) {
+      await updateCollectionCsvImportItem(item.itemId, {
+        matchCandidateJson: null,
+        matchConfidence: null,
+        resultReason: "NO_CANDIDATE",
+        errorText: `No candidates found for remap search "${remapTitle}".`,
+      });
+      await safeUpdate(interaction, {
+        content:
+          `No GameDB matches found for "${remapTitle}". ` +
+          "Use Search a different title to try another title or Skip.",
+        components: [buildCsvImportItemButtons({
+          ownerId: parsed.ownerId,
+          importId: session.importId,
+          itemId: item.itemId,
+        })],
+      });
+      return;
+    }
+
+    const remapMatchConfidence = buildImportMatchConfidence(remapTitle, remapCandidates);
+    await updateCollectionCsvImportItem(item.itemId, {
+      matchCandidateJson: JSON.stringify(remapCandidates),
+      matchConfidence: remapMatchConfidence,
+      resultReason: null,
+      errorText: null,
+    });
+    logCsvImportEvent("item_remapped", {
+      userId: parsed.ownerId,
+      importId: session.importId,
+      itemId: item.itemId,
+      candidateCount: remapCandidates.length,
+    });
+
+    await this.renderNextCsvImportItem(interaction, session.importId, parsed.ownerId);
+  }
+
+  @ModalComponent({
+    id: /^collection-csv-game-id-v1:[^:]+:\d+:\d+$/,
+  })
+  async onCsvImportGameIdModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const parsed = parseCollectionCsvGameIdModalId(interaction.customId);
+    if (!parsed) {
+      await interaction.reply({
+        content: "This GameDB ID form is invalid.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    if (interaction.user.id !== parsed.ownerId) {
+      await interaction.reply({
+        content: "This GameDB ID form is not for you.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    const session = await getCollectionCsvImportById(parsed.importId);
+    if (!session || session.userId !== parsed.ownerId || session.status !== "ACTIVE") {
+      await interaction.reply({
+        content: "This CSV import session is no longer active.",
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+      return;
+    }
+
+    const item = await getNextPendingCollectionCsvImportItem(session.importId);
+    if (!item || item.itemId !== parsed.itemId) {
+      await safeUpdate(interaction, {
+        content: "This import row is no longer pending.",
+        components: [],
+      });
+      return;
+    }
+
+    const gameIdRaw = sanitizeUserInput(
+      interaction.fields.getTextInputValue(COLLECTION_CSV_GAME_ID_INPUT_ID) ?? "",
+      { preserveNewlines: false, maxLength: 20 },
+    ).trim();
+    const enteredId = Number(gameIdRaw);
+    if (!Number.isInteger(enteredId) || enteredId <= 0) {
+      await safeUpdate(interaction, {
+        content: "Game ID must be a positive integer.",
+        components: [],
+      });
+      return;
+    }
+
+    let resolvedGameId: number | null = null;
+    let source: "gamedb" | "igdb" | null = null;
+
+    const game = await Game.getGameById(enteredId);
+    if (game) {
+      resolvedGameId = game.id;
+      source = "gamedb";
+    } else {
+      try {
+        const imported = await Game.importGameFromIgdb(enteredId);
+        resolvedGameId = imported.gameId;
+        source = "igdb";
+      } catch {
+        resolvedGameId = null;
+      }
+    }
+
+    if (!resolvedGameId) {
+      await safeUpdate(interaction, {
+        content: `Could not find or import game ID ${enteredId}.`,
+        components: [],
+      });
+      return;
+    }
+
+    await this.applyCsvImportSelection({
+      ownerId: parsed.ownerId,
+      item,
+      gameId: resolvedGameId,
+      reason: "MANUAL_REMAP",
+    });
+    logCsvImportEvent("item_selected_by_game_id", {
+      userId: parsed.ownerId,
+      importId: session.importId,
+      itemId: item.itemId,
+      gameDbGameId: resolvedGameId,
+      source: source ?? "unknown",
+    });
+
+    await this.renderNextCsvImportItem(interaction, session.importId, parsed.ownerId);
   }
 
   @Slash({ name: "add", description: "Add a game you own to your collection" })

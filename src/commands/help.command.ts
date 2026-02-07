@@ -241,7 +241,8 @@ const HELP_TOPICS: HelpTopic[] = [
       "/collection edit entry:<selection> [fields...] | /collection remove entry:<selection> | " +
       "/collection to-now-playing entry:<selection> [note_override:<string>] | " +
       "/collection to-completion entry:<selection> completion_type:<type> [fields...] | " +
-      "/collection import-steam action:<start|resume|status|pause|cancel> [steam_profile:<id|url>]",
+      "/collection import-steam action:<start|resume|status|pause|cancel> [steam_profile:<id|url>] | " +
+      "/collection import-csv action:<start|resume|status|pause|cancel> [file:<csv>]",
     notes:
       "Duplicate policy: same game on multiple platforms is supported. Exact duplicates " +
       "(same game, platform, ownership type) are blocked. /collection list shows 10 entries per page " +
@@ -251,7 +252,8 @@ const HELP_TOPICS: HelpTopic[] = [
       "review with per-candidate Choose buttons plus Search a different title/Enter GameDB ID/Skip/Pause. " +
       "Single exact matches auto-accept. Search a different title re-runs matching using a title you enter. " +
       "Enter GameDB ID accepts an existing GameDB ID or imports by IGDB numeric ID. " +
-      "For ambiguous matches, the candidate list can include titles chosen previously by other users.",
+      "For ambiguous matches, the candidate list can include titles chosen previously by other users. " +
+      "CSV import uses the same review flow and provides a template with required columns and an example row.",
   },
   {
     id: "remindme",
