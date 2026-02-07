@@ -122,7 +122,7 @@ type GameCompletionHelpTopicId =
   | "edit"
   | "delete"
   | "export"
-  | "completionator-import";
+  | "import-completionator";
 
 type GameCompletionHelpTopic = {
   id: GameCompletionHelpTopicId;
@@ -227,7 +227,7 @@ const HELP_TOPICS: HelpTopic[] = [
     label: "/game-completion",
     summary: "Log completed games (removes them from Now Playing if present).",
     syntax:
-      "Use /game-completion help for subcommands: add, list, common, edit, delete, export, completionator-import.",
+      "Use /game-completion help for subcommands: add, list, common, edit, delete, export, import-completionator.",
   },
   {
     id: "collection",
@@ -945,13 +945,14 @@ const GAME_COMPLETION_HELP_TOPICS: GameCompletionHelpTopic[] = [
     notes: "Returns a CSV file with your completion records.",
   },
   {
-    id: "completionator-import",
-    label: "/game-completion completionator-import",
+    id: "import-completionator",
+    label: "/game-completion import-completionator",
     summary: "Import completions from a Completionator CSV export. Server owner only.",
     syntax:
-      "Syntax: /game-completion completionator-import action:<start|resume|status|pause|cancel> [file:<csv>]",
+      "Syntax: /game-completion import-completionator action:<start|resume|status|pause|cancel> [file:<csv>]",
     notes:
       "Server owner only. Use action:start with the CSV file to begin. " +
+      "Export your CSV from Completionator using its Export or Download CSV option. " +
       "During review, reply with a GameDB id, skip, or pause, and choose Update Existing " +
       "when you want to sync the CSV data. Entries with a clear GameDB match and a " +
       "platform selection can auto add without confirmation.",

@@ -973,7 +973,7 @@ export class CompletionatorHandlersService {
 
     const content =
       `Import #${session.importId} paused. ` +
-      "Resume with `/game-completion completionator-import action:resume`.";
+      "Resume with `/game-completion import-completionator action:resume`.";
     const payload: {
       content: string;
       flags: number;

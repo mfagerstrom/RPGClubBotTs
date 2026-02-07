@@ -2869,7 +2869,10 @@ export class CollectionCommand {
 
         if (!identifier) {
           await interaction.editReply(
-            "Provide steam_profile or add your Steam URL with `/profile edit steam:<url>` first.",
+            "Add your Steam profile first:\n" +
+            "1. Set it once with `/profile edit steam:<url>`\n" +
+            "2. Then run `/collection import-steam action:start`\n" +
+            "Or include it now with `steam_profile:<url|vanity|steamid64>`.",
           );
           return;
         }

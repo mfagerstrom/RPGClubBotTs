@@ -37,7 +37,14 @@ export async function handleCompletionatorImport(
   if (action === "start") {
     if (!file?.url) {
       await safeReply(interaction, {
-        content: "Please attach the Completionator CSV file.",
+        content: [
+          "Please attach the Completionator CSV file.",
+          "To export it from Completionator:",
+          "1. Open your Completionator profile",
+          "2. Hover over 'Playthroughs' from the top menu and choose 'My Completions'",
+          "3. In the upper-right, click 'Export' and then 'Export to CSV'",
+          "4. Upload the CSV with `/game-completion import-completionator action:start file:<csv>`.",
+        ].join("\n"),
         flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
       return;
@@ -133,7 +140,7 @@ export async function handleCompletionatorImport(
     await safeReply(interaction, {
       content:
         `Import #${session.importId} paused. ` +
-        "Resume with `/game-completion completionator-import action:resume`.",
+        "Resume with `/game-completion import-completionator action:resume`.",
       flags: ephemeral ? MessageFlags.Ephemeral : undefined,
     });
     return;

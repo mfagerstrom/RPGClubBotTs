@@ -711,7 +711,7 @@ export class GameCompletionCommands {
 
   @Slash({
     description: "Import completions from a Completionator CSV",
-    name: "completionator-import",
+    name: "import-completionator",
   })
   async completionatorImport(
     @SlashChoice(
